@@ -1,0 +1,54 @@
+{
+  "name": "claude-killer",
+  "version": "1.0.0",
+  "description": "Claude-Killer — CLI agent powered by Kimi K2.6 via NVIDIA NIM API for local code analysis and editing",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-killer": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --no-warnings=DEP0040 --loader ts-node/esm src/index.ts",
+    "start": "node --no-warnings=DEP0040 dist/index.js",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "kimi",
+    "nvidia",
+    "nim",
+    "agent",
+    "code-assistant"
+  ],
+  "author": "KimiCode-Local",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "dotenv": "^16.4.5",
+    "ink": "^7.0.6",
+    "ink-select-input": "^6.2.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "openai": "^4.67.0",
+    "ora": "^8.1.0",
+    "react": "^19.2.7",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8"
+  },
+  "devDependencies": {
+    "@types/ink": "^0.5.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.17",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
