@@ -2,10 +2,15 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   onPreToolCall,
   onPostToolCall,
+  onPreFileWrite,
+  onPostFileWrite,
   executePreToolCallHooks,
   executePostToolCallHooks,
+  executePreFileWriteHooks,
+  executePostFileWriteHooks,
   clearAllHooks,
   unregisterHook,
+  registerDebugHook,
 } from "../hooks.js";
 
 describe("Hook System", () => {
@@ -103,6 +108,22 @@ describe("Hook System", () => {
     it("returns false for unknown id", () => {
       expect(unregisterHook("nonexistent")).toBe(false);
     });
+
+    it("can unregister file write hook", async () => {
+      let called = false;
+      const id = onPreFileWrite(async () => { called = true; return {}; });
+      unregisterHook(id);
+      await executePreFileWriteHooks("file.txt", "content");
+      expect(called).toBe(false);
+    });
+
+    it("can unregister post file write hook", async () => {
+      let called = false;
+      const id = onPostFileWrite(async () => { called = true; });
+      unregisterHook(id);
+      await executePostFileWriteHooks("file.txt", "content");
+      expect(called).toBe(false);
+    });
   });
 
   describe("clearAllHooks", () => {
@@ -115,6 +136,79 @@ describe("Hook System", () => {
       await executePreToolCallHooks("tool", {});
       await executePostToolCallHooks("tool", {}, "result");
       expect(count).toBe(0);
+    });
+  });
+
+  describe("preFileWrite hooks", () => {
+    it("executes registered hooks", async () => {
+      let called = false;
+      onPreFileWrite(async (filePath, content) => {
+        called = true;
+        return {};
+      });
+
+      const result = await executePreFileWriteHooks("test.txt", "content");
+      expect(called).toBe(true);
+      expect(result.block).toBe(false);
+      expect(result.modifiedContent).toBe("content");
+    });
+
+    it("blocks write when hook returns block: true", async () => {
+      onPreFileWrite(async () => {
+        return { block: true, reason: "forbidden" };
+      });
+
+      const result = await executePreFileWriteHooks("test.txt", "content");
+      expect(result.block).toBe(true);
+      expect(result.reason).toBe("forbidden");
+    });
+
+    it("modifies content via modifiedContent", async () => {
+      onPreFileWrite(async (filePath, content) => {
+        return { modifiedContent: content + " [modified]" };
+      });
+
+      const result = await executePreFileWriteHooks("test.txt", "original");
+      expect(result.modifiedContent).toBe("original [modified]");
+    });
+
+    it("stops execution when block is returned", async () => {
+      const calls: string[] = [];
+      onPreFileWrite(async (fp, c) => { calls.push("first"); return { block: true }; }, 1);
+      onPreFileWrite(async (fp, c) => { calls.push("second"); return {}; }, 2);
+
+      const result = await executePreFileWriteHooks("test.txt", "content");
+      expect(calls).toEqual(["first"]);
+      expect(result.block).toBe(true);
+    });
+  });
+
+  describe("postFileWrite hooks", () => {
+    it("executes registered hooks", async () => {
+      let called = false;
+      onPostFileWrite(async (filePath, content) => {
+        called = true;
+      });
+
+      await executePostFileWriteHooks("test.txt", "content");
+      expect(called).toBe(true);
+    });
+
+    it("executes multiple hooks in order", async () => {
+      const order: number[] = [];
+      onPostFileWrite(async () => { order.push(1); });
+      onPostFileWrite(async () => { order.push(2); });
+
+      await executePostFileWriteHooks("test.txt", "content");
+      expect(order).toEqual([1, 2]);
+    });
+  });
+
+  describe("registerDebugHook", () => {
+    it("registers a debug hook", () => {
+      const id = registerDebugHook();
+      expect(typeof id).toBe("string");
+      expect(id.length).toBeGreaterThan(0);
     });
   });
 });

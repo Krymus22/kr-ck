@@ -5,12 +5,16 @@ import {
   getCavemanLevel,
   setCavemanLevel,
   addUserMessage,
+  addRawAssistantMessage,
+  addToolResult,
+  addSystemMessage,
   getHistory,
   historyLength,
   resetHistory,
   compactHistory,
   historySummary,
   estimateTokens,
+  getSystemPrompt,
 } from "../history.js";
 
 describe("Plan Mode", () => {
@@ -110,7 +114,6 @@ describe("compactHistory", () => {
   });
 
   it("compacts when history is long", () => {
-    // Add enough messages to trigger compaction
     for (let i = 0; i < 15; i++) {
       addUserMessage(`message ${i}`);
     }
@@ -118,7 +121,91 @@ describe("compactHistory", () => {
     const result = compactHistory();
     expect(result).not.toBeNull();
     expect(result!.removed).toBeGreaterThan(0);
-    // After compaction, history should have fewer messages
     expect(historyLength()).toBeLessThan(beforeCount);
+  });
+});
+
+describe("History - Extended", () => {
+  beforeEach(() => {
+    resetHistory();
+  });
+
+  it("addRawAssistantMessage stores raw message", () => {
+    const msg = { role: "assistant", content: "hi", tool_calls: [] };
+    addRawAssistantMessage(msg as any);
+    expect(historyLength()).toBe(2);
+    expect(getHistory()[1].role).toBe("assistant");
+  });
+
+  it("addToolResult stores tool result with call id", () => {
+    addUserMessage("test");
+    addToolResult("call_123", "result content");
+    const h = getHistory();
+    expect(h.length).toBe(3);
+    expect(h[2].role).toBe("tool");
+    expect((h[2] as any).tool_call_id).toBe("call_123");
+  });
+
+  it("addSystemMessage adds system message", () => {
+    addSystemMessage("injected system msg");
+    const h = getHistory();
+    expect(h.length).toBe(2);
+    expect(h[1].role).toBe("system");
+    expect(h[1].content).toBe("injected system msg");
+  });
+
+  it("getSystemPrompt includes base prompt", () => {
+    const prompt = getHistory()[0].content as string;
+    expect(prompt.length).toBeGreaterThan(0);
+    expect(typeof prompt).toBe("string");
+  });
+
+  it("setCavemanLevel updates existing system prompt", () => {
+    addUserMessage("msg"); // triggers ensureHistoryInitialized
+    setCavemanLevel("ultra");
+    const sysContent = getHistory()[0].content as string;
+    expect(sysContent).toContain("CAVEMAN MODE");
+    expect(sysContent).toContain("ultra");
+  });
+
+  it("estimateTokens counts tool_calls JSON", () => {
+    const messages = [
+      { role: "assistant", content: "text", tool_calls: [{ id: "1", type: "function", function: { name: "fn", arguments: "{}" } }] }
+    ];
+    const tokens = estimateTokens(messages as any);
+    expect(tokens).toBeGreaterThan(0);
+  });
+
+  it("compactHistory drops orphan tool messages", () => {
+    addUserMessage("msg0");
+    addUserMessage("msg1");
+    addUserMessage("msg2");
+    addToolResult("orphan_call", "orphan result");
+    // Now we have 5 messages: system + user + user + user + tool
+    for (let i = 5; i < 15; i++) {
+      addUserMessage(`msg${i}`);
+    }
+    const result = compactHistory();
+    expect(result).not.toBeNull();
+    // Orphan tool message should be removed
+    const h = getHistory();
+    const toolMsgs = h.filter(m => m.role === "tool");
+    // All orphan tool messages should be cleaned up after compaction
+    expect(toolMsgs.length).toBe(0);
+  });
+
+  it("historySummary includes all role counts", () => {
+    addUserMessage("u1");
+    addUserMessage("u2");
+    addSystemMessage("sys1");
+    const summary = historySummary();
+    expect(summary).toContain("system:");
+    expect(summary).toContain("user:");
+  });
+
+  it("resetHistory clears custom messages", () => {
+    addUserMessage("before reset");
+    resetHistory();
+    expect(historyLength()).toBe(1);
   });
 });

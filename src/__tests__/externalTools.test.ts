@@ -335,3 +335,327 @@ describe("ToolInvocation", () => {
     expect(invocation.context).toBe("Running tests for the project");
   });
 });
+
+// ─── Additional ToolRegistry Tests ──────────────────────────────────────────
+
+describe("ToolRegistry - extended", () => {
+  let registry: ToolRegistry;
+
+  beforeEach(() => {
+    registry = new ToolRegistry();
+  });
+
+  it("should overwrite existing tool with warning", () => {
+    registry.register(mockTool);
+    registry.register({ ...mockTool, description: "updated" });
+    expect(registry.get("test_tool")?.description).toBe("updated");
+  });
+
+  it("should return undefined for non-existent tool", () => {
+    expect(registry.get("nonexistent")).toBeUndefined();
+  });
+
+  it("should get user tools path", () => {
+    const userPath = registry.getUserToolsPath();
+    expect(userPath).toContain("tools.json");
+  });
+
+  it("should get user tools count (0 initially)", () => {
+    expect(registry.getUserToolsCount()).toBe(0);
+  });
+
+  it("should remove user tool", () => {
+    registry.addTool({ ...mockTool, name: "custom1", category: "custom" });
+    expect(registry.get("custom1")).toBeDefined();
+    const result = registry.removeUserTool("custom1");
+    expect(result.success).toBe(true);
+    expect(registry.get("custom1")).toBeUndefined();
+  });
+
+  it("should fail to remove non-existent tool", () => {
+    const result = registry.removeUserTool("nonexistent");
+    expect(result.success).toBe(false);
+  });
+
+  it("should fail to remove non-custom tool", () => {
+    registry.register(mockTool); // category: "custom" already
+    // Register a roblox tool directly
+    registry.register({ ...mockTool, name: "roblox_tool", category: "roblox" });
+    const result = registry.removeUserTool("roblox_tool");
+    expect(result.success).toBe(false);
+  });
+
+  it("should update user tool", () => {
+    registry.addTool({ ...mockTool, name: "upd_tool", category: "custom" });
+    const result = registry.updateUserTool("upd_tool", { description: "updated desc" });
+    expect(result.success).toBe(true);
+    expect(registry.get("upd_tool")?.description).toBe("updated desc");
+  });
+
+  it("should fail to update non-existent tool", () => {
+    const result = registry.updateUserTool("nonexistent", {});
+    expect(result.success).toBe(false);
+  });
+
+  it("should fail to update non-custom tool", () => {
+    registry.register({ ...mockTool, name: "roblox_upd", category: "roblox" });
+    const result = registry.updateUserTool("roblox_upd", { description: "nope" });
+    expect(result.success).toBe(false);
+  });
+
+  it("should fail to update with invalid data", () => {
+    registry.addTool({ ...mockTool, name: "upd2", category: "custom" });
+    const result = registry.updateUserTool("upd2", { name: "" });
+    expect(result.success).toBe(false);
+  });
+
+  it("should detect tool with 'package' method", () => {
+    const pkgTool: Tool = {
+      ...mockTool, name: "pkg_tool",
+      detection: { method: "package", check: "package.json" }
+    };
+    registry.register(pkgTool);
+    const result = registry.isInstalled("pkg_tool");
+    expect(typeof result).toBe("boolean");
+  });
+
+  it("should detect tool with 'manual' method", () => {
+    const manualTool: Tool = {
+      ...mockTool, name: "manual_tool",
+      detection: { method: "manual", check: "", installed: true }
+    };
+    registry.register(manualTool);
+    expect(registry.isInstalled("manual_tool")).toBe(true);
+  });
+
+  it("should detect tool with 'manual' method not installed", () => {
+    const manualTool: Tool = {
+      ...mockTool, name: "manual_tool2",
+      detection: { method: "manual", check: "", installed: false }
+    };
+    registry.register(manualTool);
+    expect(registry.isInstalled("manual_tool2")).toBe(false);
+  });
+
+  it("should return false for unknown detection method", () => {
+    const unknownTool: Tool = {
+      ...mockTool, name: "unk_tool",
+      detection: { method: "unknown" as any, check: "" }
+    };
+    registry.register(unknownTool);
+    expect(registry.isInstalled("unk_tool")).toBe(false);
+  });
+
+  it("should return false for non-existent tool in isInstalled", () => {
+    expect(registry.isInstalled("ghost")).toBe(false);
+  });
+
+  it("should use cached detection within 5 minutes", () => {
+    const tool: Tool = {
+      ...mockTool, name: "cached_tool",
+      detection: { method: "manual", check: "", installed: true, lastChecked: Date.now() }
+    };
+    registry.register(tool);
+    expect(registry.isInstalled("cached_tool")).toBe(true);
+  });
+
+  it("should re-check when cache expired", () => {
+    const tool: Tool = {
+      ...mockTool, name: "expired_tool",
+      detection: { method: "manual", check: "", installed: true, lastChecked: Date.now() - 10 * 60 * 1000 }
+    };
+    registry.register(tool);
+    expect(registry.isInstalled("expired_tool")).toBe(true);
+  });
+});
+
+// ─── ToolExecutor - extended ────────────────────────────────────────────────
+
+describe("ToolExecutor - extended", () => {
+  let registry: ToolRegistry;
+  let executor: ToolExecutor;
+
+  beforeEach(() => {
+    registry = new ToolRegistry();
+    executor = new ToolExecutor(registry);
+  });
+
+  it("should build command with flags", async () => {
+    registry.register({
+      ...mockTool,
+      name: "echo_flag",
+      command: "echo",
+      args: ["hello"],
+      detection: { method: "binary", check: "echo --version" },
+      flags: [
+        { name: "--verbose", type: "boolean" },
+        { name: "--output", type: "string" }
+      ]
+    });
+    const result = await executor.execute("echo_flag", { "--verbose": true, "--output": "file.txt" });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("hello");
+  });
+
+  it("should parse JSON output", async () => {
+    // Write a temp script that outputs valid JSON
+    const fs = await import("fs");
+    const path = await import("path");
+    const os = await import("os");
+    const tmpScript = path.join(os.tmpdir(), `__test_json_out_${Date.now()}.js`);
+    fs.writeFileSync(tmpScript, 'console.log(JSON.stringify({key:"value"}))');
+    
+    registry.register({
+      ...mockTool,
+      name: "json_echo",
+      command: "node",
+      args: [tmpScript],
+      detection: { method: "manual", check: "", installed: true },
+      outputParser: "json"
+    });
+    const result = await executor.execute("json_echo");
+    try { fs.unlinkSync(tmpScript); } catch {}
+    
+    expect(result.success).toBe(true);
+    expect(result.metadata).toBeDefined();
+    expect(result.metadata.key).toBe("value");
+  });
+
+  it("should parse structured output", async () => {
+    registry.register({
+      ...mockTool,
+      name: "struct_echo",
+      command: "echo",
+      args: ["error: something failed"],
+      detection: { method: "binary", check: "echo --version" },
+      outputParser: "structured"
+    });
+    const result = await executor.execute("struct_echo");
+    expect(result.success).toBe(false);
+    expect(result.errors).toBeDefined();
+  });
+
+  it("should handle structured output with warnings", async () => {
+    registry.register({
+      ...mockTool,
+      name: "warn_echo",
+      command: "echo",
+      args: ["warning: careful"],
+      detection: { method: "binary", check: "echo --version" },
+      outputParser: "structured"
+    });
+    const result = await executor.execute("warn_echo");
+    expect(result.suggestions).toBeDefined();
+  });
+
+  it("should use custom parser", async () => {
+    registry.register({
+      ...mockTool,
+      name: "custom_echo",
+      command: "echo",
+      args: ["test"],
+      detection: { method: "binary", check: "echo --version" },
+      outputParser: "custom",
+      customParser: (output) => ({ success: true, output: `custom: ${output.trim()}`, metadata: { custom: true } })
+    });
+    const result = await executor.execute("custom_echo");
+    expect(result.output).toContain("custom: test");
+    expect(result.metadata?.custom).toBe(true);
+  });
+
+  it("should handle command execution failure", async () => {
+    registry.register({
+      ...mockTool,
+      name: "fail_cmd",
+      command: "nonexistent_command_xyz",
+      args: [],
+      detection: { method: "binary", check: "nonexistent_command_xyz --version" }
+    });
+    const result = await executor.execute("fail_cmd");
+    expect(result.success).toBe(false);
+  });
+});
+
+// ─── ToolSuggester - extended ───────────────────────────────────────────────
+
+describe("ToolSuggester - extended", () => {
+  let registry: ToolRegistry;
+  let suggester: ToolSuggester;
+
+  beforeEach(() => {
+    registry = new ToolRegistry();
+    suggester = new ToolSuggester(registry);
+  });
+
+  it("should match by command name", () => {
+    registry.register({
+      ...mockTool,
+      name: "pytest_run",
+      command: "pytest",
+      context: { whenToUse: [], examples: [] }
+    });
+    const suggestions = suggester.suggest("run pytest on code");
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions[0].reason).toContain("command");
+  });
+
+  it("should match by category", () => {
+    registry.register({
+      ...mockTool,
+      name: "rust_build",
+      command: "cargo",
+      category: "rust",
+      context: { whenToUse: [], examples: [] }
+    });
+    const suggestions = suggester.suggest("build rust project");
+    expect(suggestions.length).toBeGreaterThan(0);
+  });
+
+  it("should boost confidence for installed tools", () => {
+    registry.register({
+      ...mockTool,
+      name: "echo_suggest",
+      command: "echo",
+      detection: { method: "binary", check: "echo --version" },
+      context: { whenToUse: ["echo text"], examples: [] }
+    });
+    const suggestions = suggester.suggest("echo text");
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions[0].reason).toContain("installed");
+  });
+});
+
+// ─── Singleton Tests ────────────────────────────────────────────────────────
+
+describe("Singletons", () => {
+  it("getRegistry should return ToolRegistry", async () => {
+    const { getRegistry } = await import("../externalTools.js");
+    const reg = getRegistry();
+    expect(reg).toBeInstanceOf(ToolRegistry);
+  });
+
+  it("getDetector should return ToolDetector", async () => {
+    const { getDetector } = await import("../externalTools.js");
+    const det = getDetector();
+    expect(det).toBeInstanceOf(ToolDetector);
+  });
+
+  it("getExecutor should return ToolExecutor", async () => {
+    const { getExecutor } = await import("../externalTools.js");
+    const exec = getExecutor();
+    expect(exec).toBeInstanceOf(ToolExecutor);
+  });
+
+  it("getSuggester should return ToolSuggester", async () => {
+    const { getSuggester } = await import("../externalTools.js");
+    const sug = getSuggester();
+    expect(sug).toBeInstanceOf(ToolSuggester);
+  });
+
+  it("initializeTools should register built-in tools", async () => {
+    const { initializeTools, getRegistry } = await import("../externalTools.js");
+    await initializeTools();
+    const reg = getRegistry();
+    expect(reg.getAll().length).toBeGreaterThan(0);
+  });
+});

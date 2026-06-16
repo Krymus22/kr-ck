@@ -1,194 +1,118 @@
 /**
- * clipboard.test.ts — Tests for clipboard.ts pure logic.
- * Covers: platform detection, command construction, content parsing.
+ * clipboard.test.ts — Tests for clipboard.ts (real module).
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// ─── Extract pure functions from clipboard.ts ──────────────────────────────
+vi.mock("node:child_process", () => ({
+  execSync: vi.fn().mockReturnValue(""),
+}));
 
-type Platform = "win32" | "darwin" | "linux";
+vi.mock("../logger.js", () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  success: vi.fn(),
+}));
 
-function detectPlatform(): Platform {
-  const p = process.platform;
-  if (p === "win32" || p === "darwin" || p === "linux") return p;
-  return "linux";
-}
+import { execSync } from "node:child_process";
+import { copyToClipboard, pasteFromClipboard, copyFileToClipboard } from "../clipboard.js";
 
-function getCopyCommand(platform: Platform): string {
-  switch (platform) {
-    case "win32": return "clip";
-    case "darwin": return "pbcopy";
-    case "linux": return "xclip -selection clipboard";
-  }
-}
+beforeEach(() => {
+  vi.mocked(execSync).mockReturnValue("" as any);
+});
 
-function getPasteCommand(platform: Platform): string {
-  switch (platform) {
-    case "win32": return "powershell -command \"Get-Clipboard\"";
-    case "darwin": return "pbpaste";
-    case "linux": return "xclip -selection clipboard -o";
-  }
-}
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
-function sanitizeClipboardContent(content: string): string {
-  // Remove null bytes and normalize line endings
-  return content.replace(/\0/g, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
+describe("clipboard.ts (real module)", () => {
+  describe("copyToClipboard", () => {
+    it("should return true on success (win32)", () => {
+      vi.stubGlobal("process", { ...process, platform: "win32" });
+      expect(copyToClipboard("hello")).toBe(true);
+    });
 
-function isImageContent(content: string): boolean {
-  const trimmed = content.trim();
-  // Check for image file extensions or base64 data URI
-  if (/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(trimmed)) return true;
-  if (/^data:image\//.test(trimmed)) return true;
-  if (/^iVBORw0KGgo/.test(trimmed)) return true; // PNG base64 header
-  return false;
-}
+    it("should return true on success (darwin)", () => {
+      vi.stubGlobal("process", { ...process, platform: "darwin" });
+      expect(copyToClipboard("hello")).toBe(true);
+    });
 
-function detectImageFormat(data: string): string | null {
-  if (data.startsWith("PNG")) return "png";
-  if (data.startsWith("JPEG") || data.startsWith("JFIF")) return "jpeg";
-  if (data.startsWith("GIF8")) return "gif";
-  if (data.startsWith("RIFF") && data.includes("WEBP")) return "webp";
-  if (data.startsWith("<svg")) return "svg";
-  return null;
-}
+    it("should return true on success (linux with xclip)", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      expect(copyToClipboard("hello")).toBe(true);
+    });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TESTS
-// ═══════════════════════════════════════════════════════════════════════════════
+    it("should fall back to xsel on linux when xclip fails", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync)
+        .mockImplementationOnce(() => { throw new Error("xclip not found"); })
+        .mockReturnValue("" as any);
+      expect(copyToClipboard("hello")).toBe(true);
+    });
 
-describe("clipboard.ts pure logic", () => {
-  describe("detectPlatform", () => {
-    it("should return a valid platform", () => {
-      const p = detectPlatform();
-      expect(["win32", "darwin", "linux"]).toContain(p);
+    it("should return false on complete failure", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync).mockImplementation(() => { throw new Error("fail"); });
+      expect(copyToClipboard("hello")).toBe(false);
     });
   });
 
-  describe("getCopyCommand", () => {
-    it("should return clip for Windows", () => {
-      expect(getCopyCommand("win32")).toBe("clip");
+  describe("pasteFromClipboard", () => {
+    it("should return text on success (win32)", () => {
+      vi.stubGlobal("process", { ...process, platform: "win32" });
+      vi.mocked(execSync).mockReturnValue("clipboard content" as any);
+      expect(pasteFromClipboard()).toBe("clipboard content");
     });
 
-    it("should return pbcopy for macOS", () => {
-      expect(getCopyCommand("darwin")).toBe("pbcopy");
+    it("should return text on success (darwin)", () => {
+      vi.stubGlobal("process", { ...process, platform: "darwin" });
+      vi.mocked(execSync).mockReturnValue("clipboard content\n" as any);
+      expect(pasteFromClipboard()).toBe("clipboard content");
     });
 
-    it("should return xclip for Linux", () => {
-      expect(getCopyCommand("linux")).toContain("xclip");
-    });
-  });
-
-  describe("getPasteCommand", () => {
-    it("should return PowerShell for Windows", () => {
-      const cmd = getPasteCommand("win32");
-      expect(cmd).toContain("powershell");
-      expect(cmd).toContain("Get-Clipboard");
+    it("should return text on success (linux)", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync).mockReturnValue("clipboard content" as any);
+      expect(pasteFromClipboard()).toBe("clipboard content");
     });
 
-    it("should return pbpaste for macOS", () => {
-      expect(getPasteCommand("darwin")).toBe("pbpaste");
+    it("should fall back to xsel on linux", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync)
+        .mockImplementationOnce(() => { throw new Error("xclip fail"); })
+        .mockReturnValue("from xsel" as any);
+      expect(pasteFromClipboard()).toBe("from xsel");
     });
 
-    it("should return xclip for Linux", () => {
-      const cmd = getPasteCommand("linux");
-      expect(cmd).toContain("xclip");
-      expect(cmd).toContain("-o");
-    });
-  });
-
-  describe("sanitizeClipboardContent", () => {
-    it("should remove null bytes", () => {
-      expect(sanitizeClipboardContent("hello\0world")).toBe("helloworld");
-    });
-
-    it("should normalize CRLF to LF", () => {
-      expect(sanitizeClipboardContent("line1\r\nline2")).toBe("line1\nline2");
-    });
-
-    it("should normalize CR to LF", () => {
-      expect(sanitizeClipboardContent("line1\rline2")).toBe("line1\nline2");
-    });
-
-    it("should handle clean content unchanged", () => {
-      expect(sanitizeClipboardContent("clean text")).toBe("clean text");
-    });
-
-    it("should handle empty string", () => {
-      expect(sanitizeClipboardContent("")).toBe("");
+    it("should return null on complete failure", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync).mockImplementation(() => { throw new Error("fail"); });
+      expect(pasteFromClipboard()).toBeNull();
     });
   });
 
-  describe("isImageContent", () => {
-    it("should detect PNG file path", () => {
-      expect(isImageContent("screenshot.png")).toBe(true);
+  describe("copyFileToClipboard", () => {
+    it("should return true on success (win32)", () => {
+      vi.stubGlobal("process", { ...process, platform: "win32" });
+      expect(copyFileToClipboard("file.txt")).toBe(true);
     });
 
-    it("should detect JPEG file path", () => {
-      expect(isImageContent("photo.jpg")).toBe(true);
+    it("should return true on success (darwin)", () => {
+      vi.stubGlobal("process", { ...process, platform: "darwin" });
+      expect(copyFileToClipboard("file.txt")).toBe(true);
     });
 
-    it("should detect JPEG extension", () => {
-      expect(isImageContent("image.jpeg")).toBe(true);
+    it("should return true on success (linux)", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      expect(copyFileToClipboard("file.txt")).toBe(true);
     });
 
-    it("should detect GIF file path", () => {
-      expect(isImageContent("anim.gif")).toBe(true);
-    });
-
-    it("should detect SVG file path", () => {
-      expect(isImageContent("icon.svg")).toBe(true);
-    });
-
-    it("should detect data URI", () => {
-      expect(isImageContent("data:image/png;base64,iVBOR...")).toBe(true);
-    });
-
-    it("should detect PNG base64 header", () => {
-      expect(isImageContent("iVBORw0KGgoAAAANSUhEUg")).toBe(true);
-    });
-
-    it("should reject plain text", () => {
-      expect(isImageContent("hello world")).toBe(false);
-    });
-
-    it("should reject non-image file extension", () => {
-      expect(isImageContent("script.ts")).toBe(false);
-    });
-
-    it("should handle case-insensitive extensions", () => {
-      expect(isImageContent("PHOTO.PNG")).toBe(true);
-    });
-  });
-
-  describe("detectImageFormat", () => {
-    it("should detect PNG", () => {
-      expect(detectImageFormat("PNGrest")).toBe("png");
-    });
-
-    it("should detect JPEG", () => {
-      expect(detectImageFormat("JPEGrest")).toBe("jpeg");
-    });
-
-    it("should detect JPEG from JFIF", () => {
-      expect(detectImageFormat("JFIFrest")).toBe("jpeg");
-    });
-
-    it("should detect GIF", () => {
-      expect(detectImageFormat("GIF89a")).toBe("gif");
-    });
-
-    it("should detect SVG", () => {
-      expect(detectImageFormat("<svg xmlns='http://www.w3.org/2000/svg'>")).toBe("svg");
-    });
-
-    it("should return null for unknown format", () => {
-      expect(detectImageFormat("random data")).toBeNull();
-    });
-
-    it("should return null for empty string", () => {
-      expect(detectImageFormat("")).toBeNull();
+    it("should return false on failure", () => {
+      vi.stubGlobal("process", { ...process, platform: "linux" });
+      vi.mocked(execSync).mockImplementation(() => { throw new Error("fail"); });
+      expect(copyFileToClipboard("file.txt")).toBe(false);
     });
   });
 });

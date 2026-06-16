@@ -1,207 +1,311 @@
 /**
- * logger.test.ts — Tests for logger.ts pure logic.
- * Covers: formatLevel, getVisibleLength, truncate, formatTimestamp, log formatting.
+ * logger.test.ts — Tests for logger.ts (real module).
+ * Covers: banner, info, success, warn, error, formatMarkdown, reply,
+ * toolCall, toolResult, throttle, debug, divider, statusBar.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// ─── Extract pure functions from logger.ts ─────────────────────────────────
+vi.mock("../config.js", () => ({
+  config: { debug: false },
+}));
 
-type LogLevel = "debug" | "info" | "warn" | "error" | "success";
+import {
+  banner,
+  info,
+  success,
+  warn,
+  error,
+  formatMarkdown,
+  reply,
+  toolCall,
+  toolResult,
+  throttle,
+  debug,
+  divider,
+  statusBar,
+  type StatusBarInput,
+} from "../logger.js";
 
-function formatLevel(level: LogLevel): string {
-  const labels: Record<LogLevel, string> = {
-    debug: "DEBUG",
-    info: " INFO",
-    warn: " WARN",
-    error: "ERROR",
-    success: "  OK ",
-  };
-  return labels[level] ?? level.toUpperCase();
-}
+let logSpy: ReturnType<typeof vi.spyOn>;
+let warnSpy: ReturnType<typeof vi.spyOn>;
+let errorSpy: ReturnType<typeof vi.spyOn>;
+let debugSpy: ReturnType<typeof vi.spyOn>;
 
-function getVisibleLength(str: string): number {
-  // Strip ANSI escape sequences before counting
-  const stripped = str.replace(/\x1B\[[0-9;]*m/g, "");
-  return stripped.length;
-}
+beforeEach(() => {
+  logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+});
 
-function truncate(str: string, maxWidth: number): string {
-  if (str.length <= maxWidth) return str;
-  if (maxWidth < 3) return str.slice(0, maxWidth);
-  return str.slice(0, maxWidth - 3) + "...";
-}
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
-function formatTimestamp(date: Date): string {
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
-  return `${h}:${m}:${s}`;
-}
-
-function formatLogLine(level: LogLevel, message: string, timestamp?: Date): string {
-  const ts = timestamp ? `[${formatTimestamp(timestamp)}]` : "";
-  const lvl = formatLevel(level);
-  return `${ts} ${lvl} ${message}`;
-}
-
-function parseAnsiCodes(str: string): string[] {
-  const matches = str.match(/\x1B\[[0-9;]*m/g);
-  return matches ?? [];
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// TESTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe("logger.ts pure logic", () => {
-  describe("formatLevel", () => {
-    it("should format debug level", () => {
-      expect(formatLevel("debug")).toBe("DEBUG");
-    });
-
-    it("should format info level", () => {
-      expect(formatLevel("info")).toBe(" INFO");
-    });
-
-    it("should format warn level", () => {
-      expect(formatLevel("warn")).toBe(" WARN");
-    });
-
-    it("should format error level", () => {
-      expect(formatLevel("error")).toBe("ERROR");
-    });
-
-    it("should format success level", () => {
-      expect(formatLevel("success")).toBe("  OK ");
-    });
-
-    it("should uppercase unknown levels", () => {
-      expect(formatLevel("trace" as LogLevel)).toBe("TRACE");
+describe("logger.ts (real module)", () => {
+  describe("banner", () => {
+    it("should call console.log", () => {
+      banner("test banner");
+      expect(logSpy).toHaveBeenCalled();
     });
   });
 
-  describe("getVisibleLength", () => {
-    it("should count plain text", () => {
-      expect(getVisibleLength("hello")).toBe(5);
-    });
-
-    it("should strip ANSI codes", () => {
-      expect(getVisibleLength("\x1B[31mred\x1B[0m")).toBe(3);
-    });
-
-    it("should handle empty string", () => {
-      expect(getVisibleLength("")).toBe(0);
-    });
-
-    it("should handle multiple ANSI codes", () => {
-      const str = "\x1B[1m\x1B[31mbold red\x1B[0m";
-      expect(getVisibleLength(str)).toBe(8);
-    });
-
-    it("should handle nested ANSI codes", () => {
-      const str = "\x1B[32m\x1B[1mgreen bold\x1B[0m";
-      expect(getVisibleLength(str)).toBe(10);
+  describe("info", () => {
+    it("should call console.log with text", () => {
+      info("hello");
+      expect(logSpy).toHaveBeenCalled();
     });
   });
 
-  describe("truncate", () => {
-    it("should not truncate short strings", () => {
-      expect(truncate("hello", 10)).toBe("hello");
-    });
-
-    it("should truncate long strings with ellipsis", () => {
-      expect(truncate("hello world", 8)).toBe("hello...");
-    });
-
-    it("should handle exact length", () => {
-      expect(truncate("hello", 5)).toBe("hello");
-    });
-
-    it("should handle maxWidth of 2", () => {
-      expect(truncate("hello", 2)).toBe("he");
-    });
-
-    it("should handle maxWidth of 0", () => {
-      expect(truncate("hello", 0)).toBe("");
-    });
-
-    it("should handle empty string", () => {
-      expect(truncate("", 5)).toBe("");
-    });
-
-    it("should handle maxWidth of 3 with truncation needed", () => {
-      expect(truncate("hello", 3)).toBe("...");
+  describe("success", () => {
+    it("should call console.log with SUCCESS prefix", () => {
+      success("done");
+      expect(logSpy).toHaveBeenCalled();
     });
   });
 
-  describe("formatTimestamp", () => {
-    it("should format time with leading zeros", () => {
-      const date = new Date(2024, 0, 1, 9, 5, 3);
-      expect(formatTimestamp(date)).toBe("09:05:03");
-    });
-
-    it("should format midnight", () => {
-      const date = new Date(2024, 0, 1, 0, 0, 0);
-      expect(formatTimestamp(date)).toBe("00:00:00");
-    });
-
-    it("should format end of day", () => {
-      const date = new Date(2024, 0, 1, 23, 59, 59);
-      expect(formatTimestamp(date)).toBe("23:59:59");
-    });
-
-    it("should format single-digit hours", () => {
-      const date = new Date(2024, 0, 1, 1, 2, 3);
-      expect(formatTimestamp(date)).toBe("01:02:03");
+  describe("warn", () => {
+    it("should call console.warn", () => {
+      warn("careful");
+      expect(warnSpy).toHaveBeenCalled();
     });
   });
 
-  describe("formatLogLine", () => {
-    it("should format info log line", () => {
-      const line = formatLogLine("info", "Server started");
-      expect(line).toContain(" INFO ");
-      expect(line).toContain("Server started");
-    });
-
-    it("should include timestamp when provided", () => {
-      const ts = new Date(2024, 0, 1, 14, 30, 0);
-      const line = formatLogLine("warn", "Disk low", ts);
-      expect(line).toContain("[14:30:00]");
-      expect(line).toContain(" WARN ");
-    });
-
-    it("should not include timestamp when omitted", () => {
-      const line = formatLogLine("error", "Failed");
-      expect(line).not.toContain("[");
-      expect(line).toContain("ERROR");
-    });
-
-    it("should format success log line", () => {
-      const line = formatLogLine("success", "Build complete");
-      expect(line).toContain("  OK ");
-    });
-
-    it("should format debug log line", () => {
-      const line = formatLogLine("debug", "Variables: x=1");
-      expect(line).toContain("DEBUG");
+  describe("error", () => {
+    it("should call console.error", () => {
+      error("oops");
+      expect(errorSpy).toHaveBeenCalled();
     });
   });
 
-  describe("parseAnsiCodes", () => {
-    it("should extract ANSI codes", () => {
-      const codes = parseAnsiCodes("\x1B[31mred\x1B[0m");
-      expect(codes).toHaveLength(2);
-      expect(codes[0]).toBe("\x1B[31m");
+  describe("formatMarkdown", () => {
+    it("should pass through plain text", () => {
+      const result = formatMarkdown("hello world");
+      expect(result).toContain("hello world");
     });
 
-    it("should return empty array for plain text", () => {
-      expect(parseAnsiCodes("no codes here")).toHaveLength(0);
+    it("should render fenced code blocks", () => {
+      const md = "```javascript\nconst x = 1;\n```";
+      const result = formatMarkdown(md);
+      expect(result).toContain("const x = 1;");
     });
 
-    it("should handle multiple colored segments", () => {
-      const codes = parseAnsiCodes("\x1B[31mr\x1B[32mg\x1B[0m");
-      expect(codes).toHaveLength(3);
+    it("should render headings level 1", () => {
+      const result = formatMarkdown("# Title");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should render headings level 3", () => {
+      const result = formatMarkdown("### Sub");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should render horizontal rules", () => {
+      const result = formatMarkdown("---");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should render blockquotes", () => {
+      const result = formatMarkdown("> quoted text");
+      expect(result).toContain("quoted text");
+    });
+
+    it("should render task list items (unchecked)", () => {
+      const result = formatMarkdown("- [ ] task");
+      expect(result).toContain("task");
+    });
+
+    it("should render task list items (checked)", () => {
+      const result = formatMarkdown("- [x] done");
+      expect(result).toContain("done");
+    });
+
+    it("should render bullet lists", () => {
+      const result = formatMarkdown("- item one");
+      expect(result).toContain("item one");
+    });
+
+    it("should render numbered lists", () => {
+      const result = formatMarkdown("1. first");
+      expect(result).toContain("first");
+    });
+
+    it("should render tables", () => {
+      const md = "| A | B |\n|---|---|\n| 1 | 2 |";
+      const result = formatMarkdown(md);
+      expect(result).toContain("A");
+      expect(result).toContain("2");
+    });
+
+    it("should apply bold formatting", () => {
+      const result = formatMarkdown("**bold**");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should apply italic formatting", () => {
+      const result = formatMarkdown("*italic*");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should apply inline code formatting", () => {
+      const result = formatMarkdown("`code`");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should apply link formatting", () => {
+      const result = formatMarkdown("[text](url)");
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    it("should handle empty input", () => {
+      const result = formatMarkdown("");
+      expect(typeof result).toBe("string");
+    });
+
+    it("should handle code block with no language", () => {
+      const result = formatMarkdown("```\nno lang\n```");
+      expect(result).toContain("no lang");
+    });
+
+    it("should handle multi-line blockquote", () => {
+      const md = "> line1\n> line2";
+      const result = formatMarkdown(md);
+      expect(result).toContain("line1");
+      expect(result).toContain("line2");
+    });
+  });
+
+  describe("reply", () => {
+    it("should call console.log multiple times", () => {
+      reply("hello");
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  describe("toolCall", () => {
+    it("should log tool name and args", () => {
+      toolCall("bash", { command: "ls" });
+      expect(logSpy).toHaveBeenCalled();
+    });
+
+    it("should truncate long args with ellipsis", () => {
+      const longArgs = { data: "x".repeat(200) };
+      toolCall("bash", longArgs);
+      expect(logSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("toolResult", () => {
+    it("should log success", () => {
+      toolResult("bash", true, "ok");
+      expect(logSpy).toHaveBeenCalled();
+    });
+
+    it("should log failure", () => {
+      toolResult("bash", false, "failed");
+      expect(logSpy).toHaveBeenCalled();
+    });
+
+    it("should handle no detail", () => {
+      toolResult("bash", true);
+      expect(logSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("throttle", () => {
+    it("should log throttle reason", () => {
+      throttle("rate limited");
+      expect(logSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("debug", () => {
+    it("should not output when DEBUG=false", () => {
+      debug("test");
+      expect(debugSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("divider", () => {
+    it("should log a divider line", () => {
+      divider();
+      expect(logSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("statusBar", () => {
+    const baseInput: StatusBarInput = {
+      promptTokens: 1000,
+      completionTokens: 500,
+      totalTokens: 1500,
+      contextWindow: 128000,
+      warnThreshold: 0.7,
+      compactThreshold: 0.9,
+      costPerKPrompt: 0.001,
+      costPerKCompletion: 0.002,
+    };
+
+    it("should render status bar", () => {
+      statusBar(baseInput);
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should show warning when near warn threshold", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 100000, // ~78% of 128k
+        contextWindow: 128000,
+      });
+      expect(logSpy).toHaveBeenCalled();
+    });
+
+    it("should show warning when near compact threshold", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 120000, // ~94% of 128k
+        contextWindow: 128000,
+      });
+      expect(logSpy).toHaveBeenCalled();
+    });
+
+    it("should handle zero cost rates", () => {
+      statusBar({
+        ...baseInput,
+        costPerKPrompt: 0,
+        costPerKCompletion: 0,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should handle zero context window", () => {
+      statusBar({
+        ...baseInput,
+        contextWindow: 0,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should format token counts with k suffix", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 50000,
+        promptTokens: 30000,
+        completionTokens: 20000,
+        contextWindow: 128000,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should handle small token counts without k suffix", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 500,
+        promptTokens: 300,
+        completionTokens: 200,
+        contextWindow: 128000,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

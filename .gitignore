@@ -8,3 +8,5 @@ Thumbs.db
 .scannerwork/
 sonar-issues.txt
 sonar-remaining.txt
+
+coverage/
