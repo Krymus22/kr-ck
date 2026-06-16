@@ -322,5 +322,64 @@ describe("logger.ts (real module)", () => {
       });
       expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
+
+    it("should show no cost when both cost rates are zero and tokens are zero", () => {
+      statusBar({
+        ...baseInput,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        costPerKPrompt: 0,
+        costPerKCompletion: 0,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should show green bar when usage is below warnThreshold", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 10000,
+        contextWindow: 128000,
+        warnThreshold: 0.7,
+        compactThreshold: 0.9,
+      });
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should show amber warning when usage is between warn and compact", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 100000,
+        contextWindow: 128000,
+        warnThreshold: 0.7,
+        compactThreshold: 0.9,
+      });
+      const allOutput = logSpy.mock.calls.map((c: any[]) => String(c[0])).join("");
+      expect(allOutput).toContain("78%");
+    });
+
+    it("should show red warning when usage exceeds compactThreshold", () => {
+      statusBar({
+        ...baseInput,
+        totalTokens: 120000,
+        contextWindow: 128000,
+        warnThreshold: 0.7,
+        compactThreshold: 0.9,
+      });
+      const allOutput = logSpy.mock.calls.map((c: any[]) => String(c[0])).join("");
+      expect(allOutput).toContain("94%");
+    });
+
+    it("should estimate cost with configured rates", () => {
+      statusBar({
+        ...baseInput,
+        promptTokens: 10000,
+        completionTokens: 5000,
+        costPerKPrompt: 0.01,
+        costPerKCompletion: 0.02,
+      });
+      const allOutput = logSpy.mock.calls.map((c: any[]) => String(c[0])).join("");
+      expect(allOutput).toContain("session");
+    });
   });
 });

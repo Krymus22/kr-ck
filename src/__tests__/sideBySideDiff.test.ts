@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { computeSideBySideDiff, renderSideBySide, generateUnifiedDiff } from "../sideBySideDiff.js";
+import { computeSideBySideDiff, renderSideBySide, generateUnifiedDiff, DiffLine } from "../sideBySideDiff.js";
 
 describe("computeSideBySideDiff", () => {
   it("should detect identical content", () => {
@@ -54,6 +54,39 @@ describe("renderSideBySide", () => {
     const diff = computeSideBySideDiff(longLine, "short");
     const rendered = renderSideBySide(diff, 40);
     expect(rendered.length).toBeGreaterThan(0);
+  });
+
+  it("should render same lines with grey color codes", () => {
+    const sameDiff: DiffLine[] = [
+      { oldNum: 1, newNum: 1, oldContent: "shared line", newContent: "shared line", type: "same" },
+    ];
+    const rendered = renderSideBySide(sameDiff);
+    expect(rendered).toContain("shared line");
+    expect(rendered).toContain("\x1b[90m");
+  });
+
+  it("should render changed/default lines with raw text", () => {
+    const changedDiff: DiffLine[] = [
+      { oldNum: 1, newNum: 1, oldContent: "old text", newContent: "new text", type: "changed" as any },
+    ];
+    const rendered = renderSideBySide(changedDiff);
+    expect(rendered).toContain("old text");
+    expect(rendered).toContain("new text");
+  });
+
+  it("should render mixed diff types", () => {
+    const mixedDiff: DiffLine[] = [
+      { oldNum: 1, newNum: 1, oldContent: "same", newContent: "same", type: "same" },
+      { oldNum: 2, newNum: null, oldContent: "removed", newContent: "", type: "removed" },
+      { oldNum: null, newNum: 2, oldContent: "", newContent: "added", type: "added" },
+      { oldNum: 3, newNum: 3, oldContent: "old", newContent: "new", type: "changed" as any },
+    ];
+    const rendered = renderSideBySide(mixedDiff);
+    expect(rendered).toContain("same");
+    expect(rendered).toContain("removed");
+    expect(rendered).toContain("added");
+    expect(rendered).toContain("old");
+    expect(rendered).toContain("new");
   });
 });
 

@@ -11,6 +11,8 @@ import {
   type Tool,
   type ToolInvocation,
 } from "../externalTools.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 // ─── Mock Tools ─────────────────────────────────────────────────────────────
 
@@ -108,6 +110,21 @@ describe("ToolRegistry", () => {
     });
     expect(result.success).toBe(true);
     expect(registry.get("dynamic_tool")).toBeDefined();
+  });
+
+  it("should persist custom tools to disk via saveUserTools", () => {
+    const fs = require("fs");
+    const result = registry.addTool({
+      ...mockTool,
+      name: "persist_tool",
+      category: "custom"
+    });
+    expect(result.success).toBe(true);
+    const userPath = registry.getUserToolsPath();
+    expect(fs.existsSync(userPath)).toBe(true);
+    const saved = JSON.parse(fs.readFileSync(userPath, "utf-8"));
+    expect(Array.isArray(saved)).toBe(true);
+    expect(saved.some((t: any) => t.name === "persist_tool")).toBe(true);
   });
 
   it("should fail to add tool without name", () => {
@@ -574,6 +591,84 @@ describe("ToolExecutor - extended", () => {
     const result = await executor.execute("fail_cmd");
     expect(result.success).toBe(false);
   });
+
+  it("should return stderr/stdout in error result when execSync throws", async () => {
+    const fs = await import("fs");
+    const os = await import("os");
+    const path = await import("path");
+    const tmpScript = path.join(os.tmpdir(), `__test_exit1_${Date.now()}.js`);
+    fs.writeFileSync(tmpScript, 'process.stderr.write("err_out"); process.stdout.write("std_out"); process.exit(1);');
+
+    registry.register({
+      name: "exit1_tool",
+      description: "exits 1",
+      category: "custom",
+      command: "node",
+      args: [tmpScript],
+      flags: [],
+      detection: { method: "manual", check: "", installed: true },
+      context: { whenToUse: [], examples: [] },
+      outputParser: "raw"
+    });
+    const result = await executor.execute("exit1_tool");
+    try { fs.unlinkSync(tmpScript); } catch {}
+    expect(result.success).toBe(false);
+    expect(result.output).toContain("std_out");
+    expect(result.errors).toContain("err_out");
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("should handle execSync throw with no stderr/stdout", async () => {
+    registry.register({
+      name: "throw_tool",
+      description: "throws",
+      category: "custom",
+      command: "node",
+      args: ["-e", "throw new Error('boom')"],
+      flags: [],
+      detection: { method: "manual", check: "", installed: true },
+      context: { whenToUse: [], examples: [] },
+      outputParser: "raw"
+    });
+    const result = await executor.execute("throw_tool");
+    expect(result.success).toBe(false);
+    expect(result.errors).toBeDefined();
+  });
+
+  it("should handle invalid JSON with json output parser", async () => {
+    registry.register({
+      name: "bad_json",
+      description: "bad json",
+      category: "custom",
+      command: "echo",
+      args: ["not valid json"],
+      flags: [],
+      detection: { method: "binary", check: "echo --version" },
+      context: { whenToUse: [], examples: [] },
+      outputParser: "json"
+    });
+    const result = await executor.execute("bad_json");
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("not valid json");
+    expect(result.metadata).toBeUndefined();
+  });
+
+  it("should use customParser when provided", async () => {
+    registry.register({
+      name: "cparse",
+      description: "custom parser",
+      category: "custom",
+      command: "echo",
+      args: ["data"],
+      flags: [],
+      detection: { method: "binary", check: "echo --version" },
+      context: { whenToUse: [], examples: [] },
+      outputParser: "custom",
+      customParser: (output) => ({ success: true, output: `custom:${output.trim()}` })
+    });
+    const result = await executor.execute("cparse");
+    expect(result.output).toBe("custom:data");
+  });
 });
 
 // ─── ToolSuggester - extended ───────────────────────────────────────────────
@@ -657,5 +752,68 @@ describe("Singletons", () => {
     await initializeTools();
     const reg = getRegistry();
     expect(reg.getAll().length).toBeGreaterThan(0);
+  });
+});
+
+// ─── Coverage: loadUserTools, updateUserTool catch, detectFromContext ────────
+
+describe("ToolRegistry - coverage gaps", () => {
+  it("should load user tools from disk when file exists", () => {
+    const registry = new ToolRegistry();
+    const toolsPath = registry.getUserToolsPath();
+
+    const userTools = [{
+      name: "disk_tool",
+      description: "Loaded from disk",
+      command: "echo",
+      args: [],
+      detection: { method: "manual", check: "", installed: true },
+      context: { whenToUse: [], examples: [] },
+      outputParser: "raw"
+    }];
+
+    try {
+      const dir = path.dirname(toolsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(toolsPath, JSON.stringify(userTools), "utf-8");
+
+      registry.loadUserTools();
+      expect(registry.get("disk_tool")).toBeDefined();
+      expect(registry.get("disk_tool")?.category).toBe("custom");
+    } finally {
+      try { fs.unlinkSync(toolsPath); } catch {}
+    }
+  });
+
+  it("should catch errors during tool update", () => {
+    const registry = new ToolRegistry();
+    registry.addTool({ ...mockTool, name: "err_upd", category: "custom" });
+
+    vi.spyOn(registry, "register").mockImplementationOnce(() => {
+      throw new Error("register failed");
+    });
+
+    const result = registry.updateUserTool("err_upd", { description: "new" });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("Failed to update tool");
+  });
+});
+
+describe("ToolDetector - coverage gaps", () => {
+  it("should detect tools when project config files exist", () => {
+    const registry = new ToolRegistry();
+    registry.registerAll([mockTool, mockConfigTool]);
+    const detector = new ToolDetector(registry);
+
+    const tmpDir = path.join(process.cwd(), "__test_detect_ctx__");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "pyproject.toml"), "", "utf8");
+
+    try {
+      const result = detector.detectFromContext(tmpDir);
+      expect(result.some(t => t.name === "config_tool")).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

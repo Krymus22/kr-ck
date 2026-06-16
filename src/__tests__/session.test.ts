@@ -2,7 +2,7 @@
  * session.test.ts — Tests for session persistence module.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { saveSession, loadSession, listSessions, deleteSession, autoSave } from "../session.js";
@@ -118,10 +118,31 @@ describe("autoSave", () => {
     if (id) deleteSession(id);
   });
 
-  it("should return null when saveSession throws", () => {
-    const id = autoSave();
-    expect(id === null || typeof id === "string").toBe(true);
-    if (id) deleteSession(id);
+  it("should return null when saveSession throws", async () => {
+    vi.resetModules();
+    vi.doMock("../history.js", () => ({
+      getHistory: () => { throw new Error("disk full"); },
+      getCavemanLevel: () => 0,
+      isPlanMode: () => false,
+      resetHistory: () => {},
+      addUserMessage: () => {},
+      addRawAssistantMessage: () => {},
+      addToolResult: () => {},
+      setCavemanLevel: () => {},
+      setPlanMode: () => {},
+    }));
+    vi.doMock("../logger.js", () => ({
+      success: () => {},
+      error: () => {},
+      info: () => {},
+      warn: () => {},
+      debug: () => {},
+    }));
+    const { autoSave: mockedAutoSave } = await import("../session.js");
+    const id = mockedAutoSave();
+    expect(id).toBeNull();
+    vi.doUnmock("../history.js");
+    vi.doUnmock("../logger.js");
   });
 });
 

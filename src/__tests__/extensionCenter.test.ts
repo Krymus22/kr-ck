@@ -442,6 +442,17 @@ describe("extensionCenter", () => {
       expect(skill).toBeDefined();
       expect(skill!.meta?.path).toContain("testSkill.md");
     });
+
+    it("should handle getAll returning undefined gracefully", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockGetRegistry.mockReturnValue({
+        getAll: () => undefined,
+        isInstalled: () => false,
+      });
+
+      discoverExtensions();
+      expect(getAllExtensions().filter((e) => e.category === "tool")).toHaveLength(0);
+    });
   });
 
   describe("getHubSummary - comprehensive", () => {

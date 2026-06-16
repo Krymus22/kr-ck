@@ -61,8 +61,8 @@ describe("guardrail.ts (real module)", () => {
     });
 
     it("should clean up temp file after validation", async () => {
-      await validateSyntax("test.mjs", "const x = 1;");
-      // Temp file should be cleaned up - we can't check directly but at least no error
+      const result = await validateSyntax("test.mjs", "const x = 1;");
+      expect(result.valid).toBe(true);
     });
   });
 
@@ -187,6 +187,33 @@ describe("guardrail.ts (real module)", () => {
     it("should pass through .go files", async () => {
       const result = await validateSyntax("test.go", "package main");
       expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("validateSyntax — branch coverage", () => {
+    it("should validate Python syntax and use platform binary", async () => {
+      const result = await validateSyntax("branch.py", "x = 1\n");
+      expect(result).toHaveProperty("valid");
+    });
+
+    it("should validate HTML with self-closing and regular tags", async () => {
+      const result = await validateSyntax("branch.html", "<div><br><img src='x'><p>text</p></div>");
+      expect(result).toHaveProperty("valid");
+    });
+
+    it("should validate CSS with balanced braces", async () => {
+      const result = await validateSyntax("branch.css", "@media (max-width: 600px) { .a { color: red; } }");
+      expect(result.valid).toBe(true);
+    });
+
+    it("should route through switch for .cjs extension", async () => {
+      const result = await validateSyntax("branch.cjs", "const x = 1;");
+      expect(result).toHaveProperty("valid");
+    });
+
+    it("should route through switch for .scss extension", async () => {
+      const result = await validateSyntax("branch.scss", ".class { color: blue; }");
+      expect(result).toHaveProperty("valid");
     });
   });
 });

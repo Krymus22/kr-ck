@@ -2,7 +2,33 @@
  * telemetry.test.ts — Tests for telemetry/metrics module.
  */
 
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
+import fs from "node:fs";
+
+vi.mock("../logger.js", () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  success: vi.fn(),
+}));
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    writeFileSync: (...args: any[]) => (telemetryWriteSpy ?? actual.writeFileSync)(...args),
+    mkdirSync: (...args: any[]) => (telemetryMkdirSpy ?? actual.mkdirSync)(...args),
+    existsSync: (...args: any[]) => (telemetryExistsSpy ?? actual.existsSync)(...args),
+    readdirSync: (...args: any[]) => (telemetryReaddirSpy ?? actual.readdirSync)(...args),
+  };
+});
+
+let telemetryWriteSpy: ((...args: any[]) => any) | null = null;
+let telemetryMkdirSpy: ((...args: any[]) => any) | null = null;
+let telemetryExistsSpy: ((...args: any[]) => any) | null = null;
+let telemetryReaddirSpy: ((...args: any[]) => any) | null = null;
+
 import {
   startSession,
   endSession,
@@ -15,12 +41,13 @@ import {
   getAggregatedStats,
 } from "../telemetry.js";
 
+import * as log from "../logger.js";
+
 let sessionId: string | undefined;
 
 afterAll(() => {
   if (sessionId) {
     try {
-      const fs = require("node:fs");
       const path = require("node:path");
       const telemetryDir = path.join(
         process.env.HOME ?? process.env.USERPROFILE ?? ".",
@@ -107,5 +134,44 @@ describe("getAggregatedStats", () => {
     expect(typeof stats.totalSessions).toBe("number");
     expect(typeof stats.totalApiCalls).toBe("number");
     expect(typeof stats.totalTokens).toBe("number");
+  });
+});
+
+describe("saveSessionMetric error path (line 116)", () => {
+  it("should log error when fs.writeFileSync throws", () => {
+    telemetryMkdirSpy = () => undefined as any;
+    telemetryWriteSpy = () => { throw new Error("disk full"); };
+    try {
+      startSession("error_session");
+      endSession();
+      expect(log.error).toHaveBeenCalled();
+    } finally {
+      telemetryWriteSpy = null;
+      telemetryMkdirSpy = null;
+    }
+  });
+});
+
+describe("getAggregatedStats error paths (lines 129, 158)", () => {
+  it("should return zeros when TELEMETRY_DIR does not exist (line 129)", () => {
+    telemetryExistsSpy = () => false;
+    try {
+      const stats = getAggregatedStats();
+      expect(stats).toEqual({ totalSessions: 0, totalApiCalls: 0, totalTokens: 0, totalToolCalls: 0, avgSessionDuration: 0 });
+    } finally {
+      telemetryExistsSpy = null;
+    }
+  });
+
+  it("should return zeros when readdirSync throws (line 158)", () => {
+    telemetryExistsSpy = () => true;
+    telemetryReaddirSpy = () => { throw new Error("permission denied"); };
+    try {
+      const stats = getAggregatedStats();
+      expect(stats).toEqual({ totalSessions: 0, totalApiCalls: 0, totalTokens: 0, totalToolCalls: 0, avgSessionDuration: 0 });
+    } finally {
+      telemetryExistsSpy = null;
+      telemetryReaddirSpy = null;
+    }
   });
 });

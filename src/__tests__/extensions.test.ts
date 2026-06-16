@@ -264,13 +264,15 @@ describe("extensions.ts (real module)", () => {
   describe("shutdownMCPServers", () => {
     it("should be callable", async () => {
       const { shutdownMCPServers } = await loadModule();
-      shutdownMCPServers();
+      const result = shutdownMCPServers();
+      expect(result).toBeUndefined();
     });
 
     it("should handle multiple shutdowns", async () => {
       const { shutdownMCPServers } = await loadModule();
       shutdownMCPServers();
-      shutdownMCPServers();
+      const secondCall = shutdownMCPServers();
+      expect(secondCall).toBeUndefined();
     });
   });
 

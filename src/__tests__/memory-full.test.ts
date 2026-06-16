@@ -921,6 +921,28 @@ describe("distill", () => {
     const skills = listSkills(testLocalConfig);
     expect(skills.length).toBeGreaterThanOrEqual(0);
   });
+
+  it("should save extracted skills when sequences are repeated 3+ times", async () => {
+    const baseTime = Date.now();
+    for (let i = 0; i < 5; i++) {
+      saveSessionTrace(testLocalConfig, {
+        id: `distill-v4-${baseTime}-${i}`,
+        startTime: new Date(baseTime + i * 1000).toISOString(),
+        endTime: new Date(baseTime + i * 1000 + 500).toISOString(),
+        summary: `Workflow session ${i}`,
+        decisions: [],
+        fileChanges: [],
+        toolsUsed: ["alpha", "beta", "gamma", "delta"],
+        tokensUsed: 100,
+        messages: [],
+      });
+    }
+    const result = await runDistill(testLocalConfig);
+    expect(result.skillsExtracted).toBeGreaterThan(0);
+    expect(result.skills.length).toBeGreaterThan(0);
+    const savedSkills = listSkills(testLocalConfig);
+    expect(savedSkills.length).toBeGreaterThan(0);
+  });
 });
 
 // ─── shouldWriteCheckpoint ────────────────────────────────────────────────────
@@ -1268,5 +1290,47 @@ describe("edge cases", () => {
     const loaded = listSessionTraces(config);
     expect(loaded[0].messages[0].content).toBe("hello");
     fs.rmSync(path.join(TEMP_DIR, "nested-json"), { recursive: true, force: true });
+  });
+
+  it("should create parent directory in writeMarkdown when it doesn't exist", () => {
+    const config: MemoryConfig = {
+      globalDir: path.join(TEMP_DIR, "write-md-global"),
+      projectDir: path.join(TEMP_DIR, "deeply", "nested", "nonexist-project"),
+      historyDir: path.join(TEMP_DIR, "write-md-history"),
+      skillsDir: path.join(TEMP_DIR, "write-md-skills"),
+    };
+    writeProjectMemory(config, "test content for mkdir");
+    expect(readProjectMemory(config)).toBe("test content for mkdir");
+  });
+
+  it("should create parent directory in writeJson when it doesn't exist", () => {
+    const config: MemoryConfig = {
+      globalDir: path.join(TEMP_DIR, "write-json-global"),
+      projectDir: path.join(TEMP_DIR, "write-json-project"),
+      historyDir: path.join(TEMP_DIR, "write-json-history"),
+      skillsDir: path.join(TEMP_DIR, "deeply", "nested", "nonexist-skills"),
+    };
+    const skill = makeSkill({ id: "mkdir-skill", name: "MkdirSkill" });
+    saveSkill(config, skill);
+    const skills = listSkills(config);
+    expect(skills.some((s) => s.id === "mkdir-skill")).toBe(true);
+  });
+
+  it("should log warning on writeJson error when skillsDir is a file", () => {
+    const config: MemoryConfig = {
+      globalDir: path.join(TEMP_DIR, "write-json-err-global"),
+      projectDir: path.join(TEMP_DIR, "write-json-err-project"),
+      historyDir: path.join(TEMP_DIR, "write-json-err-history"),
+      skillsDir: path.join(TEMP_DIR, "write-json-err-skills"),
+    };
+    ensureMemoryDirs(config);
+    const skillsDirFile = path.join(config.skillsDir, "not-a-dir");
+    fs.writeFileSync(skillsDirFile, "i am a file", "utf8");
+    const configWithFileSkillsDir: MemoryConfig = {
+      ...config,
+      skillsDir: skillsDirFile,
+    };
+    const skill = makeSkill({ id: "err-skill", name: "ErrSkill" });
+    expect(() => saveSkill(configWithFileSkillsDir, skill)).not.toThrow();
   });
 });

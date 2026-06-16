@@ -275,4 +275,25 @@ describe("groupIndependentTools", () => {
     expect(groups[0][0].execute).toBeInstanceOf(Function);
     expect(typeof groups[0][0].id).toBe("string");
   });
+
+  it("placeholder execute should return empty string", async () => {
+    const toolCalls = [
+      { name: "test", args: { x: 1 } },
+    ];
+    const groups = groupIndependentTools(toolCalls);
+    const result = await groups[0][0].execute();
+    expect(result).toBe("");
+  });
+
+  it("last group should contain remaining items", () => {
+    const toolCalls = [
+      { name: "edit", args: { caminho: "a.ts" } },
+      { name: "edit", args: { caminho: "b.ts" } },
+      { name: "read", args: { caminho: "c.ts" } },
+    ];
+    const groups = groupIndependentTools(toolCalls);
+    expect(groups.length).toBe(3);
+    expect(groups[2].length).toBe(1);
+    expect(groups[2][0].name).toBe("read");
+  });
 });

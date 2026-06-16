@@ -98,4 +98,13 @@ describe("editFile", () => {
     expect(fs.existsSync(backupFile)).toBe(true);
     expect(fs.readFileSync(backupFile, "utf8")).toBe("const backup = true;\n");
   });
+
+  it("should return error when applyEdits fails", () => {
+    const testFile = path.join(TEST_DIR, "fail_edit.ts");
+    fs.writeFileSync(testFile, "const a = 1;\n", "utf8");
+
+    const result = editFile(testFile, [{ search: "nonexistent string", replace: "x" }]);
+    expect(result).toContain("[ERRO]");
+    expect(result).toContain("Edição falhou");
+  });
 });

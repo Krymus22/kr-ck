@@ -53,6 +53,19 @@ describe("matchesGlob", () => {
   });
 });
 
+describe("searchDir edge cases", () => {
+  it("should handle non-existent directory gracefully", () => {
+    const results = globSearch({ pattern: "**/*.ts", cwd: "/nonexistent/path/__test__" });
+    expect(results).toHaveLength(0);
+  });
+});
+
+describe("matchesGlob edge cases", () => {
+  it("should return false for invalid regex pattern", () => {
+    expect(matchesGlob("test.ts", "[invalid")).toBe(false);
+  });
+});
+
 describe("globSearch", () => {
   it("should find files by pattern", () => {
     const results = globSearch({ pattern: "**/*.ts", cwd: TEST_DIR });

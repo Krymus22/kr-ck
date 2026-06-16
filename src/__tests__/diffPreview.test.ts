@@ -44,6 +44,13 @@ describe("computeUnifiedDiff", () => {
     expect(diff.length).toBeLessThan(50000);
   });
 
+  it("truncates diff when output exceeds MAX_DIFF_LINES_PER_HUNK * 4", () => {
+    const bigBefore = Array(1000).fill("old line").join("\n");
+    const bigAfter = Array(1000).fill("new line").join("\n");
+    const diff = computeUnifiedDiff(bigBefore, bigAfter, "huge.txt");
+    expect(diff).toContain("diff truncated for preview");
+  });
+
   it("handles multiline content", () => {
     const diff = computeUnifiedDiff("a\nb\nc", "a\nx\nc", "multi.txt");
     expect(diff).toContain("-");

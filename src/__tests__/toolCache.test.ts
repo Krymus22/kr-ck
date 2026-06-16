@@ -59,6 +59,13 @@ describe("ToolCache", () => {
     expect(cache.get("tool", { a: 2 })).toBe("r2");
   });
 
+  it("should build sorted keys for multiple args", () => {
+    const cache = new ToolCache(60000);
+    cache.set("tool", { z: 1, a: 2, m: 3 }, "multi");
+    expect(cache.get("tool", { a: 2, m: 3, z: 1 })).toBe("multi");
+    expect(cache.get("tool", { z: 1, a: 2, m: 3 })).toBe("multi");
+  });
+
   it("should check has()", () => {
     const cache = new ToolCache(60000);
     cache.set("tool", { x: 1 }, "result");

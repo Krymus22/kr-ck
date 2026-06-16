@@ -57,11 +57,34 @@ describe("readFileAdvanced", () => {
     expect(result).toContain("test.txt");
   });
 
+  it("should display different file size formats in directory listing", () => {
+    const sizeDir = path.join(TEST_DIR, "size_test");
+    fs.mkdirSync(sizeDir, { recursive: true });
+
+    fs.writeFileSync(path.join(sizeDir, "tiny.txt"), "hi");
+    fs.writeFileSync(path.join(sizeDir, "medium.txt"), "x".repeat(2048));
+    fs.writeFileSync(path.join(sizeDir, "large.txt"), "y".repeat(2 * 1024 * 1024));
+
+    const result = readFileAdvanced({ path: sizeDir });
+    expect(result).toContain("tiny.txt");
+    expect(result).toContain("medium.txt");
+    expect(result).toContain("KB");
+    expect(result).toContain("large.txt");
+    expect(result).toContain("MB");
+
+    fs.rmSync(sizeDir, { recursive: true, force: true });
+  });
+
   it("should handle grep with context", () => {
     const result = readFileAdvanced({ path: TEST_FILE, grep: "line5", contextLines: 1 });
     expect(result).toContain("line4");
     expect(result).toContain("line5");
     expect(result).toContain("line6");
+  });
+
+  it("should handle invalid regex in grep", () => {
+    const result = readFileAdvanced({ path: TEST_FILE, grep: "[" });
+    expect(result).toContain("[ERRO] Regex inválida");
   });
 });
 
@@ -75,6 +98,11 @@ describe("readBinarySafe", () => {
     const binFile = path.join(TEST_DIR, "bin.dat");
     fs.writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02, 0x00, 0x03]));
     const content = readBinarySafe(binFile);
+    expect(content).toBeNull();
+  });
+
+  it("should return null for non-existent file", () => {
+    const content = readBinarySafe("/nonexistent/path/file.txt");
     expect(content).toBeNull();
   });
 });

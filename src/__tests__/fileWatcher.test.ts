@@ -2,12 +2,26 @@
  * fileWatcher.test.ts — Tests for file watcher module.
  */
 
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { FileWatcher } from "../fileWatcher.js";
 
 const TEST_DIR = path.join(process.cwd(), "__test_watchdir__");
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal();
+  const origStatSync = actual.statSync;
+  return {
+    ...actual,
+    statSync: vi.fn((...args: any[]) => {
+      if (String(args[0]).includes("stat_fail_test")) {
+        throw new Error("permission denied");
+      }
+      return (origStatSync as any)(...args);
+    }),
+  };
+});
 
 afterAll(() => {
   fs.rmSync(TEST_DIR, { recursive: true, force: true });
@@ -128,6 +142,14 @@ describe("FileWatcher", () => {
     expect(modificationEvents.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("should handle watching non-existent path gracefully", () => {
+    const watcher = new FileWatcher();
+    const nonExistent = path.join(process.cwd(), "__nonexistent_path_for_test__");
+    watcher.watch(nonExistent);
+    expect(true).toBe(true);
+    watcher.close();
+  });
+
   it("should catch callback errors during emit", async () => {
     fs.mkdirSync(TEST_DIR, { recursive: true });
     const testFile = path.join(TEST_DIR, "error_emit.txt");
@@ -146,5 +168,24 @@ describe("FileWatcher", () => {
 
     watcher.close();
     expect(true).toBe(true);
+  });
+
+  it("should log error when statSync fails during watch", () => {
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+    const testFile = path.join(TEST_DIR, "stat_fail.txt");
+    fs.writeFileSync(testFile, "content", "utf8");
+
+    const existsSyncSpy = vi.spyOn(fs, "existsSync").mockReturnValueOnce(true);
+    const statSyncSpy = vi.spyOn(fs, "statSync").mockImplementationOnce(() => {
+      throw new Error("permission denied");
+    });
+
+    const watcher = new FileWatcher();
+    watcher.watch(testFile);
+    expect(existsSyncSpy).toHaveBeenCalled();
+    watcher.close();
+
+    existsSyncSpy.mockRestore();
+    statSyncSpy.mockRestore();
   });
 });

@@ -1,4 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+
+const mockGetActiveSkills = vi.fn().mockReturnValue([]);
+vi.mock("../extensions.js", () => ({
+  getActiveSkills: (...args: any[]) => mockGetActiveSkills(...args),
+}));
+
 import {
   isPlanMode,
   setPlanMode,
@@ -18,6 +24,10 @@ import {
   reloadProjectMemory,
   optimizeContext,
 } from "../history.js";
+
+afterEach(() => {
+  mockGetActiveSkills.mockReturnValue([]);
+});
 
 describe("Plan Mode", () => {
   beforeEach(() => {
@@ -565,5 +575,58 @@ describe("hasFlowAdvancedAfterIndex false path (line 371)", () => {
     // hasFlowAdvancedAfterIndex returned false, so read tool content is NOT optimized
     expect(readTool).toBeDefined();
     expect((readTool as any).content).toBe("a".repeat(1000));
+  });
+});
+
+describe("getSystemPrompt with skills (lines 169-180)", () => {
+  beforeEach(() => {
+    mockGetActiveSkills.mockReturnValue([]);
+    setCavemanLevel(null);
+    resetHistory();
+  });
+
+  it("renders skills and includes caveman reinforcement when skill name is caveman and level is active (lines 169-180)", () => {
+    mockGetActiveSkills.mockReturnValue([
+      {
+        name: "caveman",
+        description: "Caveman mode skill",
+        path: "/fake/path",
+        content: "Speak like caveman.",
+      },
+      {
+        name: "other-skill",
+        description: "Another skill",
+        path: "/fake/other",
+        content: "Do other things.",
+      },
+    ]);
+    setCavemanLevel("ultra");
+    // getSystemPrompt is called by resetHistory; trigger it
+    resetHistory();
+    const sysContent = getHistory()[0].content as string;
+    expect(sysContent).toContain("--- START SKILL: caveman ---");
+    expect(sysContent).toContain("Speak like caveman.");
+    expect(sysContent).toContain("--- END SKILL: caveman ---");
+    expect(sysContent).toContain("--- START SKILL: other-skill ---");
+    expect(sysContent).toContain("CRITICAL CONTEXT: Caveman Mode is currently locked at level");
+    expect(sysContent).toContain("ultra");
+  });
+
+  it("ensureHistoryInitialized pushes system prompt when history is empty (line 206)", () => {
+    resetHistory();
+    const len = historyLength();
+    addUserMessage("test");
+    expect(historyLength()).toBe(len + 1);
+    expect(getHistory()[len].role).toBe("user");
+  });
+});
+
+describe("ensureHistoryInitialized with truly empty history (line 206)", () => {
+  it("pushes system prompt when history starts empty", async () => {
+    vi.resetModules();
+    const freshHistory = await import("../history.js");
+    const len = freshHistory.historyLength();
+    expect(len).toBe(1);
+    expect(freshHistory.getHistory()[0].role).toBe("system");
   });
 });

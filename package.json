@@ -13,6 +13,7 @@
     "start": "node --no-warnings=DEP0040 dist/index.js",
     "clean": "rimraf dist",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "keywords": [

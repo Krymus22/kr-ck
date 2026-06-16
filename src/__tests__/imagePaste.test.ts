@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import * as realFs from "node:fs";
 
 vi.mock("../logger.js", () => ({
   info: vi.fn(),
@@ -15,6 +16,21 @@ vi.mock("../logger.js", () => ({
   debug: vi.fn(),
   success: vi.fn(),
 }));
+
+const mockExecSync = vi.fn();
+vi.mock("node:child_process", () => ({
+  execSync: (...args: any[]) => mockExecSync(...args),
+}));
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    readFileSync: (...args: any[]) => (imagePasteReadSpy ?? actual.readFileSync)(...args),
+  };
+});
+
+let imagePasteReadSpy: ((...args: any[]) => any) | null = null;
 
 import {
   loadImageFromFile,
@@ -28,10 +44,13 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "img_test_"));
+  imagePasteReadSpy = null;
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  mockExecSync.mockReset();
+  imagePasteReadSpy = null;
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* */ }
 });
 
@@ -154,12 +173,29 @@ describe("imagePaste.ts (real module)", () => {
       expect(result === null || typeof result === "object").toBe(true);
     });
 
-    it("should handle win32 platform", () => {
+    it("should handle win32 platform (returns null or object)", () => {
       const origPlatform = process.platform;
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
       const result = pasteImageFromClipboard();
       expect(result === null || typeof result === "object").toBe(true);
       Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+    });
+
+    it("should return decoded image on win32 when execSync returns base64 (lines 37-38)", () => {
+      const origPlatform = process.platform;
+      const fakePng = Buffer.from("fake-png-data");
+      const base64 = fakePng.toString("base64");
+      mockExecSync.mockReturnValue(base64);
+      try {
+        Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+        const result = pasteImageFromClipboard();
+        expect(result).not.toBeNull();
+        expect(result!.format).toBe("png");
+        expect(result!.data.toString()).toBe("fake-png-data");
+      } finally {
+        Object.defineProperty(process, "platform", { value: origPlatform, configurable: true });
+        mockExecSync.mockReset();
+      }
     });
 
     it("should handle darwin platform", () => {
@@ -183,6 +219,14 @@ describe("imagePaste.ts (real module)", () => {
     it("returns null on read error", () => {
       const img = loadImageFromFile("/dev/null/../invalid\x00path");
       expect(img === null || typeof img === "object").toBe(true);
+    });
+
+    it("returns null when readFileSync throws after existsSync succeeds (line 86)", () => {
+      const filePath = path.join(tmpDir, "exists_but_fail.png");
+      fs.writeFileSync(filePath, "x");
+      imagePasteReadSpy = () => { throw new Error("read failed"); };
+      const img = loadImageFromFile(filePath);
+      expect(img).toBeNull();
     });
   });
 

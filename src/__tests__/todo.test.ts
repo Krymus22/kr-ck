@@ -37,6 +37,20 @@ describe("todoWrite", () => {
     expect(getTodos()).toHaveLength(1);
   });
 
+  it("sets todos from {todo: [...]} shape", () => {
+    const result = todoWrite({
+      todo: [
+        { status: "completed", content: "Done task", active_form: "Done" },
+        { status: "pending", content: "Pending task", active_form: "Pending" },
+      ],
+    });
+
+    expect(result).toContain("2 itens");
+    expect(getTodos()).toHaveLength(2);
+    expect(getTodos()[0].status).toBe("completed");
+    expect(getTodos()[1].status).toBe("pending");
+  });
+
   it("enforces single in_progress", () => {
     setTodos([
       { status: "in_progress", content: "First", active_form: "First" },

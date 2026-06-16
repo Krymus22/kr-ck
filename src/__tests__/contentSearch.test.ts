@@ -2,10 +2,23 @@
  * contentSearch.test.ts — Tests for grep/content search module.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { grepSearch, formatGrepResults } from "../contentSearch.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual: any = await importOriginal();
+  return {
+    ...actual,
+    readFileSync: (filePath: any, ...args: any[]) => {
+      if (typeof filePath === "string" && filePath.includes("unreadable")) {
+        throw new Error("EACCES: permission denied");
+      }
+      return actual.readFileSync(filePath, ...args);
+    },
+  };
+});
 
 const TEST_DIR = path.join(process.cwd(), "__test_grepdir__");
 
@@ -89,5 +102,99 @@ describe("formatGrepResults", () => {
     }));
     const formatted = formatGrepResults(manyResults, 10);
     expect(formatted).toContain("mais 90 resultados");
+  });
+
+  it("should format context lines before and after match", () => {
+    const results = [
+      {
+        file: "src/main.ts",
+        line: 5,
+        content: "TARGET_LINE",
+        before: ["context_before_1", "context_before_2"],
+        after: ["context_after_1", "context_after_2"],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    expect(formatted).toContain("context_before_1");
+    expect(formatted).toContain("context_before_2");
+    expect(formatted).toContain("TARGET_LINE");
+    expect(formatted).toContain("context_after_1");
+    expect(formatted).toContain("context_after_2");
+  });
+
+  it("should format match with only before context", () => {
+    const results = [
+      {
+        file: "src/main.ts",
+        line: 3,
+        content: "MIDDLE",
+        before: ["above"],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    expect(formatted).toContain("above");
+    expect(formatted).toContain("MIDDLE");
+    expect(formatted).not.toContain("after");
+  });
+
+  it("should format match with only after context", () => {
+    const results = [
+      {
+        file: "src/main.ts",
+        line: 2,
+        content: "MIDDLE",
+        after: ["below"],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    expect(formatted).toContain("MIDDLE");
+    expect(formatted).toContain("below");
+  });
+
+  it("should handle empty before/after arrays", () => {
+    const results = [
+      {
+        file: "src/main.ts",
+        line: 1,
+        content: "LINE",
+        before: [],
+        after: [],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    expect(formatted).toContain("LINE");
+  });
+
+  it("should use correct line numbers for context lines", () => {
+    const results = [
+      {
+        file: "file.ts",
+        line: 10,
+        content: "match",
+        before: ["line8", "line9"],
+        after: ["line11"],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    // formatGrepResults uses: m.line - m.before.indexOf(b) - 1
+    // "line8" index=0 => 10-0-1=9; "line9" index=1 => 10-1-1=8
+    expect(formatted).toContain("file.ts:9: line8");
+    expect(formatted).toContain("file.ts:8: line9");
+    expect(formatted).toContain("file.ts:10: match");
+    expect(formatted).toContain("file.ts:11: line11");
+  });
+
+  it("should return empty for invalid regex pattern", () => {
+    const results = grepSearch({ pattern: "[", path: TEST_DIR });
+    expect(results.length).toBe(0);
+  });
+
+  it("should skip files that cannot be read", () => {
+    const testFile = path.join(TEST_DIR, "unreadable.txt");
+    fs.writeFileSync(testFile, "SECRET_DATA\n", "utf8");
+
+    const results = grepSearch({ pattern: "SECRET", path: testFile });
+    expect(results.length).toBe(0);
+    fs.unlinkSync(testFile);
   });
 });

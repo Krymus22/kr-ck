@@ -71,6 +71,32 @@ describe("saveConfig", () => {
     expect(() => saveConfig({ model: "test" })).not.toThrow();
     try { fs.rmSync(tempBlockDir, { recursive: true, force: true }); } catch {}
   });
+
+  it("should not throw when writeFileSync fails", async () => {
+    vi.resetModules();
+    vi.doMock("node:fs", () => ({
+      ...fs,
+      mkdirSync: vi.fn().mockReturnValue(undefined),
+      writeFileSync: vi.fn().mockImplementation(() => {
+        throw new Error("EPERM: permission denied");
+      }),
+      existsSync: vi.fn().mockReturnValue(true),
+      readFileSync: vi.fn().mockReturnValue("{}"),
+      unlinkSync: vi.fn(),
+      readdirSync: vi.fn().mockReturnValue([]),
+    }));
+    vi.doMock("../logger.js", () => ({
+      success: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    }));
+    const mod = await import("../dotfileConfig.js");
+    expect(() => mod.saveConfig({ model: "test" })).not.toThrow();
+    vi.doUnmock("node:fs");
+    vi.doUnmock("../logger.js");
+  });
 });
 
 describe("updateConfig", () => {

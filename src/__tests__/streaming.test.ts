@@ -80,6 +80,14 @@ describe("BufferedStreamProcessor", () => {
     const remaining = processor.forceFlush();
     expect(remaining).toBe("");
   });
+
+  it("isFlushed should return false before and after flush", () => {
+    const processor = new BufferedStreamProcessor(() => {}, 10);
+    expect(processor.isFlushed()).toBe(false);
+    processor.push("abc");
+    processor.flush();
+    expect(processor.isFlushed()).toBe(false);
+  });
 });
 
 describe("StreamThrottle", () => {
@@ -159,5 +167,35 @@ describe("StreamingMetrics", () => {
     const m = metrics.getMetrics();
     expect(m.ttft).toBeGreaterThanOrEqual(0);
     expect(m.totalTokens).toBe(1);
+  });
+
+  it("should return 0 for TTFT when onFirstToken not called", () => {
+    const metrics = new StreamingMetrics();
+    metrics.start();
+    expect(metrics.getTTFT()).toBe(0);
+  });
+
+  it("should handle TPS with tokens recorded in same millisecond", () => {
+    const metrics = new StreamingMetrics();
+    metrics.start();
+    metrics.onFirstToken();
+    for (let i = 0; i < 5; i++) metrics.onToken();
+    const tps = metrics.getTokensPerSecond();
+    expect(typeof tps).toBe("number");
+  });
+
+  it("should return 0 TPS when only one token recorded", () => {
+    const metrics = new StreamingMetrics();
+    metrics.start();
+    metrics.onFirstToken();
+    metrics.onToken();
+    expect(metrics.getTokensPerSecond()).toBe(0);
+  });
+
+  it("should return 0 TPS when no tokens recorded", () => {
+    const metrics = new StreamingMetrics();
+    metrics.start();
+    metrics.onFirstToken();
+    expect(metrics.getTokensPerSecond()).toBe(0);
   });
 });
