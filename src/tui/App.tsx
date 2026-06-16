@@ -55,8 +55,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
 
 type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean };
 
-// Module-level flag for hub command (set by handler, consumed by App)
-let pendingHubOpen = false;
+
 
 function handleExitCommand(): CommandResult {
   shutdownMCPServers();
@@ -170,8 +169,7 @@ function handleDistillCommand(): CommandResult {
 }
 
 function handleHubCommand(): CommandResult {
-  pendingHubOpen = true;
-  return { handled: true };
+  return { handled: true, openHub: true };
 }
 
 function handleToolsCommand(arg: string | null): CommandResult {
@@ -428,6 +426,9 @@ export function App() {
           return;
         }
         if (result.handled) {
+          if (result.openHub) {
+            setShowHub(true);
+          }
           if (result.message) {
             setSystemMessages((prev) => [...prev, result.message!]);
           }
@@ -528,13 +529,6 @@ export function App() {
     // Ctrl+E opens Extension Hub
     if (key.ctrl && inputChar === "e") {
       setShowHub((prev) => !prev);
-      return;
-    }
-
-    // Check pending hub open from slash command
-    if (pendingHubOpen) {
-      pendingHubOpen = false;
-      setShowHub(true);
       return;
     }
 
