@@ -314,11 +314,29 @@ function buildSearchQuery(req: ResearchRequest): string {
 /**
  * Pick the best source from search results.
  * Prefers trusted sources for the given language, then falls back to top result.
+ *
+ * ASYNC: merges built-in TRUSTED_SOURCES with any custom researchSources
+ * defined in the active mode. This lets mode authors add their preferred
+ * docs sites (e.g. terraform.io/docs for DevOps mode).
  */
-function pickBestSource(results: SearchResult[], language: string): SearchResult | null {
+async function pickBestSource(results: SearchResult[], language: string): Promise<SearchResult | null> {
   if (results.length === 0) return null;
 
-  const trusted = TRUSTED_SOURCES[language.toLowerCase()] ?? [];
+  // Built-in trusted sources
+  const builtIn = TRUSTED_SOURCES[language.toLowerCase()] ?? [];
+
+  // Merge with mode-specific custom sources (if any)
+  let custom: string[] = [];
+  try {
+    const { getActiveResearchSources } = await import("./modeExtensions.js");
+    const allSources = await getActiveResearchSources();
+    custom = allSources[language.toLowerCase()] ?? [];
+  } catch {
+    // modeExtensions not available - use built-in only
+  }
+
+  const trusted = [...builtIn, ...custom];
+
   for (const domain of trusted) {
     const match = results.find((r) => r.url.includes(domain));
     if (match) return match;
@@ -435,8 +453,8 @@ export async function researchApi(req: ResearchRequest): Promise<ResearchResult 
     };
   }
 
-  // 3. Pick best source and read it
-  const best = pickBestSource(searchResults, req.language);
+  // 3. Pick best source and read it (async - merges built-in + mode sources)
+  const best = await pickBestSource(searchResults, req.language);
   const sources = [best!.url];
   let rawContent = await webRead(best!.url);
 

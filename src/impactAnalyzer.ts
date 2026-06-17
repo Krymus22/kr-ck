@@ -127,12 +127,42 @@ function runCmd(
   });
 }
 
-/** Detect language based on file extension. */
+/** Detect language based on file extension (built-in only, sync). */
 function detectLanguage(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   for (const [lang, exts] of Object.entries(EXTENSIONS_BY_LANG)) {
     if (exts.includes(ext)) return lang;
   }
+  return "unknown";
+}
+
+/**
+ * Detect language based on file extension (async, merges built-in + mode custom).
+ *
+ * Checks built-in EXTENSIONS_BY_LANG first, then checks the active mode's
+ * symbolPatterns for custom language definitions (e.g. HCL for .tf files).
+ */
+async function detectLanguageAsync(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase();
+
+  // Check built-in first
+  for (const [lang, exts] of Object.entries(EXTENSIONS_BY_LANG)) {
+    if (exts.includes(ext)) return lang;
+  }
+
+  // Check custom mode patterns
+  try {
+    const { getActiveSymbolPatterns } = await import("./modeExtensions.js");
+    const customPatterns = await getActiveSymbolPatterns();
+    for (const cp of customPatterns) {
+      if (cp.extensions.includes(ext)) {
+        return cp.language;
+      }
+    }
+  } catch {
+    // modeExtensions not available
+  }
+
   return "unknown";
 }
 
@@ -214,6 +244,88 @@ export function extractSymbols(filePath: string, content: string): FileSymbol[] 
     );
   }
 
+  return extractSymbolsFromPatterns(lines, patterns);
+}
+
+/**
+ * Extract symbols using custom patterns from the active mode.
+ *
+ * This is the async version that merges built-in patterns with any custom
+ * symbolPatterns defined in the active mode. Used by analyzeImpact() so
+ * that mode authors can add support for new languages (HCL, Elixir, etc).
+ */
+async function extractSymbolsAsync(filePath: string, content: string): Promise<FileSymbol[]> {
+  const ext = path.extname(filePath).toLowerCase();
+  const lines = content.split("\n");
+
+  // Start with built-in patterns (same as extractSymbols)
+  const patterns: RegExp[] = [];
+  if (ext === ".luau" || ext === ".lua") {
+    patterns.push(
+      /^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*:/,
+      /^\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*=/,
+      /^\s*local\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^\s*local\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\b/,
+      /^\s*local\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*function\s*\(/,
+      /^\s*export\s+type\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/,
+    );
+  } else if (ext === ".ts" || ext === ".tsx" || ext === ".js" || ext === ".jsx" || ext === ".mjs" || ext === ".cjs") {
+    patterns.push(
+      /^\s*export\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^\s*export\s+const\s+([A-Za-z_][A-Za-z0-9_$]*)\s*=/,
+      /^\s*export\s+let\s+([A-Za-z_][A-Za-z0-9_$]*)\s*=/,
+      /^\s*export\s+class\s+([A-Za-z_][A-Za-z0-9_$]*)\b/,
+      /^\s*export\s+type\s+([A-Za-z_][A-Za-z0-9_$]*)\s*=/,
+      /^\s*export\s+interface\s+([A-Za-z_][A-Za-z0-9_$]*)\s*\{/,
+      /^\s*export\s+default\s+function\s+([A-Za-z_][A-Za-z0-9_$]*)?\s*\(/,
+    );
+  } else if (ext === ".py") {
+    patterns.push(
+      /^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*[\(:]/,
+    );
+  } else if (ext === ".rs") {
+    patterns.push(
+      /^\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^\s*pub\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\b/,
+      /^\s*pub\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)\b/,
+      /^\s*pub\s+trait\s+([A-Za-z_][A-Za-z0-9_]*)\b/,
+    );
+  } else if (ext === ".go") {
+    patterns.push(
+      /^func\s+(?:\([^)]*\)\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      /^type\s+([A-Za-z_][A-Za-z0-9_]*)\s/,
+    );
+  }
+
+  // Merge with custom patterns from active mode
+  try {
+    const { getActiveSymbolPatterns } = await import("./modeExtensions.js");
+    const customPatterns = await getActiveSymbolPatterns();
+    for (const cp of customPatterns) {
+      // Check if this custom pattern's extensions include the current file's extension
+      if (cp.extensions.includes(ext)) {
+        for (const patternStr of cp.patterns) {
+          try {
+            patterns.push(new RegExp(patternStr));
+          } catch {
+            // Skip invalid regex
+          }
+        }
+      }
+    }
+  } catch {
+    // modeExtensions not available
+  }
+
+  return extractSymbolsFromPatterns(lines, patterns);
+}
+
+/** Common symbol extraction logic shared by sync and async versions. */
+function extractSymbolsFromPatterns(lines: string[], patterns: RegExp[]): FileSymbol[] {
+  const symbols: FileSymbol[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     for (const pattern of patterns) {
@@ -254,7 +366,21 @@ async function findUsages(
   targetFile: string,
   language: string
 ): Promise<SymbolUsage[]> {
-  const extensions = EXTENSIONS_BY_LANG[language] ?? [];
+  // Get extensions: built-in first, then check mode custom patterns
+  let extensions = EXTENSIONS_BY_LANG[language] ?? [];
+  if (extensions.length === 0) {
+    // Try mode-specific custom patterns
+    try {
+      const { getActiveSymbolPatterns } = await import("./modeExtensions.js");
+      const customPatterns = await getActiveSymbolPatterns();
+      const custom = customPatterns.find((cp) => cp.language === language);
+      if (custom) {
+        extensions = custom.extensions;
+      }
+    } catch {
+      // modeExtensions not available
+    }
+  }
   if (extensions.length === 0) return [];
 
   // Build ripgrep glob patterns
@@ -422,14 +548,14 @@ export async function analyzeImpact(
     return empty;
   }
 
-  // Detect language
-  const language = detectLanguage(targetFile);
+  // Detect language (async - merges built-in + mode-specific extensions)
+  const language = await detectLanguageAsync(targetFile);
   if (language === "unknown") {
     return { ...empty, durationMs: Date.now() - start };
   }
 
-  // Extract symbols
-  const symbols = extractSymbols(targetFile, content);
+  // Extract symbols (async - merges built-in + mode-specific patterns)
+  const symbols = await extractSymbolsAsync(targetFile, content);
   if (symbols.length === 0) {
     const report = { ...empty, durationMs: Date.now() - start };
     return report;
