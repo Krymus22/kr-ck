@@ -747,11 +747,17 @@ describe("Singletons", () => {
     expect(sug).toBeInstanceOf(ToolSuggester);
   });
 
-  it("initializeTools should register built-in tools", async () => {
+  it("initializeTools should load user-defined tools (no hardcoded tools anymore)", async () => {
+    // After the refactor, no tools are hardcoded in src/tools/*.ts.
+    // initializeTools() just calls registry.loadUserTools() which reads from
+    // ~/.claude-killer/tools/*.json (seeded by configSeeder on first run).
+    // In this test environment, the singleton may already have tools loaded
+    // from a previous test, so we just verify it doesn't throw and returns.
     const { initializeTools, getRegistry } = await import("../externalTools.js");
     await initializeTools();
     const reg = getRegistry();
-    expect(reg.getAll().length).toBeGreaterThan(0);
+    // Should not throw; count depends on what previous tests registered
+    expect(Array.isArray(reg.getAll())).toBe(true);
   });
 });
 

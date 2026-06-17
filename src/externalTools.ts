@@ -98,13 +98,15 @@ export interface ToolInvocation {
 export class ToolRegistry {
   private readonly tools: Map<string, Tool> = new Map();
   private readonly userToolsPath: string;
+  private readonly userToolsDir: string;
   
   constructor() {
-    this.userToolsPath = path.join(
+    const base = path.join(
       process.env.HOME ?? process.env.USERPROFILE ?? "",
-      ".claude-killer",
-      "tools.json"
+      ".claude-killer"
     );
+    this.userToolsPath = path.join(base, "tools.json");
+    this.userToolsDir = path.join(base, "tools");
   }
   
   /**
@@ -269,72 +271,84 @@ export class ToolRegistry {
   }
   
   /**
-   * Load user-defined tools from file
+   * Load user-defined tools from `~/.claude-killer/tools.json` (legacy single file).
+   * Preserves the original category from JSON (e.g. "roblox") instead of forcing "custom".
    */
   loadUserTools(): void {
     try {
-      if (!fs.existsSync(this.userToolsPath)) {
-        // Create default tools.json with example
-        this.createDefaultToolsFile();
+      // New: prefer loading from the tools/ directory (one file per CLI binary).
+      // This keeps user extensions organized and avoids one giant JSON.
+      const loadedFromDir = this.loadToolsFromDir();
+      if (loadedFromDir > 0) {
+        log.info(`Loaded ${loadedFromDir} tools from ${this.userToolsDir}`);
         return;
       }
-      
+
+      // Fallback: legacy single-file tools.json (for backward compatibility)
+      if (!fs.existsSync(this.userToolsPath)) {
+        return;
+      }
+
       const data = fs.readFileSync(this.userToolsPath, "utf-8");
       const userTools = JSON.parse(data) as Tool[];
-      
-      // Validate and register each tool
+
       let loadedCount = 0;
       for (const tool of userTools) {
         if (this.validateUserTool(tool)) {
-          tool.category = "custom";
+          // Preserve original category if present (roblox, python, etc.).
+          // Only fall back to "custom" when JSON omits category entirely.
+          if (!tool.category || tool.category === "custom") {
+            tool.category = "custom";
+          }
           this.register(tool);
           loadedCount++;
         } else {
           log.warn(`Skipped invalid user tool: ${tool.name ?? "unnamed"}`);
         }
       }
-      
+
       log.info(`Loaded ${loadedCount} user-defined tools from ${this.userToolsPath}`);
     } catch (error) {
       log.error(`Failed to load user tools: ${error}`);
     }
   }
-  
+
   /**
-   * Create default tools.json with example
+   * Load tools from `~/.claude-killer/tools/*.json` directory.
+   * Each file may contain a single Tool object or an array of Tools.
+   * Returns the number of tools successfully loaded.
    */
-  private createDefaultToolsFile(): void {
+  private loadToolsFromDir(): number {
     try {
-      const dir = path.dirname(this.userToolsPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      
-      const defaultTools: Partial<Tool>[] = [
-        {
-          name: "example_custom_tool",
-          description: "Example custom tool - edit this file to add your own tools",
-          command: "echo",
-          args: ["Hello from custom tool!"],
-          flags: [],
-          detection: { method: "binary", check: "echo --version" },
-          context: {
-            whenToUse: ["example", "custom tool"],
-            examples: ["echo Hello from custom tool!"]
-          },
-          outputParser: "raw"
+      if (!fs.existsSync(this.userToolsDir)) return 0;
+      const files = fs.readdirSync(this.userToolsDir).filter((f) => f.endsWith(".json"));
+      if (files.length === 0) return 0;
+
+      let count = 0;
+      for (const file of files) {
+        const filePath = path.join(this.userToolsDir, file);
+        try {
+          const data = fs.readFileSync(filePath, "utf-8");
+          const parsed = JSON.parse(data);
+          const tools: Tool[] = Array.isArray(parsed) ? parsed : [parsed];
+          for (const tool of tools) {
+            if (this.validateUserTool(tool)) {
+              if (!tool.category || tool.category === "custom") {
+                tool.category = "custom";
+              }
+              this.register(tool);
+              count++;
+            } else {
+              log.warn(`Skipped invalid tool in ${file}: ${tool.name ?? "unnamed"}`);
+            }
+          }
+        } catch (err) {
+          log.warn(`Failed to parse ${file}: ${(err as Error).message}`);
         }
-      ];
-      
-      fs.writeFileSync(
-        this.userToolsPath,
-        JSON.stringify(defaultTools, null, 2),
-        "utf-8"
-      );
-      
-      log.info(`Created default tools file: ${this.userToolsPath}`);
-    } catch (error) {
-      log.error(`Failed to create default tools file: ${error}`);
+      }
+      return count;
+    } catch {
+      return 0;
     }
   }
   
@@ -760,25 +774,19 @@ export function getSuggester(): ToolSuggester {
 }
 
 /**
- * Initialize the tool system
+ * Initialize the tool system.
+ *
+ * No tools are hardcoded anymore — everything is loaded from external JSON
+ * files at `~/.claude-killer/tools/*.json`. The seed step (see configSeeder.ts)
+ * copies bundled defaults (Roblox CLI tools) into that directory on first run.
+ *
+ * Note: getRegistry() already calls loadUserTools() lazily on first access,
+ * so this function is mostly a no-op for backward compat. It exists so callers
+ * can explicitly initialize before the first getRegistry() call.
  */
 export async function initializeTools(): Promise<void> {
   const registry = getRegistry();
-  
-  // Load built-in tools
-  const { ROBLOX_TOOLS } = await import("./tools/roblox.js");
-  const { PYTHON_TOOLS } = await import("./tools/python.js");
-  const { NODE_TOOLS } = await import("./tools/node.js");
-  const { RUST_TOOLS } = await import("./tools/rust.js");
-  const { GO_TOOLS } = await import("./tools/go.js");
-  const { DOCKER_TOOLS } = await import("./tools/docker.js");
-  
-  registry.registerAll(ROBLOX_TOOLS);
-  registry.registerAll(PYTHON_TOOLS);
-  registry.registerAll(NODE_TOOLS);
-  registry.registerAll(RUST_TOOLS);
-  registry.registerAll(GO_TOOLS);
-  registry.registerAll(DOCKER_TOOLS);
-  
+  // getRegistry() already calls loadUserTools() on first construction,
+  // so we don't need to call it again here.
   log.info(`Initialized ${registry.getAll().length} external tools`);
 }

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "wally_package_types",
+    "description": "Generate TypeScript/Luau type definitions for installed Wally packages",
+    "category": "roblox",
+    "command": "wally-package-types",
+    "args": [],
+    "flags": [
+      { "name": "packages", "type": "string", "description": "Path to Packages directory (default: Packages/)" },
+      { "name": "--output", "type": "string", "description": "Output type definitions file" }
+    ],
+    "detection": { "method": "binary", "check": "wally-package-types --version" },
+    "context": {
+      "whenToUse": ["generate types", "wally types", "package type definitions", "lsp types"],
+      "requiresProject": ["wally.toml"],
+      "examples": ["wally-package-types Packages/"]
+    },
+    "outputParser": "raw"
+  }
+]

@@ -16,6 +16,7 @@ import { render } from "ink";
 import { App } from "./tui/App.js";
 import { loadAllExtensions, shutdownMCPServers } from "./extensions.js";
 import { execSync } from "node:child_process";
+import { seedUserConfig } from "./configSeeder.js";
 
 // --- Force UTF-8 on Windows ----------------------------------------------
 // Windows cmd.exe defaults to cp1252 which breaks Unicode characters.
@@ -31,6 +32,10 @@ if (process.platform === "win32") {
 // --- Entry Point ---------------------------------------------------------
 
 async function main(): Promise<void> {
+  // Seed bundled defaults (Roblox CLI tools, library skills) on first run.
+  // After this, the user owns everything in ~/.claude-killer/ and can edit/delete freely.
+  seedUserConfig();
+
   // Load skills and start MCP servers before rendering
   await loadAllExtensions();
 
