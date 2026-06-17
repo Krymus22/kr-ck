@@ -145,6 +145,40 @@ export async function editFile(
     }
   }
 
+  // --- Safety review (NEW) ---
+  // If the active mode has safetyReview=true, run LLM-based review on .luau/.lua
+  // files. Heuristics first (regex for dangerous patterns), LLM only if patterns
+  // match. High-risk writes are BLOCKED.
+  if (ext === ".luau" || ext === ".lua") {
+    try {
+      const { getActiveMode } = await import("./modes.js");
+      const mode = getActiveMode();
+      if (mode?.safetyReview) {
+        const { reviewCodeSafety, formatSafetyReview, shouldReviewFile } =
+          await import("./safetyReviewer.js");
+        if (shouldReviewFile(resolved)) {
+          const review = await reviewCodeSafety(result.content, resolved);
+          log.info(`[SAFETY] risk=${review.risk} reviewedByLlm=${review.reviewedByLlm} patterns=${review.patternsMatched.length} (${review.durationMs}ms)`);
+
+          if (review.risk === "high") {
+            const msg = formatSafetyReview(review);
+            log.toolResult("editar_arquivo", false, "safety review blocked");
+            return `[ERRO] Revisor de segurança bloqueou a edição.\n\n${msg}`;
+          }
+
+          // Log low/none reviews as info (not blocking)
+          const reviewMsg = formatSafetyReview(review);
+          if (reviewMsg) {
+            log.info(`[SAFETY] ${reviewMsg}`);
+          }
+        }
+      }
+    } catch (err) {
+      // Don't block writes if safety reviewer crashes
+      log.warn(`fileEdit: safety review skipped: ${(err as Error).message}`);
+    }
+  }
+
   // Backup original
   if (options?.backup && fs.existsSync(resolved)) {
     const backupPath = resolved + ".bak";

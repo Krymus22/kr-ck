@@ -79,6 +79,11 @@ export interface ModeDefinition {
    * for current API docs before writing code, and on selene false positives). */
   autoResearch?: boolean;
 
+  /** Whether to enable LLM-based safety review before writing .luau/.lua files.
+   * When true, a second LLM call reviews code for data-destructive operations
+   * (DataStore:RemoveAsync, profile.Data =, etc). High-risk writes are BLOCKED. */
+  safetyReview?: boolean;
+
   /** For user modes: the original prompt the user gave when creating */
   userPrompt?: string;
   /** When this mode was created (ISO date) */
