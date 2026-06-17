@@ -747,11 +747,11 @@ function createStreamRequest(
     tools: tools ?? TOOL_DEFINITIONS,
     tool_choice: "auto",
     // IDEIA 6: NVIDIA NIM (OpenAI-compatible) supports parallel tool calls.
-    // Setting this explicitly tells the model it CAN batch multiple read-only
-    // tools in a single response, which we parallelize in processToolCalls.
     parallel_tool_calls: true,
     stream: true,
-    max_tokens: 16384,
+    max_tokens: config.maxTokens,
+    temperature: config.temperature,
+    top_p: config.topP,
     chat_template_kwargs: { thinking_mode: "enabled" },
   } as any);
 }
