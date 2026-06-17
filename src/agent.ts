@@ -139,6 +139,34 @@ function getMergedTools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
   return allTools;
 }
 
+/**
+ * Public accessor for the merged tool list (used by sub-agents).
+ * Includes TOOL_DEFINITIONS + external tools + think tool + MCP tools,
+ * all with poka-yoke expanded descriptions.
+ */
+export function getMergedToolsPublic(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  return getMergedTools();
+}
+
+/**
+ * Public accessor for the tool dispatcher (used by sub-agents).
+ * Delegates to the internal dispatchToolCall function.
+ *
+ * The sub-agent passes the same tool calls it would to the main dispatcher,
+ * and gets back the same result. This means sub-agents have access to ALL
+ * tools (write, edit, git, test, etc) with full safety checks (read-before-
+ * write, schema validation, poka-yoke, etc).
+ *
+ * The sub-agent inherits the file lock from the same module - so if both
+ * the main agent and a sub-agent try to edit the same file, one will wait.
+ */
+export async function dispatchToolCallPublic(
+  toolCall: ToolCall,
+  healRetry: number = 0
+): Promise<ToolResult> {
+  return dispatchToolCall(toolCall, healRetry);
+}
+
 function getExternalToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool[] {
   return [
     {

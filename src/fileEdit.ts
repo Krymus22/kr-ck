@@ -68,6 +68,10 @@ export function applyEdits(content: string, edits: EditOperation[]): EditResult 
  * Luau/Lua files (when mode has luauValidation rules) are validated BEFORE
  * the write happens. If a blocking rule fails, the write is aborted and the
  * error is returned to the AI.
+ *
+ * File lock: acquires a lock on the target file before editing, so multiple
+ * agents (main + sub-agents in powerful mode) can't edit the same file
+ * simultaneously. Lock auto-releases after 30s TTL (or on function exit).
  */
 export async function editFile(
   filePath: string,
@@ -77,22 +81,36 @@ export async function editFile(
   const resolved = path.resolve(filePath);
   log.toolCall("editar_arquivo", { caminho: resolved, numEdits: edits.length });
 
-  let content = "";
-  if (fs.existsSync(resolved)) {
-    content = fs.readFileSync(resolved, "utf8");
-  } else if (options?.createIfMissing) {
-    // content is already ""
-  } else {
-    return `[ERRO] Arquivo não encontrado: ${resolved}`;
+  // --- File lock (acquire before any work) ---
+  // Prevents race conditions when main + sub-agents edit the same file.
+  // Lock auto-releases on TTL or function exit (via finally block).
+  const { acquireLock, getCurrentAgentId } = await import("./fileLock.js");
+  const holderId = getCurrentAgentId();
+  let releaseLock: (() => void) | null = null;
+  try {
+    releaseLock = await acquireLock(resolved, holderId, 30_000, 60_000);
+  } catch (err) {
+    log.warn(`fileEdit: could not acquire lock for ${resolved}: ${(err as Error).message}`);
+    return `[ERRO] Não foi possível obter lock no arquivo: ${(err as Error).message}`;
   }
 
-  const original = content;
-  const result = applyEdits(content, edits);
+  try {
+    let content = "";
+    if (fs.existsSync(resolved)) {
+      content = fs.readFileSync(resolved, "utf8");
+    } else if (options?.createIfMissing) {
+      // content is already ""
+    } else {
+      return `[ERRO] Arquivo não encontrado: ${resolved}`;
+    }
 
-  if (!result.success) {
-    log.toolResult("editar_arquivo", false, result.error);
-    return `[ERRO] Edição falhou: ${result.error}`;
-  }
+    const original = content;
+    const result = applyEdits(content, edits);
+
+    if (!result.success) {
+      log.toolResult("editar_arquivo", false, result.error);
+      return `[ERRO] Edição falhou: ${result.error}`;
+    }
 
   // --- Impact analysis (NEW) ---
   // Before writing, find all OTHER files in the project that reference
@@ -198,6 +216,10 @@ export async function editFile(
     msg += `\n\n${impactHint}`;
   }
   return msg;
+  } finally {
+    // Always release the file lock (even on early returns above)
+    if (releaseLock) releaseLock();
+  }
 }
 
 function countOccurrences(text: string, search: string): number {

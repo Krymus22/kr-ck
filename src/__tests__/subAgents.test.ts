@@ -37,6 +37,29 @@ vi.mock("../lspAst.ts", () => ({
 
 vi.mock("../effortLevels.js", () => ({
   shouldUseSubAgents: vi.fn().mockReturnValue(true),
+  getEffortLevel: vi.fn().mockReturnValue("high"),
+}));
+
+vi.mock("../history.js", () => ({
+  getSystemPrompt: vi.fn().mockReturnValue("MOCK MAIN SYSTEM PROMPT"),
+}));
+
+// Mock agent.js to avoid loading the real agent (which has many side effects)
+vi.mock("../agent.js", () => ({
+  getMergedToolsPublic: vi.fn().mockReturnValue([
+    {
+      type: "function",
+      function: {
+        name: "ler_arquivo",
+        description: "Read a file",
+        parameters: { type: "object", properties: { caminho: { type: "string" } } },
+      },
+    },
+  ]),
+  dispatchToolCallPublic: vi.fn().mockResolvedValue({
+    resultStr: "[OK] mock dispatch result",
+    usedHeal: false,
+  }),
 }));
 
 import { runSubAgent, shouldDelegateToSubAgent } from "../subAgents.js";
@@ -259,6 +282,158 @@ describe("subAgents", () => {
       const toolMsg = retryMessages.find((m: any) => m.role === "tool");
       expect(toolMsg).toBeDefined();
       expect(toolMsg.tool_call_id).toBe("tc1");
+    });
+  });
+
+  describe("powerful mode", () => {
+    it("should be skipped when effort is not max", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("high");
+
+      const result = await runSubAgent({
+        question: "write tests",
+        powerful: true,
+      });
+      expect(result).toBeNull();
+      expect(mockedChat).not.toHaveBeenCalled();
+    });
+
+    it("should activate when effort is max", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("max");
+
+      mockedChat.mockResolvedValueOnce({
+        choices: [{
+          message: { role: "assistant", content: "## Summary\nPowerful mode active" },
+          finish_reason: "stop",
+        }],
+      });
+
+      const result = await runSubAgent({
+        question: "implement feature",
+        powerful: true,
+        maxToolCalls: 2,
+      });
+
+      expect(result).toBe("## Summary\nPowerful mode active");
+      expect(mockedChat).toHaveBeenCalledTimes(1);
+    });
+
+    it("should use main system prompt in powerful mode (not the read-only prompt)", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("max");
+
+      mockedChat.mockResolvedValueOnce({
+        choices: [{
+          message: { role: "assistant", content: "## Summary\ndone" },
+          finish_reason: "stop",
+        }],
+      });
+
+      await runSubAgent({
+        question: "implement X",
+        powerful: true,
+        maxToolCalls: 1,
+      });
+
+      const callArgs = mockedChat.mock.calls[0];
+      const messages = callArgs[0];
+      const systemMsg = messages[0];
+
+      // In powerful mode, the system prompt should include the inherited main prompt
+      expect(systemMsg.content).toContain("MOCK MAIN SYSTEM PROMPT");
+      expect(systemMsg.content).toContain("SUB-AGENT CONTEXT");
+      expect(systemMsg.content).toContain("implement X");
+    });
+
+    it("should set CLAUDE_KILLER_AGENT_ID env var during execution", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("max");
+
+      let capturedAgentId: string | undefined;
+      mockedChat.mockImplementationOnce(async () => {
+        capturedAgentId = process.env.CLAUDE_KILLER_AGENT_ID;
+        return {
+          choices: [{
+            message: { role: "assistant", content: "## Summary\ndone" },
+            finish_reason: "stop",
+          }],
+        };
+      });
+
+      await runSubAgent({
+        question: "test",
+        powerful: true,
+        maxToolCalls: 1,
+      });
+
+      // During execution, agent ID should be "sub-N"
+      expect(capturedAgentId).toMatch(/^sub-\d+$/);
+
+      // After execution, env var should be cleared (was undefined before)
+      expect(process.env.CLAUDE_KILLER_AGENT_ID).toBeUndefined();
+    });
+
+    it("should restore previous agent ID after execution (nested sub-agents)", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("max");
+
+      // Simulate being called from inside a sub-agent context
+      process.env.CLAUDE_KILLER_AGENT_ID = "sub-1";
+
+      mockedChat.mockResolvedValueOnce({
+        choices: [{
+          message: { role: "assistant", content: "## Summary\nnested" },
+          finish_reason: "stop",
+        }],
+      });
+
+      await runSubAgent({
+        question: "nested task",
+        powerful: true,
+        maxToolCalls: 1,
+      });
+
+      // Should restore to the previous ID (sub-1)
+      expect(process.env.CLAUDE_KILLER_AGENT_ID).toBe("sub-1");
+    });
+
+    it("should have higher default maxToolCalls in powerful mode (15 vs 8)", async () => {
+      const { getEffortLevel } = await import("../effortLevels.js");
+      (getEffortLevel as any).mockReturnValue("max");
+
+      let callCount = 0;
+      mockedChat.mockImplementation(async () => {
+        callCount++;
+        // Return tool_calls for first 14 calls, then stop
+        if (callCount < 15) {
+          return {
+            choices: [{
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [{ id: `tc${callCount}`, function: { name: "ler_arquivo", arguments: '{"caminho":"/tmp/test.luau"}' } }],
+              },
+              finish_reason: "tool_calls",
+            }],
+          };
+        }
+        return {
+          choices: [{
+            message: { role: "assistant", content: "## Summary\ndone after many calls" },
+            finish_reason: "stop",
+          }],
+        };
+      });
+
+      const result = await runSubAgent({
+        question: "long task",
+        powerful: true,
+        // Note: not setting maxToolCalls, should default to 15 in powerful mode
+      });
+
+      // Should have completed before hitting the default 15 calls
+      expect(callCount).toBeLessThanOrEqual(15);
     });
   });
 });

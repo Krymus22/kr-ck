@@ -48,6 +48,12 @@ export interface BackupRecord {
   size: number;
   /** Stable ID for the snapshot (used by desfazer_edicao) */
   id: string;
+  /**
+   * Which agent made the edit. "main" for the main agent, "sub-N" for sub-agents.
+   * Read from CLAUDE_KILLER_AGENT_ID env var (set by runSubAgent in subAgents.ts).
+   * Older backups without this field default to "main".
+   */
+  agentId?: string;
 }
 
 interface IndexFile {
@@ -253,6 +259,7 @@ export function saveBackup(
       timestamp,
       size: Buffer.byteLength(content, "utf8"),
       id,
+      agentId: process.env.CLAUDE_KILLER_AGENT_ID ?? "main",
     };
 
     // Write metadata
