@@ -881,7 +881,9 @@ describe("dream", () => {
         messages: [],
       });
     }
-    writeProjectMemory(testLocalConfig, "# Project\n### Auto-discovered patterns\n- Tool \"toolA\" used 5 times — consider optimizing workflow\n- Tool \"toolB\" used 5 times — consider optimizing workflow\n- Tool \"toolC\" used 5 times — consider optimizing workflow");
+    // Note: must use regular hyphen "-" (not em-dash "—") to match the format
+    // produced by extractPatterns() in memory.ts line 614.
+    writeProjectMemory(testLocalConfig, "# Project\n### Auto-discovered patterns\n- Tool \"toolA\" used 5 times - consider optimizing workflow\n- Tool \"toolB\" used 5 times - consider optimizing workflow\n- Tool \"toolC\" used 5 times - consider optimizing workflow");
     const result = await runDream(testLocalConfig);
     expect(result.updatedProjectMemory).toBe(false);
   });
