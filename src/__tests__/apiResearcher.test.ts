@@ -343,10 +343,11 @@ describe("apiResearcher - integration with modes (autoResearch)", () => {
     vi.resetModules();
   });
 
-  it("roblox built-in mode should have autoResearch=true", async () => {
+  it("roblox built-in mode should have autoResearch enabled (default true, not explicitly false)", async () => {
     const { getBuiltInModes } = await import("./../modes.js");
     const roblox = getBuiltInModes().find((m) => m.name === "roblox");
     expect(roblox).toBeDefined();
-    expect(roblox!.autoResearch).toBe(true);
+    // autoResearch defaults to true - mode doesn't need to set it explicitly
+    expect(roblox!.autoResearch).not.toBe(false);
   });
 });

@@ -303,11 +303,11 @@ describe("safetyReviewer - mode integration", () => {
     expect(roblox!.safetyReview).toBe(true);
   });
 
-  it("roblox mode should also have autoResearch=true (combined safety)", async () => {
+  it("roblox mode should have autoResearch enabled (default true) and safetyReview=true (combined safety)", async () => {
     const { getBuiltInModes } = await import("./../modes.js");
     const roblox = getBuiltInModes().find((m) => m.name === "roblox");
     expect(roblox!.safetyReview).toBe(true);
-    expect(roblox!.autoResearch).toBe(true);
+    expect(roblox!.autoResearch).not.toBe(false);
   });
 });
 

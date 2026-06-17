@@ -61,7 +61,6 @@
   "strictMode": true,
   "readBeforeWrite": true,
   "advancedThinking": true,
-  "autoResearch": true,
   "safetyReview": true,
 
   "luauValidation": [

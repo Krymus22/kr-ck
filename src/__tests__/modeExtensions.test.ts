@@ -393,7 +393,8 @@ describe("modeExtensions", () => {
       expect(roblox!.enableFeatures.length).toBe(14);
       expect(roblox!.effortLevel).toBe("high");
       expect(roblox!.strictMode).toBe(true);
-      expect(roblox!.autoResearch).toBe(true);
+      // autoResearch defaults to true (not set explicitly in roblox.json anymore)
+      expect(roblox!.autoResearch).not.toBe(false);
       expect(roblox!.safetyReview).toBe(true);
       expect(roblox!.luauValidation).toBeDefined();
       expect(roblox!.luauValidation!.length).toBe(4);

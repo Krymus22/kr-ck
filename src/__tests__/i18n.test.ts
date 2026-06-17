@@ -94,7 +94,7 @@ describe("i18n", () => {
     it("should return subcommands for /mode", async () => {
       const { getCommandI18n } = await import("./../i18n.js");
       const i18n = getCommandI18n("/mode");
-      expect(i18n.subcommands).toEqual(["roblox", "off", "create", "confirm"]);
+      expect(i18n.subcommands).toEqual(["roblox", "devops", "off", "create", "confirm", "new", "keep"]);
     });
 
     it("should return empty desc for unknown command", async () => {
@@ -135,7 +135,7 @@ describe("i18n", () => {
       const effort = cmds.find((c) => c.cmd === "/effort");
       expect(effort?.subcommands).toEqual(["low", "medium", "high", "max"]);
       const mode = cmds.find((c) => c.cmd === "/mode");
-      expect(mode?.subcommands).toEqual(["roblox", "off", "create", "confirm"]);
+      expect(mode?.subcommands).toEqual(["roblox", "devops", "off", "create", "confirm", "new", "keep"]);
     });
 
     it("should not include subcommands for commands without them", async () => {

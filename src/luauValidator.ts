@@ -154,16 +154,18 @@ export async function validateLuauBeforeWrite(
     return result; // no rules apply to this file type
   }
 
-  // Check if auto-research is enabled (mode has autoResearch flag).
-  // When true, selene false positives (unknown globals) include a hint
-  // telling the AI to call pesquisar_api_atualizada before "fixing".
-  let autoResearchEnabled = false;
+  // Check if auto-research is enabled.
+  // DEFAULT IS TRUE (always on) - API research is useful for ALL languages,
+  // not just Roblox. Modes can explicitly set autoResearch: false to disable.
+  let autoResearchEnabled = true;
   try {
     const { getActiveMode } = await import("./modes.js");
     const mode = getActiveMode();
-    autoResearchEnabled = !!mode?.autoResearch;
+    if (mode && mode.autoResearch === false) {
+      autoResearchEnabled = false;
+    }
   } catch {
-    // ignore - if modes module fails, default to false
+    // If modes module fails, keep default (true)
   }
 
   // Write proposed content to a temp file for validation

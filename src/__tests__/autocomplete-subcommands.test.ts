@@ -98,16 +98,19 @@ describe("autocomplete subcommands", () => {
     expect(matches[0].label).toBe("medium");
   });
 
-  it("should suggest all 4 mode subcommands when typing /mode + space", async () => {
+  it("should suggest all 7 mode subcommands when typing /mode + space", async () => {
     const { getLocalizedSlashCommands } = await import("./../i18n.js");
     const commands = getLocalizedSlashCommands();
     const matches = getMatches("/mode ", commands);
-    expect(matches.length).toBe(4);
+    expect(matches.length).toBe(7);
     const labels = matches.map((m) => m.label);
     expect(labels).toContain("roblox");
+    expect(labels).toContain("devops");
     expect(labels).toContain("off");
     expect(labels).toContain("create");
     expect(labels).toContain("confirm");
+    expect(labels).toContain("new");
+    expect(labels).toContain("keep");
   });
 
   it("should filter mode subcommands by prefix when typing /mode r", async () => {

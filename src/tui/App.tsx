@@ -60,7 +60,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = getSlashCommands().
   desc: c.desc,
 }));
 
-type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean };
+type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean };
 
 
 
@@ -387,16 +387,37 @@ function handleModeCommand(arg: string | null): CommandResult {
     };
   }
 
-  // /mode <name> - activate existing mode
-  const mode = getMode(arg);
+  // Parse: /mode <name> [new|keep]
+  //   new  = ativa modo + limpa chat (contexto fresh)
+  //   keep = ativa modo + mantém chat atual (default)
+  const parts = arg.split(/\s+/).filter(Boolean);
+  const modeName = parts[0]!;
+  const contextAction = parts[1]?.toLowerCase();  // "new" | "keep" | undefined
+
+  const mode = getMode(modeName);
   if (!mode) {
-    return { handled: true, message: `Modo "${arg}" não encontrado. Use: /mode (sem args) para listar.` };
+    return { handled: true, message: `Modo "${modeName}" não encontrado. Use: /mode (sem args) para listar.` };
   }
 
-  // Activate (returns Promise, but we show immediate feedback)
-  applyMode(arg).then((result) => {
+  // If no context action specified, ask the user which they want
+  if (!contextAction || (contextAction !== "new" && contextAction !== "keep")) {
+    return {
+      handled: true,
+      message:
+        `Ativando modo "${modeName}" (${mode.label})...\n\n` +
+        `Escolha uma opção:\n` +
+        `  /mode ${modeName} new   → Ativa modo + inicia chat novo (contexto limpo)\n` +
+        `  /mode ${modeName} keep  → Ativa modo + mantém chat atual (mesmo contexto)\n\n` +
+        `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
+        `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false} | ` +
+        `Validation: ${(mode.luauValidation?.length ?? 0) + (mode.validation?.length ?? 0)} regra(s)`,
+    };
+  }
+
+  // Activate the mode
+  const activatePromise = applyMode(modeName).then((result) => {
     if (result.success) {
-      console.log(`[modes] Modo "${arg}" ativado: ${result.toolsEnabled.length} tools, ${result.featuresEnabled.length} features`);
+      console.log(`[modes] Modo "${modeName}" ativado: ${result.toolsEnabled.length} tools, ${result.featuresEnabled.length} features`);
     } else {
       console.error(`[modes] Erro ao ativar: ${result.errors.join(", ")}`);
     }
@@ -404,13 +425,31 @@ function handleModeCommand(arg: string | null): CommandResult {
     console.error(`[modes] Falha: ${err.message}`);
   });
 
+  // Handle context action
+  if (contextAction === "new") {
+    // Clear chat history (same as /reset)
+    history.resetHistory();
+    return {
+      handled: true,
+      resetChat: true,
+      message:
+        `✅ Modo "${modeName}" (${mode.label}) ativado!\n` +
+        `🧹 Chat reiniciado - contexto limpo.\n\n` +
+        `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
+        `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false}\n\n` +
+        `Pronto para começar. O que você quer fazer?`,
+    };
+  }
+
+  // contextAction === "keep"
   return {
     handled: true,
-    message: `Ativando modo "${arg}" (${mode.label})...\n` +
-             `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
-             `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false} | ` +
-             `Validation: ${mode.luauValidation?.length ?? 0} regra(s)\n\n` +
-             `Verifique o Hub (Ctrl+E) para ver tudo ativado.`,
+    message:
+      `✅ Modo "${modeName}" (${mode.label}) ativado!\n` +
+      `💬 Chat mantido - contexto atual preservado.\n\n` +
+      `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
+      `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false}\n\n` +
+      `As ferramentas do modo foram adicionadas. Continue conversando.`,
   };
 }
 
@@ -721,6 +760,9 @@ export function App() {
     if (result.handled) {
       if (result.openHub) {
         setShowHub(true);
+      }
+      if (result.resetChat) {
+        setMessages([]);
       }
       if (result.message) {
         setSystemMessages((prev) => [...prev, result.message!]);

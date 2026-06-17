@@ -82,11 +82,11 @@ export const COMMAND_I18N: Record<string, Record<Language, CommandI18n>> = {
   "/mode": {
     en: {
       desc: "List/switch/create project modes",
-      subcommands: ["roblox", "off", "create", "confirm"],
+      subcommands: ["roblox", "devops", "off", "create", "confirm", "new", "keep"],
     },
     "pt-BR": {
       desc: "Listar/trocar/criar modos de projeto",
-      subcommands: ["roblox", "off", "create", "confirm"],
+      subcommands: ["roblox", "devops", "off", "create", "confirm", "new", "keep"],
     },
   },
   "/reset": {
