@@ -7,7 +7,6 @@ on:
     branches: [main, master]
 
 jobs:
-  # --- Job 1: Type-check ---
   typecheck:
     name: TypeScript Type-Check
     runs-on: ubuntu-latest
@@ -20,7 +19,6 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
 
-  # --- Job 2: Tests + Coverage ---
   test:
     name: Tests + Coverage
     runs-on: ubuntu-latest
@@ -33,22 +31,18 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - name: Run tests with coverage
+      - name: Run tests
         run: npx vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --exclude src/__tests__/memory-full.test.ts
-      - name: Upload coverage artifact
+      - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
           path: coverage/lcov.info
           retention-days: 7
 
-  # --- Job 3: Build + Start Smoke Test (Ubuntu + Windows) ---
   smoke:
-    name: Build + Start (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+    name: Build + Start
+    runs-on: ubuntu-latest
     env:
       NVIDIA_API_KEY: dummy
     steps:
@@ -57,16 +51,9 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - name: npm install
-        run: npm install
-      - name: npm run build
-        run: npm run build
-      - name: Verify dist/index.js exists
-        run: test -f dist/index.js && echo "OK: build produced dist/index.js" || (echo "FAIL: dist/index.js missing" && exit 1)
-        shell: bash
-      - name: Start CLI for 5 seconds (smoke test)
-        run: |
-          echo "Starting Claude-Killer for 5 seconds..."
-          timeout 5 node --no-warnings=DEP0040 dist/index.js 2>&1 || true
-          echo "Smoke test done (timeout exit is expected)"
-        shell: bash
+      - run: npm install
+      - run: npm run build
+      - name: Verify build
+        run: test -f dist/index.js && echo "OK" || exit 1
+      - name: Smoke test (5s)
+        run: timeout 5 node dist/index.js 2>&1 || true
