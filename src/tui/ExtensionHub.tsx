@@ -1,16 +1,17 @@
 /**
- * ExtensionHub.tsx - 3x3 grid panel for managing extensions.
+ * ExtensionHub.tsx - 3x3 grid panel for managing extensions and modes.
  *
  * Layout:
- *   - Category tabs at top: [Skills] [Tools] [MCPs] [Plugins] [All]
- *   - 3x3 grid of extension cards (9 visible)
+ *   - Category tabs at top: [All] [Skills] [Tools] [MCPs] [Plugins] [Features] [Modes]
+ *   - 3x3 grid of cards (9 visible)
+ *   - On "Modes" tab: shows project modes (Roblox, custom, ...) instead of extensions
  *   - Scroll indicator if >9 items
- *   - Bottom: keyboard shortcuts + stats
+ *   - Bottom: keyboard shortcuts + stats + active mode
  *
  * Keyboard:
  *   <- ->     Navigate between items
  *   ^ v     Scroll page
- *   Enter   Toggle enabled/disabled
+ *   Enter   Toggle enabled/disabled (extensions) | Activate mode (Modes tab)
  *   T       Cycle trigger mode
  *   1-4     Quick-set trigger mode (1=OFF, 2=FILE, 3=TASK, 4=EVERY)
  *   Tab     Switch category tab
@@ -34,6 +35,14 @@ import {
   type ExtensionCategory,
   type TriggerMode,
 } from "../extensionCenter.js";
+import {
+  getAllModes,
+  getActiveModeName,
+  getMode,
+  applyMode,
+  deactivateMode,
+  type ModeDefinition,
+} from "../modes.js";
 
 // --- Constants --------------------------------------------------------------
 
@@ -41,13 +50,16 @@ const GRID_COLS = 3;
 const GRID_ROWS = 3;
 const PAGE_SIZE = GRID_COLS * GRID_ROWS;
 
-const CATEGORIES: Array<{ key: ExtensionCategory | "all"; label: string }> = [
+type TabKey = ExtensionCategory | "all" | "modes";
+
+const CATEGORIES: Array<{ key: TabKey; label: string }> = [
   { key: "all", label: "All" },
   { key: "skill", label: "Skills" },
   { key: "tool", label: "Tools" },
   { key: "mcp", label: "MCPs" },
   { key: "plugin", label: "Plugins" },
   { key: "feature", label: "Features" },
+  { key: "modes", label: "Modes" },
 ];
 
 const TRIGGER_COLORS: Record<TriggerMode, string> = {
@@ -72,17 +84,30 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   const [renderKey, setRenderKey] = useState(0);
 
   const currentTab = CATEGORIES[tabIndex] ?? CATEGORIES[0];
-  const allItems = currentTab.key === "all"
-    ? getAllExtensions()
-    : getExtensionsByCategory(currentTab.key);
+  const isModesTab = currentTab.key === "modes";
 
-  const totalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
+  // For modes tab, use modes list; otherwise extensions
+  const allModes = isModesTab ? getAllModes() : [];
+  const activeModeName = isModesTab ? getActiveModeName() : null;
+
+  const allItems: readonly ExtensionEntry[] = isModesTab
+    ? []
+    : currentTab.key === "all"
+    ? getAllExtensions()
+    : getExtensionsByCategory(currentTab.key as ExtensionCategory);
+
+  // Total items in current tab (extensions or modes)
+  const totalItems = isModesTab ? allModes.length : allItems.length;
+
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
   const currentPage = Math.floor(scrollTop / PAGE_SIZE);
   const lastPageStart = Math.max(0, (totalPages - 1) * PAGE_SIZE);
-  const visibleItems = allItems.slice(scrollTop, scrollTop + PAGE_SIZE);
 
-  const clampCursor = useCallback((idx: number, items: readonly ExtensionEntry[]) => {
-    return Math.max(0, Math.min(idx, items.length - 1));
+  const visibleModes = isModesTab ? allModes.slice(scrollTop, scrollTop + PAGE_SIZE) : [];
+  const visibleItems = isModesTab ? [] : allItems.slice(scrollTop, scrollTop + PAGE_SIZE);
+
+  const clampCursor = useCallback((idx: number, max: number) => {
+    return Math.max(0, Math.min(idx, max - 1));
   }, []);
 
   // -- Keyboard handling -----------------------------------------------
@@ -99,24 +124,22 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   });
 
   function handleNavigation(key: { leftArrow?: boolean; rightArrow?: boolean; upArrow?: boolean; downArrow?: boolean; ctrl?: boolean }, inputChar: string) {
+    const maxItems = isModesTab ? visibleModes.length : visibleItems.length;
     if (key.leftArrow) {
-      setCursorIndex((prev) => clampCursor(prev - 1, visibleItems));
+      setCursorIndex((prev) => clampCursor(prev - 1, maxItems || 1));
     } else if (key.rightArrow) {
-      setCursorIndex((prev) => clampCursor(prev + 1, visibleItems));
+      setCursorIndex((prev) => clampCursor(prev + 1, maxItems || 1));
     } else if (key.upArrow && !key.ctrl) {
       if (cursorIndex >= GRID_COLS) {
-        setCursorIndex((prev) => clampCursor(prev - GRID_COLS, visibleItems));
+        setCursorIndex((prev) => clampCursor(prev - GRID_COLS, maxItems || 1));
       } else if (scrollTop > 0) {
-        // Go to previous page (always advance by full PAGE_SIZE)
         setScrollTop((prev) => Math.max(0, prev - PAGE_SIZE));
         setCursorIndex(0);
       }
     } else if (key.downArrow && !key.ctrl) {
-      if (cursorIndex < (visibleItems.length - GRID_COLS)) {
-        setCursorIndex((prev) => clampCursor(prev + GRID_COLS, visibleItems));
-      } else if (scrollTop + PAGE_SIZE < allItems.length) {
-        // Go to next page (always advance by full PAGE_SIZE, clamped to last page start)
-        // This prevents overlap between pages when total items aren't a multiple of PAGE_SIZE
+      if (cursorIndex < (maxItems - GRID_COLS)) {
+        setCursorIndex((prev) => clampCursor(prev + GRID_COLS, maxItems || 1));
+      } else if (scrollTop + PAGE_SIZE < totalItems) {
         setScrollTop((prev) => Math.min(prev + PAGE_SIZE, lastPageStart));
         setCursorIndex(0);
       }
@@ -125,12 +148,37 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
 
   function handleActions(key: { return?: boolean }, inputChar: string) {
     if (key.return || inputChar === " ") {
+      if (isModesTab) {
+        const mode = visibleModes[cursorIndex];
+        if (mode) {
+          // Activate the selected mode (async, but we trigger immediate re-render)
+          applyMode(mode.name).then((result) => {
+            if (result.success) {
+              setRenderKey((n) => n + 1);
+            }
+          }).catch(() => {
+            // ignore - logged by applyMode
+          });
+          setRenderKey((n) => n + 1);
+        }
+        return;
+      }
       const item = visibleItems[cursorIndex];
       if (item) {
         toggleExtension(item.id);
         setRenderKey((n) => n + 1);
       }
     }
+
+    // 'D' on Modes tab deactivates the current mode
+    if (isModesTab && (inputChar === "d" || inputChar === "D")) {
+      deactivateMode();
+      setRenderKey((n) => n + 1);
+      return;
+    }
+
+    if (isModesTab) return; // other shortcuts don't apply to modes
+
     if (inputChar === "t" || inputChar === "T") {
       const item = visibleItems[cursorIndex];
       if (item) {
@@ -152,6 +200,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
 
   // -- Render ----------------------------------------------------------
   const summary = getHubSummary();
+  const activeMode = getActiveModeName();
 
   return (
     <Box key={`hub-${renderKey}`} flexDirection="column" borderStyle="double" borderColor={colors.primary} paddingX={1}>
@@ -162,14 +211,28 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         </Text>
       </Box>
 
+      {/* Active mode indicator (if any) */}
+      {activeMode && (
+        <Box justifyContent="center">
+          <Text color={colors.success} bold>
+            Active mode: {activeMode}
+          </Text>
+        </Box>
+      )}
+
       {/* Category Tabs */}
       <Box justifyContent="center" gap={1} marginBottom={1}>
         {CATEGORIES.map((cat, i) => {
           const isActive = i === tabIndex;
           const catKey = cat.key;
-          const count = catKey === "all"
-            ? summary.total
-            : summary.byCategory[catKey]?.total ?? 0;
+          let count: number;
+          if (catKey === "all") {
+            count = summary.total;
+          } else if (catKey === "modes") {
+            count = getAllModes().length;
+          } else {
+            count = summary.byCategory[catKey as ExtensionCategory]?.total ?? 0;
+          }
           return (
             <Text
               key={cat.key}
@@ -184,12 +247,27 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         })}
       </Box>
 
-      {/* 3x3 Grid */}
+      {/* 3x3 Grid - either extensions or modes */}
       <Box flexDirection="column" gap={0}>
         {Array.from({ length: GRID_ROWS }, (_, row) => (
           <Box key={`row-${row}`} flexDirection="row" gap={1} justifyContent="center">
             {Array.from({ length: GRID_COLS }, (_, col) => {
               const idx = row * GRID_COLS + col;
+              if (isModesTab) {
+                const mode = visibleModes[idx];
+                if (!mode) {
+                  return <Box key={`empty-${col}`} width={22} />;
+                }
+                const isSelected = idx === cursorIndex;
+                return (
+                  <ModeCard
+                    key={mode.name}
+                    mode={mode}
+                    selected={isSelected}
+                    isActive={mode.name === activeModeName}
+                  />
+                );
+              }
               const item = visibleItems[idx];
               if (!item) {
                 return <Box key={`empty-${col}`} width={22} />;
@@ -220,7 +298,10 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       )}
 
       {/* Description of selected item (terminal equivalent of hover tooltip) */}
-      {visibleItems[cursorIndex] && (
+      {isModesTab && visibleModes[cursorIndex] && (
+        <ModeDescription mode={visibleModes[cursorIndex]} isActive={visibleModes[cursorIndex].name === activeModeName} />
+      )}
+      {!isModesTab && visibleItems[cursorIndex] && (
         <Box marginTop={1} paddingLeft={1} paddingRight={1} borderStyle="round" borderColor={colors.muted}>
           <Text color={colors.white} wrap="truncate">
             {visibleItems[cursorIndex].description || "No description available."}
@@ -231,12 +312,88 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       {/* Bottom bar */}
       <Box justifyContent="space-between" marginTop={1} borderTop borderTopColor={colors.muted}>
         <Text color={colors.muted} dimColor>
-          {"<->"} select  {"^v"} scroll  {"<-"} toggle  T mode  1-4 quick  Tab switch  Esc close
+          {isModesTab
+            ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
+            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  Tab switch  Esc close"}
         </Text>
         <Text color={colors.primary}>
-          {summary.enabled}/{summary.total} active
+          {isModesTab
+            ? `${allModes.length} modes${activeModeName ? ` | active: ${activeModeName}` : ""}`
+            : `${summary.enabled}/${summary.total} active`}
         </Text>
       </Box>
+    </Box>
+  );
+}
+
+// --- Mode Card ---------------------------------------------------------------
+
+function ModeCard({ mode, selected, isActive }: Readonly<{ mode: ModeDefinition; selected: boolean; isActive: boolean }>) {
+  const borderColor = selected ? colors.primary : (isActive ? colors.success : colors.muted);
+  const icon = mode.icon ?? "M";
+  const kind = mode.builtIn ? "BUILT-IN" : "USER";
+  const statusText = isActive ? "[ATIVO]" : `[${kind}]`;
+  const statusColor = isActive ? colors.success : (mode.builtIn ? colors.primary : colors.muted);
+
+  return (
+    <Box
+      width={22}
+      flexDirection="column"
+      borderStyle={selected ? "bold" : (isActive ? "bold" : "round")}
+      borderColor={borderColor}
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      {/* Name row */}
+      <Box>
+        <Text color={isActive ? colors.success : colors.white} bold={selected || isActive}>
+          {selected ? ">" : " "} {icon} {mode.name.slice(0, 14)}
+        </Text>
+      </Box>
+
+      {/* Status row */}
+      <Box>
+        <Text color={statusColor} bold={isActive}>
+          {statusText}
+        </Text>
+        <Text color={colors.muted}> </Text>
+        <Text color={colors.muted}>
+          T{mode.enableTools.length} S{mode.enableSkills.length} F{mode.enableFeatures.length}
+        </Text>
+      </Box>
+
+      {/* Label (truncated) */}
+      <Box>
+        <Text color={colors.muted} wrap="truncate">
+          {mode.label.slice(0, 19)}
+        </Text>
+      </Box>
+    </Box>
+  );
+}
+
+// --- Mode Description (tooltip) ---------------------------------------------
+
+function ModeDescription({ mode, isActive }: Readonly<{ mode: ModeDefinition; isActive: boolean }>) {
+  const lines: string[] = [];
+  lines.push(`${mode.label} (${mode.name})${isActive ? " - ATIVO" : ""}`);
+  lines.push(mode.description);
+  lines.push("");
+  lines.push(`Tools:     ${mode.enableTools.length}  |  Skills:     ${mode.enableSkills.length}  |  Features: ${mode.enableFeatures.length}`);
+  lines.push(`Effort:    ${mode.effortLevel ?? "default"}  |  Strict: ${mode.strictMode ?? false}  |  Read-before-write: ${mode.readBeforeWrite ?? false}`);
+  if (mode.luauValidation && mode.luauValidation.length > 0) {
+    lines.push(`Luau validation: ${mode.luauValidation.length} rule(s) - ${mode.luauValidation.map((r) => `${r.tool}${r.blocking ? "*" : ""}`).join(", ")}`);
+  }
+  if (mode.userPrompt) {
+    lines.push(`User prompt: "${mode.userPrompt}"`);
+  }
+  return (
+    <Box marginTop={1} paddingLeft={1} paddingRight={1} borderStyle="round" borderColor={colors.muted} flexDirection="column">
+      {lines.map((line, i) => (
+        <Text key={i} color={i === 0 ? colors.primary : colors.white} bold={i === 0} wrap="truncate">
+          {line}
+        </Text>
+      ))}
     </Box>
   );
 }
@@ -284,3 +441,4 @@ function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; sel
     </Box>
   );
 }
+
