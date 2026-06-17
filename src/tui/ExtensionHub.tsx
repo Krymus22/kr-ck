@@ -47,6 +47,7 @@ const CATEGORIES: Array<{ key: ExtensionCategory | "all"; label: string }> = [
   { key: "tool", label: "Tools" },
   { key: "mcp", label: "MCPs" },
   { key: "plugin", label: "Plugins" },
+  { key: "feature", label: "Features" },
 ];
 
 const TRIGGER_COLORS: Record<TriggerMode, string> = {

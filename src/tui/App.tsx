@@ -414,7 +414,18 @@ export function App() {
 
   // ── Discover extensions on mount ────────────────────────────────────
   useMemo(() => {
-    discoverExtensions();
+    // Initialize external tools registry BEFORE discovering extensions
+    // so the Hub can see all available tools (Roblox, Python, etc.)
+    import("../externalTools.js").then((mod) => {
+      mod.initializeTools().then(() => {
+        discoverExtensions();
+      }).catch(() => {
+        // If init fails, still discover what we can
+        discoverExtensions();
+      });
+    }).catch(() => {
+      discoverExtensions();
+    });
   }, []);
 
   // ── Update todos from shared state ─────────────────────────────────────

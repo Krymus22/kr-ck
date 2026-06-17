@@ -21,7 +21,7 @@ import * as log from "./logger.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type ExtensionCategory = "skill" | "tool" | "mcp" | "plugin";
+export type ExtensionCategory = "skill" | "tool" | "mcp" | "plugin" | "feature";
 export type TriggerMode = "disabled" | "on_file" | "on_task" | "always";
 
 export interface ExtensionEntry {
@@ -285,6 +285,9 @@ export function discoverExtensions(): void {
   // Discover MCP servers from config
   discoverMCPServers(entries);
 
+  // Discover Claude-Killer features (effort, strict mode, LSP, etc.)
+  discoverFeatures(entries);
+
   syncExtensions(entries);
   log.debug(`Extension Hub: discovered ${entries.length} extensions`);
 }
@@ -358,6 +361,115 @@ function discoverMCPServers(entries: Omit<ExtensionEntry, "enabled" | "triggerMo
   }
 }
 
+// ─── Feature Discovery ─────────────────────────────────────────────────────
+
+function discoverFeatures(entries: Omit<ExtensionEntry, "enabled" | "triggerMode">[]): void {
+  const features = [
+    {
+      id: "feature:think_tool",
+      name: "Think Tool",
+      description: "Structured reasoning space (pensar) before each write",
+      installed: true,
+      meta: { module: "thinkTool" },
+    },
+    {
+      id: "feature:read_before_write",
+      name: "Read-before-Write",
+      description: "Blocks edits on files that haven't been read first",
+      installed: true,
+      meta: { module: "readBeforeWrite" },
+    },
+    {
+      id: "feature:rollback",
+      name: "Auto Rollback",
+      description: "Saves backups in .rollback/ before each edit",
+      installed: true,
+      meta: { module: "rollbackStore" },
+    },
+    {
+      id: "feature:strict_gate",
+      name: "Strict Quality Gate",
+      description: "Blocks finish_reason until tsc + lint pass",
+      installed: true,
+      meta: { module: "strictQualityGate" },
+    },
+    {
+      id: "feature:schema_validation",
+      name: "Schema Validation",
+      description: "Validates tool args against JSON Schema before execution",
+      installed: true,
+      meta: { module: "toolSchemaValidation" },
+    },
+    {
+      id: "feature:poka_yoke",
+      name: "Poka-Yoke",
+      description: "Error-proofing: path validation, diff structure checks",
+      installed: true,
+      meta: { module: "pokaYoke" },
+    },
+    {
+      id: "feature:task_state",
+      name: "Task State",
+      description: "Structured TASK_STATE.md (done/todo/bugs/decisions)",
+      installed: true,
+      meta: { module: "taskState" },
+    },
+    {
+      id: "feature:self_validation",
+      name: "Self-Validation",
+      description: "Forces model to reflect before finish_reason",
+      installed: true,
+      meta: { module: "selfValidation" },
+    },
+    {
+      id: "feature:context_injection",
+      name: "Context Injection",
+      description: "Auto-injects TASK_STATE.md before each decision",
+      installed: true,
+      meta: { module: "contextInjector" },
+    },
+    {
+      id: "feature:auto_test",
+      name: "Auto-Test Gen",
+      description: "Suggests tests after each diff (skip Luau/Roblox)",
+      installed: true,
+      meta: { module: "autoTestGenerator" },
+    },
+    {
+      id: "feature:lsp",
+      name: "LSP Integration",
+      description: "Real LSP (tsserver/pylsp) with tree-sitter fallback",
+      installed: true,
+      meta: { module: "lspClient" },
+    },
+    {
+      id: "feature:sub_agents",
+      name: "Sub-Agents",
+      description: "Parallel exploration sub-agents with retry+checkpoint",
+      installed: true,
+      meta: { module: "subAgents" },
+    },
+    {
+      id: "feature:model_compaction",
+      name: "Model Compaction",
+      description: "LLM summarizes context preserving decisions/bugs",
+      installed: true,
+      meta: { module: "contextCompaction" },
+    },
+    {
+      id: "feature:multi_key_pool",
+      name: "Multi-Key Pool",
+      description: "Round-robin API key pool with 429 cooldown",
+      installed: true,
+      meta: { module: "apiKeyPool" },
+    },
+  ];
+
+  for (const f of features) {
+    entries.push({ ...f, category: "feature" });
+  }
+}
+
 // ─── UI Helpers ─────────────────────────────────────────────────────────────
 
 export function getTriggerLabel(mode: TriggerMode): string {
@@ -374,6 +486,7 @@ export function getCategoryIcon(category: ExtensionCategory): string {
     case "tool": return "🔧";
     case "mcp": return "🔌";
     case "plugin": return "🧩";
+    case "feature": return "⚙️";
   }
 }
 
@@ -383,6 +496,7 @@ export function getCategoryColor(category: ExtensionCategory): string {
     case "tool": return "#FBBF24";
     case "mcp": return "#A78BFA";
     case "plugin": return "#34D399";
+    case "feature": return "#60A5FA";
   }
 }
 
@@ -399,6 +513,7 @@ export function getHubSummary(): {
     tool: { total: 0, enabled: 0 },
     mcp: { total: 0, enabled: 0 },
     plugin: { total: 0, enabled: 0 },
+    feature: { total: 0, enabled: 0 },
   };
   const byTrigger: Record<TriggerMode, number> = {
     disabled: 0,
