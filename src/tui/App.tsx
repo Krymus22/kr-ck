@@ -20,9 +20,18 @@ import * as todo from "../todo.js";
 
 import { config } from "../config.js";
 import { shutdownMCPServers, getActiveSkills, getActiveMCPServers } from "../extensions.js";
-import { discoverExtensions } from "../extensionCenter.js";
+import { discoverExtensions, getAllExtensions } from "../extensionCenter.js";
 import { setEffortLevel, getEffortLabel } from "../effortLevels.js";
 import { getPoolSize } from "../apiKeyPool.js";
+import {
+  getAllModes,
+  getActiveModeName,
+  getMode,
+  applyMode,
+  deactivateMode,
+  suggestMode,
+  confirmAndSaveMode,
+} from "../modes.js";
 import { colors } from "./theme.js";
 import { icons } from "./icons.js";
 import { ChatDisplay, ChatMessage } from "./ChatDisplay.js";
@@ -40,6 +49,7 @@ type AppStatus = "idle" | "thinking" | "streaming";
 const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/help", desc: "Show help" },
   { cmd: "/hub", desc: "Extension Hub (control center)" },
+  { cmd: "/mode", desc: "List/switch/create project modes (roblox, custom, ...)" },
   { cmd: "/reset", desc: "Clear history" },
   { cmd: "/history", desc: "History summary" },
   { cmd: "/skills", desc: "List skills" },
@@ -269,6 +279,7 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/help": () => handleHelpCommand(),
   "/?": () => handleHelpCommand(),
   "/hub": () => handleHubCommand(),
+  "/mode": (arg) => handleModeCommand(arg),
   "/reset": () => handleResetCommand(),
   "/history": () => handleHistoryCommand(),
   "/skills": () => handleSkillsCommand(),
@@ -296,6 +307,119 @@ function handleEffortCommand(arg: string | null): CommandResult {
   }
   setEffortLevel(arg as any);
   return { handled: true, message: `Effort alterado para: ${getEffortLabel()}` };
+}
+
+function handleModeCommand(arg: string | null): CommandResult {
+  const allModes = getAllModes();
+  const activeName = getActiveModeName();
+
+  // No arg: list all modes
+  if (!arg) {
+    if (allModes.length === 0) {
+      return { handled: true, message: "Nenhum modo disponível. Use: /mode create <descrição>" };
+    }
+    const lines = allModes.map((m) => {
+      const active = m.name === activeName ? " [ATIVO]" : "";
+      const kind = m.builtIn ? "(built-in)" : "(user)";
+      return `  ${m.name.padEnd(20)} ${kind.padEnd(12)} ${m.label}${active}`;
+    });
+    return {
+      handled: true,
+      message: `Modos disponíveis:\n${lines.join("\n")}\n\n` +
+               `Ativo: ${activeName ?? "(nenhum)"}\n\n` +
+               `Use: /mode <nome> para ativar | /mode off para desativar | /mode create <descrição> para criar novo`,
+    };
+  }
+
+  // /mode off - deactivate
+  if (arg === "off" || arg === "none") {
+    deactivateMode();
+    return { handled: true, message: "Modo desativado. Nenhuma validação automática ativa." };
+  }
+
+  // /mode create <description> - AI-assisted mode creation
+  if (arg.startsWith("create ") || arg.startsWith("new ")) {
+    const prompt = arg.replace(/^(create|new)\s+/, "").trim();
+    if (!prompt) {
+      return { handled: true, message: "Descrição vazia. Use: /mode create <o que você quer fazer>" };
+    }
+
+    const all = getAllExtensions();
+    const suggestion = suggestMode({
+      prompt,
+      availableTools: all.filter((e) => e.category === "tool").map((e) => e.id),
+      availableSkills: all.filter((e) => e.category === "skill").map((e) => e.id),
+      availableFeatures: all.filter((e) => e.category === "feature").map((e) => e.id),
+    });
+
+    return {
+      handled: true,
+      message:
+        `Modo sugerido: ${suggestion.label} (${suggestion.name})\n\n` +
+        `Razão: ${suggestion.reasoning}\n\n` +
+        `Ferramentas a ativar (${suggestion.enableTools.length}):\n` +
+        suggestion.enableTools.map((t) => `  - ${t}`).join("\n") + "\n\n" +
+        `Skills a ativar (${suggestion.enableSkills.length}):\n` +
+        (suggestion.enableSkills.length > 0
+          ? suggestion.enableSkills.map((s) => `  - ${s}`).join("\n")
+          : "  (nenhuma)") + "\n\n" +
+        `Features a ativar (${suggestion.enableFeatures.length}):\n` +
+        suggestion.enableFeatures.map((f) => `  - ${f}`).join("\n") + "\n\n" +
+        `Configurações:\n` +
+        `  effort: ${suggestion.effortLevel}\n` +
+        `  strictMode: ${suggestion.strictMode}\n` +
+        `  readBeforeWrite: ${suggestion.readBeforeWrite}\n` +
+        `  advancedThinking: ${suggestion.advancedThinking}\n` +
+        (suggestion.luauValidation && suggestion.luauValidation.length > 0
+          ? `  luauValidation: ${suggestion.luauValidation.length} regra(s)\n`
+          : "") +
+        `\nPara confirmar e ativar: /mode confirm ${suggestion.name}\n` +
+        `Para cancelar: ignore esta mensagem`,
+    };
+  }
+
+  // /mode confirm <name> - save and activate the suggested mode
+  if (arg.startsWith("confirm ")) {
+    const name = arg.replace(/^confirm\s+/, "").trim();
+    const suggestion = suggestMode({
+      prompt: name,
+      availableTools: [],
+      availableSkills: [],
+      availableFeatures: [],
+    });
+    suggestion.name = name;
+    const mode = confirmAndSaveMode(suggestion);
+    return {
+      handled: true,
+      message: `Modo "${mode.name}" salvo em ~/.claude-killer/modes/${mode.name}.json\n\nPara ativar: /mode ${mode.name}`,
+    };
+  }
+
+  // /mode <name> - activate existing mode
+  const mode = getMode(arg);
+  if (!mode) {
+    return { handled: true, message: `Modo "${arg}" não encontrado. Use: /mode (sem args) para listar.` };
+  }
+
+  // Activate (returns Promise, but we show immediate feedback)
+  applyMode(arg).then((result) => {
+    if (result.success) {
+      console.log(`[modes] Modo "${arg}" ativado: ${result.toolsEnabled.length} tools, ${result.featuresEnabled.length} features`);
+    } else {
+      console.error(`[modes] Erro ao ativar: ${result.errors.join(", ")}`);
+    }
+  }).catch((err) => {
+    console.error(`[modes] Falha: ${err.message}`);
+  });
+
+  return {
+    handled: true,
+    message: `Ativando modo "${arg}" (${mode.label})...\n` +
+             `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
+             `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false} | ` +
+             `Validation: ${mode.luauValidation?.length ?? 0} regra(s)\n\n` +
+             `Verifique o Hub (Ctrl+E) para ver tudo ativado.`,
+  };
 }
 
 function handlePoolCommand(): CommandResult {

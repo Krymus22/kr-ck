@@ -300,7 +300,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   "editar_arquivo": async (args) => {
     const edits = args.edits as EditOperation[] | undefined;
     if (edits && Array.isArray(edits)) {
-      const result = editFile(
+      const result = await editFile(
         asString(args.path ?? args.caminho),
         edits,
         { createIfMissing: args.createIfMissing as boolean | undefined }
@@ -313,7 +313,7 @@ const toolHandlers: Record<string, ToolHandler> = {
       replace: asString(args.replace ?? args.newString),
       all: args.all as boolean | undefined,
     };
-    const result = editFile(
+    const result = await editFile(
       asString(args.path ?? args.caminho),
       [edit],
       { createIfMissing: args.createIfMissing as boolean | undefined }

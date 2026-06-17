@@ -21,7 +21,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import * as log from "./logger.js";
 
-const SEED_VERSION = "v1";
+const SEED_VERSION = "v2";
 const SEED_MARKER = `.seeded-${SEED_VERSION}`;
 
 /** Resolve the bundled defaults directory. Works both in dev (src/) and prod (dist/). */
@@ -115,6 +115,13 @@ export function seedUserConfig(): number {
   if (fs.existsSync(defaultSkillsDir)) {
     const userSkillsDir = path.join(userDir, "skills");
     totalCopied += copyDirRecursive(defaultSkillsDir, userSkillsDir);
+  }
+
+  // Seed modes/ subdir (NEW in v2)
+  const defaultModesDir = path.join(defaultsDir, "modes");
+  if (fs.existsSync(defaultModesDir)) {
+    const userModesDir = path.join(userDir, "modes");
+    totalCopied += copyDirRecursive(defaultModesDir, userModesDir);
   }
 
   // Write the seed marker so we don't re-seed next time

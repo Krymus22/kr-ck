@@ -64,12 +64,16 @@ export function applyEdits(content: string, edits: EditOperation[]): EditResult 
 
 /**
  * Edit a file on disk. Returns the result message.
+ *
+ * Luau/Lua files (when mode has luauValidation rules) are validated BEFORE
+ * the write happens. If a blocking rule fails, the write is aborted and the
+ * error is returned to the AI.
  */
-export function editFile(
+export async function editFile(
   filePath: string,
   edits: EditOperation[],
   options?: { createIfMissing?: boolean; backup?: boolean }
-): string {
+): Promise<string> {
   const resolved = path.resolve(filePath);
   log.toolCall("editar_arquivo", { caminho: resolved, numEdits: edits.length });
 
@@ -88,6 +92,40 @@ export function editFile(
   if (!result.success) {
     log.toolResult("editar_arquivo", false, result.error);
     return `[ERRO] Edição falhou: ${result.error}`;
+  }
+
+  // --- Luau pre-write validation (NEW) ---
+  // If the file is .luau/.lua and the active mode has validation rules,
+  // run them on the proposed new content BEFORE writing.
+  const ext = path.extname(resolved).toLowerCase();
+  if (ext === ".luau" || ext === ".lua") {
+    try {
+      const { shouldValidateFile, validateLuauBeforeWrite, getActiveValidationRules } =
+        await import("./luauValidator.js");
+      if (await shouldValidateFile(resolved)) {
+        const rules = await getActiveValidationRules();
+        const projectRoot = process.cwd();
+        const validation = await validateLuauBeforeWrite(
+          resolved,
+          result.content,
+          rules,
+          projectRoot
+        );
+
+        if (!validation.ok && validation.blockingError) {
+          log.toolResult("editar_arquivo", false, "validation blocked");
+          return `[ERRO] Validação bloqueou a edição. Corrija os erros abaixo e tente novamente:\n\n${validation.blockingError}`;
+        }
+
+        // Log non-blocking warnings but proceed with the write
+        for (const w of validation.warnings) {
+          log.warn(`[luauValidator] ${w}`);
+        }
+      }
+    } catch (err) {
+      // Don't block writes if validator crashes - just log
+      log.warn(`fileEdit: validator error (skipping): ${(err as Error).message}`);
+    }
   }
 
   // Backup original

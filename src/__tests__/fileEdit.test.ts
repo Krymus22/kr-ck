@@ -63,47 +63,47 @@ describe("applyEdits", () => {
 });
 
 describe("editFile", () => {
-  it("should edit file on disk", () => {
+  it("should edit file on disk", async () => {
     const testFile = path.join(TEST_DIR, "edit_disk.ts");
     fs.writeFileSync(testFile, "const a = 1;\n", "utf8");
 
-    const result = editFile(testFile, [{ search: "const a = 1;", replace: "const a = 2;" }]);
+    const result = await editFile(testFile, [{ search: "const a = 1;", replace: "const a = 2;" }]);
     expect(result).toContain("[SUCESSO]");
 
     const content = fs.readFileSync(testFile, "utf8");
     expect(content).toBe("const a = 2;\n");
   });
 
-  it("should create file if createIfMissing", () => {
+  it("should create file if createIfMissing", async () => {
     const newFile = path.join(TEST_DIR, "new_file.ts");
-    const result = editFile(newFile, [{ search: "", replace: "export {};" }], { createIfMissing: true });
+    const result = await editFile(newFile, [{ search: "", replace: "export {};" }], { createIfMissing: true });
     expect(result).toContain("[SUCESSO]");
 
     const content = fs.readFileSync(newFile, "utf8");
     expect(content).toContain("export {};");
   });
 
-  it("should fail for non-existent file without createIfMissing", () => {
-    const result = editFile("/nonexistent/file.ts", [{ search: "x", replace: "y" }]);
+  it("should fail for non-existent file without createIfMissing", async () => {
+    const result = await editFile("/nonexistent/file.ts", [{ search: "x", replace: "y" }]);
     expect(result).toContain("[ERRO]");
   });
 
-  it("should create backup when backup option is set", () => {
+  it("should create backup when backup option is set", async () => {
     const testFile = path.join(TEST_DIR, "backup_test.ts");
     fs.writeFileSync(testFile, "const backup = true;\n", "utf8");
 
-    editFile(testFile, [{ search: "const backup = true;", replace: "const backup = false;" }], { backup: true });
+    await editFile(testFile, [{ search: "const backup = true;", replace: "const backup = false;" }], { backup: true });
 
     const backupFile = testFile + ".bak";
     expect(fs.existsSync(backupFile)).toBe(true);
     expect(fs.readFileSync(backupFile, "utf8")).toBe("const backup = true;\n");
   });
 
-  it("should return error when applyEdits fails", () => {
+  it("should return error when applyEdits fails", async () => {
     const testFile = path.join(TEST_DIR, "fail_edit.ts");
     fs.writeFileSync(testFile, "const a = 1;\n", "utf8");
 
-    const result = editFile(testFile, [{ search: "nonexistent string", replace: "x" }]);
+    const result = await editFile(testFile, [{ search: "nonexistent string", replace: "x" }]);
     expect(result).toContain("[ERRO]");
     expect(result).toContain("Edição falhou");
   });

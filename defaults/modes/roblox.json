@@ -1,0 +1,87 @@
+{
+  "name": "roblox",
+  "label": "Roblox (External)",
+  "description": "Full external Roblox development: Rojo sync, Wally packages, Luau lint+format+test, type-checking. Strict validation before file writes. Effort=high for thorough reasoning. Designed for personal projects - no production deploy.",
+  "builtIn": true,
+  "icon": "R",
+
+  "enableTools": [
+    "tool:rojo_build",
+    "tool:rojo_serve",
+    "tool:rojo_sourcemap",
+    "tool:wally_install",
+    "tool:wally_search",
+    "tool:wally_publish",
+    "tool:lune_run",
+    "tool:selene_lint",
+    "tool:rokit_install",
+    "tool:rokit_add",
+    "tool:wally_package_types",
+    "tool:stylua_format",
+    "tool:darklua_process"
+  ],
+
+  "enableSkills": [
+    "skill:profilestore",
+    "skill:bytenet",
+    "skill:replica",
+    "skill:react",
+    "skill:react-roblox",
+    "skill:trove",
+    "skill:signal",
+    "skill:observers",
+    "skill:cmdr",
+    "skill:rojo-cli",
+    "skill:wally-cli",
+    "skill:lune-cli",
+    "skill:selene-cli",
+    "skill:rokit-cli",
+    "skill:wally-package-types-cli",
+    "skill:testez"
+  ],
+
+  "enableFeatures": [
+    "feature:think_tool",
+    "feature:read_before_write",
+    "feature:rollback",
+    "feature:strict_gate",
+    "feature:schema_validation",
+    "feature:poka_yoke",
+    "feature:task_state",
+    "feature:self_validation",
+    "feature:context_injection",
+    "feature:auto_test",
+    "feature:lsp",
+    "feature:sub_agents",
+    "feature:model_compaction",
+    "feature:multi_key_pool"
+  ],
+
+  "effortLevel": "high",
+  "strictMode": true,
+  "readBeforeWrite": true,
+  "advancedThinking": true,
+
+  "luauValidation": [
+    {
+      "tool": "selene_lint",
+      "filePattern": "*.luau",
+      "blocking": true
+    },
+    {
+      "tool": "selene_lint",
+      "filePattern": "*.lua",
+      "blocking": true
+    },
+    {
+      "tool": "stylua_format",
+      "filePattern": "*.luau",
+      "blocking": false
+    },
+    {
+      "tool": "stylua_format",
+      "filePattern": "*.lua",
+      "blocking": false
+    }
+  ]
+}

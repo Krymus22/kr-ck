@@ -1,0 +1,600 @@
+/**
+ * modes.ts - Project-mode system for Claude-Killer.
+ *
+ * A "mode" is a named preset that activates a specific combination of:
+ *   - External CLI tools (from ~/.claude-killer/tools/*.json)
+ *   - Skills (from ~/.claude-killer/skills/*.md)
+ *   - Internal features (effort level, strict mode, read-before-write, etc.)
+ *   - Luau validation rules (selene, stylua, luau-lsp, lune)
+ *
+ * Built-in modes:
+ *   - "roblox": full Roblox external development preset
+ *     (activates Rojo, Wally, Lune, Selene, StyLua, Rokit, wally-package-types,
+ *      enables luau validation gate, sets effort=high, enables all Roblox skills)
+ *
+ * User-defined modes:
+ *   - Stored at ~/.claude-killer/modes/<name>.json
+ *   - User describes intent ("I want to write a Rust CLI"), AI suggests tool list
+ *   - User confirms before activation
+ *
+ * Persistence:
+ *   - Active mode: stored in ~/.claude-killer/modes/active.json (single string)
+ *   - Mode definitions: ~/.claude-killer/modes/<name>.json
+ *
+ * Built-in mode "roblox" is bundled at defaults/modes/roblox.json and seeded
+ * into the user's home directory on first run (see configSeeder.ts).
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import * as log from "./logger.js";
+import { fileURLToPath } from "node:url";
+
+// --- Types ------------------------------------------------------------------
+
+export type EffortLevel = "low" | "medium" | "high" | "max";
+
+export interface ModeValidationRule {
+  /** Tool name that must be enabled for this rule to apply (e.g. "selene_lint") */
+  tool: string;
+  /** Files to validate (glob: "*.luau", "*.lua", or specific paths) */
+  filePattern: string;
+  /** Whether validation blocks file write (true) or just warns (false) */
+  blocking: boolean;
+}
+
+export interface ModeDefinition {
+  /** Unique mode name (lowercase, no spaces) */
+  name: string;
+  /** Human-readable label shown in UI */
+  label: string;
+  /** Short description of what this mode is for */
+  description: string;
+  /** Whether this is a built-in (bundled) mode or user-created */
+  builtIn: boolean;
+  /** Icon character/emoji for UI */
+  icon?: string;
+
+  /** Tools to enable (by id, e.g. "tool:rojo_build") */
+  enableTools: string[];
+  /** Skills to enable (by id, e.g. "skill:profilestore") */
+  enableSkills: string[];
+  /** Internal features to enable (by id, e.g. "feature:strict_gate") */
+  enableFeatures: string[];
+
+  /** Effort level to set when mode is active */
+  effortLevel?: EffortLevel;
+  /** Whether strict mode (tsc/lint/selene gate) should be enabled */
+  strictMode?: boolean;
+  /** Whether read-before-write protection should be enforced */
+  readBeforeWrite?: boolean;
+  /** Whether to enable advanced thinking prompts */
+  advancedThinking?: boolean;
+
+  /** Luau validation rules (when editing .luau/.lua files) */
+  luauValidation?: ModeValidationRule[];
+
+  /** For user modes: the original prompt the user gave when creating */
+  userPrompt?: string;
+  /** When this mode was created (ISO date) */
+  createdAt?: string;
+}
+
+export interface ActiveModeState {
+  activeMode: string | null;
+  activatedAt: string | null;
+}
+
+// --- Paths ------------------------------------------------------------------
+
+function getModesDir(): string {
+  return path.join(
+    process.env.HOME ?? process.env.USERPROFILE ?? os.homedir(),
+    ".claude-killer",
+    "modes"
+  );
+}
+
+function getActiveModeFile(): string {
+  return path.join(getModesDir(), "active.json");
+}
+
+function getModeFile(name: string): string {
+  return path.join(getModesDir(), `${name}.json`);
+}
+
+/** Find bundled defaults/modes/ directory (works in dev and prod). */
+function findBundledModesDir(): string | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.join(here, "..", "defaults", "modes"),       // dist/ -> ../defaults/modes
+    path.join(here, "..", "..", "defaults", "modes"),  // src/ -> ../../defaults/modes
+    path.join(process.cwd(), "defaults", "modes"),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+// --- Built-in modes discovery ----------------------------------------------
+
+let cachedBuiltInModes: ModeDefinition[] | null = null;
+
+/**
+ * Load built-in mode definitions from defaults/modes/*.json.
+ * These are bundled with the package and seeded into the user's
+ * ~/.claude-killer/modes/ on first run (configSeeder.ts handles that).
+ */
+export function getBuiltInModes(): ModeDefinition[] {
+  if (cachedBuiltInModes) return cachedBuiltInModes;
+
+  const modesDir = findBundledModesDir();
+  if (!modesDir) {
+    cachedBuiltInModes = [];
+    return cachedBuiltInModes;
+  }
+
+  const result: ModeDefinition[] = [];
+  try {
+    const files = fs.readdirSync(modesDir).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(modesDir, file), "utf8");
+        const mode = JSON.parse(content) as ModeDefinition;
+        if (mode && mode.name && typeof mode.name === "string") {
+          mode.builtIn = true;
+          result.push(mode);
+        }
+      } catch (err) {
+        log.warn(`modes: failed to parse ${file}: ${(err as Error).message}`);
+      }
+    }
+  } catch {
+    // directory not readable
+  }
+
+  cachedBuiltInModes = result;
+  return result;
+}
+
+// --- User modes -------------------------------------------------------------
+
+/**
+ * List all user-created modes (excluding built-ins).
+ * Reads from ~/.claude-killer/modes/*.json, excluding "active.json".
+ */
+export function getUserModes(): ModeDefinition[] {
+  const dir = getModesDir();
+  if (!fs.existsSync(dir)) return [];
+
+  const result: ModeDefinition[] = [];
+  try {
+    const files = fs.readdirSync(dir).filter(
+      (f) => f.endsWith(".json") && f !== "active.json"
+    );
+    for (const file of files) {
+      try {
+        const content = fs.readFileSync(path.join(dir, file), "utf8");
+        const mode = JSON.parse(content) as ModeDefinition;
+        if (mode && mode.name && typeof mode.name === "string") {
+          // Check if it's actually a built-in (user might have a copy)
+          const builtIn = getBuiltInModes().find((m) => m.name === mode.name);
+          mode.builtIn = !!builtIn;
+          result.push(mode);
+        }
+      } catch {
+        // skip invalid
+      }
+    }
+  } catch {
+    // directory not readable
+  }
+  return result;
+}
+
+/** Get ALL available modes (built-in + user). */
+export function getAllModes(): ModeDefinition[] {
+  const builtIns = getBuiltInModes();
+  const users = getUserModes();
+  // User modes with same name as built-in override
+  const map = new Map<string, ModeDefinition>();
+  for (const m of builtIns) map.set(m.name, m);
+  for (const m of users) map.set(m.name, m);
+  return Array.from(map.values());
+}
+
+/** Find a mode by name (built-in or user). */
+export function getMode(name: string): ModeDefinition | null {
+  return getAllModes().find((m) => m.name === name) ?? null;
+}
+
+// --- Persistence ------------------------------------------------------------
+
+function ensureModesDir(): void {
+  const dir = getModesDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+/** Save a user mode to ~/.claude-killer/modes/<name>.json */
+export function saveUserMode(mode: ModeDefinition): void {
+  if (!mode.name) throw new Error("Mode name is required");
+  ensureModesDir();
+  mode.builtIn = false;
+  if (!mode.createdAt) mode.createdAt = new Date().toISOString();
+  const filePath = getModeFile(mode.name);
+  fs.writeFileSync(filePath, JSON.stringify(mode, null, 2), "utf8");
+  log.info(`modes: saved user mode "${mode.name}" to ${filePath}`);
+}
+
+/** Delete a user mode. Returns true if deleted, false if not found. */
+export function deleteUserMode(name: string): boolean {
+  const filePath = getModeFile(name);
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    fs.unlinkSync(filePath);
+    log.info(`modes: deleted user mode "${name}"`);
+    return true;
+  } catch (err) {
+    log.warn(`modes: failed to delete "${name}": ${(err as Error).message}`);
+    return false;
+  }
+}
+
+// --- Active mode ------------------------------------------------------------
+
+/** Get the currently active mode name (or null if none). */
+export function getActiveModeName(): string | null {
+  const file = getActiveModeFile();
+  if (!fs.existsSync(file)) return null;
+  try {
+    const content = fs.readFileSync(file, "utf8");
+    const state = JSON.parse(content) as ActiveModeState;
+    return state.activeMode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Get the full ModeDefinition of the currently active mode (or null). */
+export function getActiveMode(): ModeDefinition | null {
+  const name = getActiveModeName();
+  if (!name) return null;
+  return getMode(name);
+}
+
+/**
+ * Set the active mode. Persists to ~/.claude-killer/modes/active.json.
+ * Does NOT actually apply the mode's settings - that's done by applyMode().
+ * Pass null to clear (deactivate).
+ */
+export function setActiveMode(name: string | null): void {
+  ensureModesDir();
+  const state: ActiveModeState = {
+    activeMode: name,
+    activatedAt: name ? new Date().toISOString() : null,
+  };
+  fs.writeFileSync(getActiveModeFile(), JSON.stringify(state, null, 2), "utf8");
+  if (name) {
+    log.info(`modes: active mode set to "${name}"`);
+  } else {
+    log.info(`modes: active mode cleared`);
+  }
+}
+
+// --- Mode application -------------------------------------------------------
+
+export interface ModeApplyResult {
+  success: boolean;
+  modeName: string;
+  toolsEnabled: string[];
+  toolsDisabled: string[];
+  skillsEnabled: string[];
+  featuresEnabled: string[];
+  errors: string[];
+}
+
+/**
+ * Apply a mode: set effort level, enable/disable tools/skills/features.
+ *
+ * This calls into:
+ *   - effortLevels.ts to set effort
+ *   - extensionCenter.ts to toggle extensions
+ *   - strictQualityGate.ts to set STRICT_MODE env
+ *   - readBeforeWrite.ts to set its flag
+ *
+ * Returns a summary of what was changed. Safe to call multiple times.
+ */
+export async function applyMode(name: string): Promise<ModeApplyResult> {
+  const mode = getMode(name);
+  const result: ModeApplyResult = {
+    success: false,
+    modeName: name,
+    toolsEnabled: [],
+    toolsDisabled: [],
+    skillsEnabled: [],
+    featuresEnabled: [],
+    errors: [],
+  };
+
+  if (!mode) {
+    result.errors.push(`Mode "${name}" not found`);
+    return result;
+  }
+
+  try {
+    // Lazy-import to avoid circular dependencies
+    const { toggleExtension, getAllExtensions } = await import("./extensionCenter.js");
+    const { setEffortLevel } = await import("./effortLevels.js");
+
+    const all = getAllExtensions();
+
+    // Build a set of ids that should be enabled
+    const shouldEnable = new Set<string>([
+      ...mode.enableTools,
+      ...mode.enableSkills,
+      ...mode.enableFeatures,
+    ]);
+
+    for (const ext of all) {
+      const wantsOn = shouldEnable.has(ext.id);
+      const isOn = ext.enabled && ext.triggerMode !== "disabled";
+      if (wantsOn && !isOn) {
+        // Turn on
+        if (ext.category === "feature") {
+          // Features use "always" trigger by default
+          const { setTriggerMode } = await import("./extensionCenter.js");
+          setTriggerMode(ext.id, "always");
+        } else {
+          toggleExtension(ext.id);
+        }
+        if (ext.category === "tool") result.toolsEnabled.push(ext.id);
+        else if (ext.category === "skill") result.skillsEnabled.push(ext.id);
+        else if (ext.category === "feature") result.featuresEnabled.push(ext.id);
+      } else if (!wantsOn && isOn && ext.category === "tool") {
+        // Only disable tools (don't touch skills/features the user might want)
+        toggleExtension(ext.id);
+        result.toolsDisabled.push(ext.id);
+      }
+    }
+
+    // Set effort level
+    if (mode.effortLevel) {
+      try {
+        setEffortLevel(mode.effortLevel);
+        log.info(`modes: effort set to ${mode.effortLevel}`);
+      } catch (err) {
+        result.errors.push(`Failed to set effort: ${(err as Error).message}`);
+      }
+    }
+
+    // Set strict mode (via env var - strictQualityGate reads this)
+    if (mode.strictMode !== undefined) {
+      process.env.STRICT_MODE = mode.strictMode ? "true" : "false";
+    }
+
+    // Set read-before-write (via env var)
+    if (mode.readBeforeWrite !== undefined) {
+      process.env.READ_BEFORE_WRITE = mode.readBeforeWrite ? "true" : "false";
+    }
+
+    // Set advanced thinking (via env var, used by contextInjector)
+    if (mode.advancedThinking !== undefined) {
+      process.env.ADVANCED_THINKING = mode.advancedThinking ? "true" : "false";
+    }
+
+    setActiveMode(name);
+    result.success = true;
+    return result;
+  } catch (err) {
+    result.errors.push(`Failed to apply mode: ${(err as Error).message}`);
+    return result;
+  }
+}
+
+/** Deactivate the current mode (just clears the pointer). */
+export function deactivateMode(): void {
+  setActiveMode(null);
+}
+
+// --- Mode creation (AI-assisted) -------------------------------------------
+
+export interface ModeSuggestionRequest {
+  /** User's natural language description of what they want */
+  prompt: string;
+  /** List of available tool ids (e.g. ["tool:rojo_build", "tool:stylua_lint"]) */
+  availableTools: string[];
+  /** List of available skill ids */
+  availableSkills: string[];
+  /** List of available feature ids */
+  availableFeatures: string[];
+}
+
+export interface ModeSuggestion {
+  name: string;
+  label: string;
+  description: string;
+  enableTools: string[];
+  enableSkills: string[];
+  enableFeatures: string[];
+  effortLevel: EffortLevel;
+  strictMode: boolean;
+  readBeforeWrite: boolean;
+  advancedThinking: boolean;
+  luauValidation?: ModeValidationRule[];
+  /** AI's reasoning for these choices (shown to user for confirmation) */
+  reasoning: string;
+}
+
+/**
+ * Suggest a mode based on user prompt. This is a heuristic implementation -
+ * for production use, this would call the LLM with the available tools list
+ * and ask it to pick relevant ones.
+ *
+ * The heuristic:
+ *   1. Keyword matching against tool descriptions
+ *   2. If "roblox" or "luau" mentioned → suggest Roblox preset
+ *   3. If "rust" → suggest cargo/rustc tools
+ *   4. If "python" → suggest pip/pytest tools
+ *   5. If "typescript" or "node" → suggest npm/vitest tools
+ *
+ * Returns a suggestion the user must confirm before activation.
+ */
+export function suggestMode(req: ModeSuggestionRequest): ModeSuggestion {
+  const prompt = req.prompt.toLowerCase();
+
+  // Default suggestion: high effort, strict mode, read-before-write
+  const base: ModeSuggestion = {
+    name: "",
+    label: "",
+    description: req.prompt,
+    enableTools: [],
+    enableSkills: [],
+    enableFeatures: [],
+    effortLevel: "high",
+    strictMode: true,
+    readBeforeWrite: true,
+    advancedThinking: true,
+    reasoning: "",
+  };
+
+  // Heuristic: keyword matching
+  const keywords: Array<{ pattern: RegExp; tools: string[]; skills: string[]; label: string; name: string; reasoning: string }> = [
+    {
+      pattern: /\b(roblox|luau|rojo|wally|rbxl|studio)\b/i,
+      tools: ["tool:rojo_build", "tool:rojo_serve", "tool:rojo_sourcemap",
+              "tool:wally_install", "tool:wally_search", "tool:wally_publish",
+              "tool:lune_run", "tool:selene_lint", "tool:rokit_install",
+              "tool:rokit_add", "tool:wally_package_types",
+              "tool:stylua_format", "tool:darklua_process"],
+      skills: [],
+      label: "Roblox (External)",
+      name: "roblox-custom",
+      reasoning: "Detected Roblox/Luau context. Activating: Rojo (sync+build), Wally (package manager), Lune (offline runtime), Selene (linter), StyLua (formatter), Rokit (toolchain), wally-package-types (type defs). Enabling strict mode + read-before-write because Roblox is sensitive. Effort=high for thorough reasoning.",
+    },
+    {
+      pattern: /\b(rust|cargo)\b/i,
+      tools: [],
+      skills: [],
+      label: "Rust",
+      name: "rust-custom",
+      reasoning: "Detected Rust context. No Rust tools are bundled (would need to add cargo/rustc/clippy externally). Enabling strict mode + read-before-write as Rust is type-sensitive.",
+    },
+    {
+      pattern: /\b(python|pytest|pip|poetry)\b/i,
+      tools: [],
+      skills: [],
+      label: "Python",
+      name: "python-custom",
+      reasoning: "Detected Python context. No Python tools are bundled. Enabling strict mode + read-before-write.",
+    },
+    {
+      pattern: /\b(typescript|node|npm|vitest|jest)\b/i,
+      tools: [],
+      skills: [],
+      label: "TypeScript/Node",
+      name: "ts-custom",
+      reasoning: "Detected TypeScript/Node context. Using built-in tsc + lint strict gate. Enabling strict mode + read-before-write.",
+    },
+  ];
+
+  for (const kw of keywords) {
+    if (kw.pattern.test(prompt)) {
+      // Filter to tools that actually exist
+      const tools = kw.tools.filter((t) => req.availableTools.includes(t));
+      const skills = kw.skills.filter((s) => req.availableSkills.includes(s));
+      return {
+        ...base,
+        name: kw.name,
+        label: kw.label,
+        enableTools: tools,
+        enableSkills: skills,
+        enableFeatures: [
+          "feature:strict_gate",
+          "feature:read_before_write",
+          "feature:think_tool",
+          "feature:self_validation",
+          "feature:poka_yoke",
+          "feature:rollback",
+        ].filter((f) => req.availableFeatures.includes(f)),
+        luauValidation: kw.tools.some((t) => t.includes("selene") || t.includes("lune"))
+          ? [
+              { tool: "selene_lint", filePattern: "*.luau", blocking: true },
+              { tool: "selene_lint", filePattern: "*.lua", blocking: true },
+              { tool: "stylua_format", filePattern: "*.luau", blocking: false },
+              { tool: "stylua_format", filePattern: "*.lua", blocking: false },
+            ]
+          : undefined,
+        reasoning: kw.reasoning,
+      };
+    }
+  }
+
+  // Fallback: generic mode with default settings
+  return {
+    ...base,
+    name: "custom",
+    label: "Custom",
+    reasoning: "No specific context detected. Suggesting conservative defaults: strict mode on, read-before-write on, effort=high. You can add specific tools manually.",
+  };
+}
+
+/**
+ * Confirm and save a user mode from a suggestion.
+ * Returns the saved ModeDefinition.
+ */
+export function confirmAndSaveMode(suggestion: ModeSuggestion): ModeDefinition {
+  const mode: ModeDefinition = {
+    name: suggestion.name,
+    label: suggestion.label,
+    description: suggestion.description,
+    builtIn: false,
+    enableTools: suggestion.enableTools,
+    enableSkills: suggestion.enableSkills,
+    enableFeatures: suggestion.enableFeatures,
+    effortLevel: suggestion.effortLevel,
+    strictMode: suggestion.strictMode,
+    readBeforeWrite: suggestion.readBeforeWrite,
+    advancedThinking: suggestion.advancedThinking,
+    luauValidation: suggestion.luauValidation,
+    userPrompt: suggestion.description,
+    createdAt: new Date().toISOString(),
+  };
+  saveUserMode(mode);
+  return mode;
+}
+
+// --- Seed built-in modes on first run --------------------------------------
+
+/**
+ * Copy built-in modes from defaults/modes/ to ~/.claude-killer/modes/
+ * if they don't already exist. Called from configSeeder.ts on first run.
+ */
+export function seedBuiltInModes(): number {
+  const bundledDir = findBundledModesDir();
+  if (!bundledDir) return 0;
+
+  const userDir = getModesDir();
+  if (!fs.existsSync(userDir)) {
+    fs.mkdirSync(userDir, { recursive: true });
+  }
+
+  let count = 0;
+  try {
+    const files = fs.readdirSync(bundledDir).filter((f) => f.endsWith(".json"));
+    for (const file of files) {
+      const destPath = path.join(userDir, file);
+      if (!fs.existsSync(destPath)) {
+        fs.copyFileSync(path.join(bundledDir, file), destPath);
+        count++;
+        log.info(`modes: seeded built-in mode ${file}`);
+      }
+    }
+  } catch (err) {
+    log.warn(`modes: failed to seed: ${(err as Error).message}`);
+  }
+  return count;
+}
