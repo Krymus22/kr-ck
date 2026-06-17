@@ -1,12 +1,12 @@
 ---
 name: React-Roblox
-version: "1.8.0"
+version: "17.2.1"
 source: github
 repo: jsdotlua/react-lua
 url: https://github.com/jsdotlua/react-lua
 homepage: https://jsdotlua.github.io/react-lua/
 category: roblox
-package: jsdotlua/react-roblox@1.8.0
+package: jsdotlua/react-roblox@17.2.1
 tags: [ui, react, renderer, roblox-instances]
 ---
 

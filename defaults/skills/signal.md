@@ -1,6 +1,6 @@
 ---
 name: Signal
-version: "0.4.0"
+version: "2.0.3"
 source: github
 repo: Sleitnick/RbxUtil
 url: https://github.com/Sleitnick/RbxUtil/tree/main/modules/signal

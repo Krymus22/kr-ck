@@ -1,6 +1,6 @@
 ---
 name: wally-package-types CLI
-version: "1.0.3"
+version: "1.6.2"
 source: github
 repo: JohnnyMorganz/wally-package-types
 url: https://github.com/JohnnyMorganz/wally-package-types

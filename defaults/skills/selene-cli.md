@@ -1,6 +1,6 @@
 ---
 name: Selene CLI
-version: "0.29.0"
+version: "0.31.0"
 source: github
 repo: Kampfkarren/selene
 url: https://github.com/Kampfkarren/selene

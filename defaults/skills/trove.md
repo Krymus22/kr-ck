@@ -1,12 +1,12 @@
 ---
 name: Trove
-version: "2.0.3"
+version: "1.8.0"
 source: github
 repo: Sleitnick/RbxUtil
 url: https://github.com/Sleitnick/RbxUtil/tree/main/modules/trove
 homepage: https://sleitnick.github.io/RbxUtil/api/Trove
 category: roblox
-package: sleitnick/trove@2.0.3
+package: sleitnick/trove@1.8.0
 tags: [cleanup, lifecycle, memory-management, connections]
 ---
 

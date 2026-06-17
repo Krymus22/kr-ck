@@ -1,6 +1,6 @@
 ---
 name: Rokit CLI
-version: "1.6.2"
+version: "1.2.0"
 source: github
 repo: rojo-rbx/rokit
 url: https://github.com/rojo-rbx/rokit

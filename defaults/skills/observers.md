@@ -1,12 +1,12 @@
 ---
 name: Observers
-version: "1.12.0"
+version: "0.5.0"
 source: github
 repo: Sleitnick/RbxObservers
 url: https://github.com/Sleitnick/RbxObservers
 homepage: https://sleitnick.github.io/RbxObservers/
 category: roblox
-package: sleitnick/observers@1.12.0
+package: sleitnick/observers@0.5.0
 tags: [observation, instances, tags, collectionservice]
 ---
 

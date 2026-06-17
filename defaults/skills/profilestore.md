@@ -1,59 +1,49 @@
 ---
 name: ProfileStore
-version: "0.4.6"
+version: "1.0.3"
 source: github
-repo: MadStudioRoblox/ProfileService
-url: https://github.com/MadStudioRoblox/ProfileService
-homepage: https://madstudioroblox.github.io/ProfileService/
+repo: MadStudioRoblox/ProfileStore
+url: https://github.com/MadStudioRoblox/ProfileStore
+homepage: https://madstudioroblox.github.io/ProfileStore/
 category: roblox
-package: fireelysium/profilestore@0.4.6
+package: lm-loleris/profilestore@1.0.3
 tags: [data, persistence, datastore, session-locking]
 ---
 
-> **Source:** This skill is the official README from [MadStudioRoblox/ProfileService](https://github.com/MadStudioRoblox/ProfileService) on GitHub.
+> **Source:** This skill is the official README from [MadStudioRoblox/ProfileStore](https://github.com/MadStudioRoblox/ProfileStore) on GitHub.
 > All credit goes to the original authors. Licensed under their respective licenses.
 > Fetched on 2026-06-17.
 
 ---
 
-# Madwork - ProfileService
+# MAD STUDIO - ProfileStore
 
-**[FOR NEW PROJECTS - USE ProfileStore (Click here)](https://github.com/MadStudioRoblox/ProfileStore)**
+ProfileStore is a Roblox DataStore wrapper that streamlines auto-saving, session locking and a few other features for the game developer. ProfileStore's source code runs on a single ModuleScript.
 
-(This project is no longer supported - it's been stable for a long while and migration to [ProfileStore](https://github.com/MadStudioRoblox/ProfileStore) is possible for most projects)
+If you want to save time writing code for player data caching or want to prevent item "duping" in a game with trading - this can be a helpful resource!
 
-ProfileService is a stand-alone ModuleScript that specialises in loading and auto-saving
-DataStore profiles.
+💲💲💲 *Consider [donating R$ to the creator of ProfileStore (Click here)](https://www.roblox.com/games/103946622805308/MAD-STUDIO-Open-Source-Donations) if you find this resource helpful!*
 
-A DataStore `Profile` (Later referred to as just `Profile`) is a set of data which is meant to be loaded up
-**only once** inside a Roblox server and then written to and read from locally on that server
-(With no delays associated with talking with the DataStore every time data changes) whilst being
-periodically auto-saved and saved immediately once after the server finishes working with the `Profile`.
+## How does it work?
 
-The benefits of using ProfileService for your game's profiles are:
+ProfileStore loads and caches data from a DataStore key on a single Roblox game server and prevents other game servers from accessing this data too soon by establishing a session lock and handling session lock conflicts between servers swiftly all while not using too many DataStore and MessagingService API calls.
 
-- **Easy to learn, and eventually forget** - ProfileService does not give you any data getter or setter functions. It gives you the freedom to write your own data interface.
+Data units saved by ProfileStore are called **"profiles"** which can be accessed in-game by starting a **"session"**. During an active session you gain access to a table ([`Profile.Data`](/ProfileStore/api/#data)) which will either be saved to the DataStore on the next auto-save or when you manually end the session.
 
-- **Built for massive scalability** - low resource footprint, no excessive type checking. Great for 100+ player servers. ProfileService automatically spreads the DataStore API calls evenly within the auto-save loop timeframe.
+ProfileStore is primarily **player-data-oriented** and, by design, tweaked for a common use case where each game player would have a single profile dedicated to storing their game progress. Session locking addresses the issue of data access from more than one game server (which can cause item "dupes" in games with trading) by keeping track of which game server is currently caching data and gracefully switches ownership from one server to the other without failing new session requests. ProfileStore can still be used for non-player data storage, although ProfileStore's session locking is not ideal for quick writing from several game servers.
 
-- **Already does the things you wouldn't dare script yourself (but should)** - session-locking is essential to keeping your data protected from multiple server editing - this is a potential cause of item loss or item duplication loopholes. ProfileService offers a very comprehensive and short API for handling session-locking yourself or just letting ProfileService do it automatically for you.
+ProfileStore's module functions try to resemble the Roblox API for a sense of familiarity to Roblox developers. Methods with the `Async` keyword yield until a result is ready (e.g. `:StartSessionAsync()`), while others do not.
 
-- **Future-proof** - with features like `MetaTags` and `GlobalUpdates`, you will always be able to add new functionality to your profiles without headaches.
-
-- **Made for ambitious projects** - ProfileService is a **profile object abstraction** detached from the `Player` instance - this allows the developer to create profiles for entities other than players, such as: group-owned houses, savable multiplayer game instances, etc.
+**ProfileStore is not designed (and never will be) for in-game leaderboards or any kind of global state.**
 
 ---
-*ProfileService is part of the **Madwork** framework*
-*Developed by [loleris](https://twitter.com/LM_loleris)*
 
-***It's documented:***
-**[ProfileService wiki](https://madstudioroblox.github.io/ProfileService/)**
+*Developed by [loleris](https://x.com/lolerismad)*
 
-***It's open source:***
-[Roblox library](https://www.roblox.com/library/5331689994/ProfileService)
+***See documentation:***
+**[ProfileStore wiki](https://madstudioroblox.github.io/ProfileStore/)**
 
-**Watch while you eat pizza on the couch - YouTube tutorials:**  
-**[ProfileService tutorial playlist](https://www.youtube.com/playlist?list=PLUUm0OvGDjJ8_e8co48ngMJC4XwCaUIIH)** by @okeanskiy  
-**[Session-locking explained and savable leaderstats](https://youtu.be/P5NuM0gPmew)** by @EncodedLua  
-(Will add new tutorials as they come)
+***Get it now on:***
+[Roblox library](https://create.roblox.com/store/asset/109379033046155/ProfileStore)
 
+If you need help integrating ProfileStore into your project, [join the discussion on the Roblox forums (Click here)](https://devforum.roblox.com/t/profilestore/3190543).

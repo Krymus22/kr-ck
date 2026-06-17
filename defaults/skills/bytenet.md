@@ -1,11 +1,11 @@
 ---
 name: ByteNet
-version: "0.2.0"
+version: "0.4.6"
 source: github
 repo: ffrostfall/ByteNet
 url: https://github.com/ffrostfall/ByteNet
 category: roblox
-package: ffrostflame/bytenet@0.2.0
+package: ffrostflame/bytenet@0.4.6
 tags: [networking, remote, serialization, typesafe]
 ---
 
