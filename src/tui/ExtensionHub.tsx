@@ -78,6 +78,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
 
   const totalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
   const currentPage = Math.floor(scrollTop / PAGE_SIZE);
+  const lastPageStart = Math.max(0, (totalPages - 1) * PAGE_SIZE);
   const visibleItems = allItems.slice(scrollTop, scrollTop + PAGE_SIZE);
 
   const clampCursor = useCallback((idx: number, items: readonly ExtensionEntry[]) => {
@@ -106,6 +107,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       if (cursorIndex >= GRID_COLS) {
         setCursorIndex((prev) => clampCursor(prev - GRID_COLS, visibleItems));
       } else if (scrollTop > 0) {
+        // Go to previous page (always advance by full PAGE_SIZE)
         setScrollTop((prev) => Math.max(0, prev - PAGE_SIZE));
         setCursorIndex(0);
       }
@@ -113,7 +115,9 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       if (cursorIndex < (visibleItems.length - GRID_COLS)) {
         setCursorIndex((prev) => clampCursor(prev + GRID_COLS, visibleItems));
       } else if (scrollTop + PAGE_SIZE < allItems.length) {
-        setScrollTop((prev) => Math.min(allItems.length - PAGE_SIZE, prev + PAGE_SIZE));
+        // Go to next page (always advance by full PAGE_SIZE, clamped to last page start)
+        // This prevents overlap between pages when total items aren't a multiple of PAGE_SIZE
+        setScrollTop((prev) => Math.min(prev + PAGE_SIZE, lastPageStart));
         setCursorIndex(0);
       }
     }

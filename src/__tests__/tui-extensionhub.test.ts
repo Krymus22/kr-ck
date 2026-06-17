@@ -141,6 +141,64 @@ describe("ExtensionHub component", () => {
     });
   });
 
+  describe("page start clamping (regression: page 2 duplicates)", () => {
+    /**
+     * Reproduces the bug where scrolling to page 2 with 14 items used to set
+     * scrollTop = Math.min(14-9, 0+9) = 5, causing 4 items (5,6,7,8) to appear
+     * on BOTH page 1 and page 2, and the page indicator stayed at "1/2".
+     *
+     * Fix: clamp to (totalPages-1)*PAGE_SIZE so each page starts at a clean
+     * multiple of PAGE_SIZE.
+     */
+    function nextPageStart(scrollTop: number, itemCount: number): number {
+      const totalPages = calculateTotalPages(itemCount);
+      const lastPageStart = Math.max(0, (totalPages - 1) * PAGE_SIZE);
+      return Math.min(scrollTop + PAGE_SIZE, lastPageStart);
+    }
+
+    it("14 items: page 1 -> page 2 should jump from 0 to 9 (not 5)", () => {
+      const next = nextPageStart(0, 14);
+      expect(next).toBe(9);
+      // Verify no overlap with page 1
+      const page1 = calculateVisibleItems(Array.from({ length: 14 }, (_, i) => i), 0);
+      const page2 = calculateVisibleItems(Array.from({ length: 14 }, (_, i) => i), next);
+      const overlap = page1.filter((x) => page2.includes(x));
+      expect(overlap).toEqual([]);
+    });
+
+    it("20 items: page 1 -> page 2 -> page 3 should jump by 9 each", () => {
+      expect(nextPageStart(0, 20)).toBe(9);
+      expect(nextPageStart(9, 20)).toBe(18);
+    });
+
+    it("9 items: only 1 page, scrollTop should stay at 0", () => {
+      // scrollTop + PAGE_SIZE < allItems.length is false, so no advance
+      // But if we did call nextPageStart, it should clamp to lastPageStart=0
+      const totalPages = calculateTotalPages(9);
+      const lastPageStart = Math.max(0, (totalPages - 1) * PAGE_SIZE);
+      expect(lastPageStart).toBe(0);
+    });
+
+    it("18 items: 2 pages, page 2 start should be 9 (no overlap)", () => {
+      const next = nextPageStart(0, 18);
+      expect(next).toBe(9);
+      const page1 = calculateVisibleItems(Array.from({ length: 18 }, (_, i) => i), 0);
+      const page2 = calculateVisibleItems(Array.from({ length: 18 }, (_, i) => i), next);
+      const overlap = page1.filter((x) => page2.includes(x));
+      expect(overlap).toEqual([]);
+    });
+
+    it("currentPage indicator: scrollTop=9 with 14 items should show page 2/2", () => {
+      const itemCount = 14;
+      const scrollTop = 9;
+      const totalPages = calculateTotalPages(itemCount);
+      const currentPage = Math.floor(scrollTop / PAGE_SIZE);
+      expect(totalPages).toBe(2);
+      expect(currentPage).toBe(1); // 0-indexed, so this means "page 2"
+      expect(currentPage + 1).toBe(2); // displayed page number
+    });
+  });
+
   describe("navigation logic", () => {
     it("left arrow should decrease cursor", () => {
       let cursor = 5;

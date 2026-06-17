@@ -18,6 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import * as log from "./logger.js";
+import { getRegistry } from "./externalTools.js";
+import { getActiveMCPServers } from "./extensions.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -341,43 +343,44 @@ function discoverSkills(entries: Omit<ExtensionEntry, "enabled" | "triggerMode">
 }
 
 function discoverTools(entries: Omit<ExtensionEntry, "enabled" | "triggerMode">[]): void {
+  let registry: ReturnType<typeof getRegistry> | null = null;
   try {
-    // Dynamic import to avoid circular dependency
-    const mod = require("./externalTools.js");
-    const registry = mod.getRegistry?.();
-    if (!registry) return;
-
-    const tools = registry.getAll?.() ?? [];
-    for (const tool of tools) {
-      entries.push({
-        id: `tool:${tool.name}`,
-        name: tool.name,
-        category: "tool",
-        description: tool.description ?? "",
-        installed: registry.isInstalled?.(tool.name) ?? false,
-        meta: { command: tool.command ?? "" },
-      });
-    }
+    registry = getRegistry();
   } catch {
     // External tools module not available
+    return;
+  }
+  if (!registry) return;
+
+  const tools = registry.getAll?.() ?? [];
+  for (const tool of tools) {
+    entries.push({
+      id: `tool:${tool.name}`,
+      name: tool.name,
+      category: "tool",
+      description: tool.description ?? "",
+      installed: registry.isInstalled?.(tool.name) ?? false,
+      meta: { command: tool.command ?? "" },
+    });
   }
 }
 
 function discoverMCPServers(entries: Omit<ExtensionEntry, "enabled" | "triggerMode">[]): void {
+  let servers: string[] = [];
   try {
-    const mod = require("./extensions.js");
-    const servers = mod.getActiveMCPServers?.() ?? [];
-    for (const serverName of servers) {
-      entries.push({
-        id: `mcp:${serverName}`,
-        name: serverName,
-        category: "mcp",
-        description: `MCP Server: ${serverName}`,
-        installed: true,
-      });
-    }
+    servers = getActiveMCPServers() ?? [];
   } catch {
     // Extensions module not available
+    return;
+  }
+  for (const serverName of servers) {
+    entries.push({
+      id: `mcp:${serverName}`,
+      name: serverName,
+      category: "mcp",
+      description: `MCP Server: ${serverName}`,
+      installed: true,
+    });
   }
 }
 

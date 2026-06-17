@@ -455,6 +455,88 @@ describe("extensionCenter", () => {
       discoverExtensions();
       expect(getAllExtensions().filter((e) => e.category === "tool")).toHaveLength(0);
     });
+
+    it("regression: should discover Roblox tools from registry (require -> static import)", () => {
+      // Previously, discoverTools used require() which throws in ESM mode,
+      // silently swallowing the error and producing zero tool entries.
+      // With static imports, the registry is consulted directly.
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockGetRegistry.mockReturnValue({
+        getAll: () => [
+          {
+            name: "rojo_build",
+            description: "Build .rbxl place file from Rojo project",
+            category: "roblox",
+            command: "rojo",
+            args: ["build"],
+            flags: [],
+            detection: { method: "binary", check: "rojo --version" },
+            context: { whenToUse: ["build roblox project"], examples: [] },
+            outputParser: "raw",
+          },
+          {
+            name: "wally_install",
+            description: "Install Wally packages",
+            category: "roblox",
+            command: "wally",
+            args: ["install"],
+            flags: [],
+            detection: { method: "binary", check: "wally --version" },
+            context: { whenToUse: ["install packages"], examples: [] },
+            outputParser: "raw",
+          },
+        ],
+        isInstalled: () => true,
+      });
+
+      discoverExtensions();
+
+      const tools = getAllExtensions().filter((e) => e.category === "tool");
+      expect(tools).toHaveLength(2);
+      expect(tools.some((t) => t.id === "tool:rojo_build")).toBe(true);
+      expect(tools.some((t) => t.id === "tool:wally_install")).toBe(true);
+      expect(tools.every((t) => t.installed)).toBe(true);
+    });
+
+    it("regression: tools should default to OFF (external things off by default)", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockGetRegistry.mockReturnValue({
+        getAll: () => [{
+          name: "rojo_build",
+          description: "Build .rbxl place file",
+          category: "roblox",
+          command: "rojo",
+          args: [], flags: [],
+          detection: { method: "binary", check: "rojo --version" },
+          context: { whenToUse: [], examples: [] },
+          outputParser: "raw",
+        }],
+        isInstalled: () => true,
+      });
+
+      discoverExtensions();
+
+      const tool = getExtension("tool:rojo_build");
+      expect(tool).toBeDefined();
+      // External tools must default to OFF (user requested this)
+      expect(tool!.enabled).toBe(false);
+      expect(tool!.triggerMode).toBe("disabled");
+    });
+
+    it("regression: features should default to ON (internal features on by default)", () => {
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      mockGetRegistry.mockReturnValue(null);
+
+      discoverExtensions();
+
+      const features = getAllExtensions().filter((e) => e.category === "feature");
+      expect(features.length).toBeGreaterThan(0);
+      // Every internal feature must default to ON
+      for (const f of features) {
+        expect(f.enabled).toBe(true);
+        expect(f.triggerMode).toBe("always");
+      }
+    });
   });
 
   describe("getHubSummary - comprehensive", () => {
