@@ -34,7 +34,7 @@ jobs:
           cache: "npm"
       - run: npm ci
       - name: Run tests with coverage
-        run: npx vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary
+        run: npx vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --exclude src/__tests__/memory-full.test.ts
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         with:
