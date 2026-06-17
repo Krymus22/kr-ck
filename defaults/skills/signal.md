@@ -1,65 +1,61 @@
 ---
 name: Signal
-version: 0.4.0
-source: wally
-package: sleitnick/signal@0.4.0
+version: "0.4.0"
+source: github
+repo: Sleitnick/RbxUtil
+url: https://github.com/Sleitnick/RbxUtil/tree/main/modules/signal
+homepage: https://sleitnick.github.io/RbxUtil/api/Signal
 category: roblox
+package: sleitnick/signal@2.0.3
 tags: [events, signal, callback, rbxscriptsignal]
 ---
 
-# Signal
+> **Source:** This skill is the official README from [Sleitnick/RbxUtil](https://github.com/Sleitnick/RbxUtil/tree/main/modules/signal) on GitHub.
+> All credit goes to the original authors. Licensed under their respective licenses.
+> Fetched on 2026-06-17.
 
-**What it is**: A simple, leak-resistant signal implementation for Luau —
-a replacement for `Instance.new("BindableEvent")` with cleaner semantics and
-no memory leaks across multiple `:Connect()` calls.
+---
 
-**When to use**:
-- You need a custom event for module-to-module communication
-- You want `:Wait()` support (yielding until the signal fires)
-- You want connections to be cleaned up automatically when the signal is destroyed
-- You're replacing RBXScriptSignal boilerplate
+> **Note:** `Signal` is one module within the larger [Sleitnick/RbxUtil](https://github.com/Sleitnick/RbxUtil) project.
+> The README below is the parent project's README. See the dedicated docs page for `Signal`: https://sleitnick.github.io/RbxUtil/api/Signal
 
-**Installation** (in `wally.toml`):
-```toml
-[dependencies]
-Signal = "sleitnick/signal@0.4.0"
-```
+---
 
-**Common pattern** (Luau):
-```lua
-local Signal = require(game:GetService("ReplicatedStorage").Packages.Signal)
+[![CI](https://github.com/Sleitnick/RbxUtil/actions/workflows/ci.yaml/badge.svg)](https://github.com/Sleitnick/RbxUtil/actions/workflows/ci.yaml)
+[![Docs](https://github.com/Sleitnick/RbxUtil/actions/workflows/docs.yaml/badge.svg)](https://github.com/Sleitnick/RbxUtil/actions/workflows/docs.yaml)
 
--- Create
-local onCoinChanged = Signal.new()
+# RbxUtil
 
--- Connect (returns a connection object)
-local conn = onCoinChanged:Connect(function(newAmount, oldAmount)
-    print("Coins changed:", oldAmount, "->", newAmount)
-end)
+| Module | Dependency | Description |
+| -- | -- | -- |
+| [BufferUtil](https://sleitnick.github.io/RbxUtil/api/BufferUtil) | `BufferUtil = "sleitnick/buffer-util@0.3.2"` | Buffer utilities |
+| [Comm](https://sleitnick.github.io/RbxUtil/api/Comm) | `Comm = "sleitnick/comm@1.0.1"` | Comm library for remote communication |
+| [Component](https://sleitnick.github.io/RbxUtil/api/Component) | `Component = "sleitnick/component@2.4.8"` | Component class |
+| [Concur](https://sleitnick.github.io/RbxUtil/api/Concur) | `Concur = "sleitnick/concur@0.1.2"` | Concurrent task handler |
+| [EnumList](https://sleitnick.github.io/RbxUtil/api/EnumList) | `EnumList = "sleitnick/enum-list@2.1.0"` | Enum List class |
+| [Find](https://sleitnick.github.io/RbxUtil/api/Find) | `Find = "sleitnick/find@1.0.0"` | Utility function for finding an in the data model hierarchy |
+| [Input](https://sleitnick.github.io/RbxUtil/api/Input) | `Input = "sleitnick/input@3.0.0"` | Basic input classes |
+| [Loader](https://sleitnick.github.io/RbxUtil/api/Loader) | `Loader = "sleitnick/loader@2.0.0"` | Requires all modules within a given instance |
+| [Log](https://sleitnick.github.io/RbxUtil/api/Log) | `Log = "sleitnick/log@0.1.2"` | Log class for logging to PlayFab |
+| [Net](https://sleitnick.github.io/RbxUtil/api/Net) | `Net = "sleitnick/net@0.2.0"` | Static networking module |
+| [Option](https://sleitnick.github.io/RbxUtil/api/Option) | `Option = "sleitnick/option@1.0.5"` | Represent optional values in Lua |
+| [PID](https://sleitnick.github.io/RbxUtil/api/PID) | `PID = "sleitnick/pid@2.1.0"` | PID Controller class |
+| [Quaternion](https://sleitnick.github.io/RbxUtil/api/Quaternion) | `Quaternion = "sleitnick/quaternion@0.2.3"` | Quaternion class |
+| [Query](https://sleitnick.github.io/RbxUtil/api/Query) | `Query = "sleitnick/query@0.2.0"` | Query instances |
+| [Sequent](https://sleitnick.github.io/RbxUtil/api/Sequent) | `Sequent = "sleitnick/sequent@0.1.0"` | Sequent class |
+| [Ser](https://sleitnick.github.io/RbxUtil/api/Ser) | `Ser = "sleitnick/ser@1.0.5"` | Ser class for serialization and deserialization |
+| [Shake](https://sleitnick.github.io/RbxUtil/api/Shake) | `Shake = "sleitnick/shake@1.1.0"` | Shake class for making things shake |
+| [Signal](https://sleitnick.github.io/RbxUtil/api/Signal) | `Signal = "sleitnick/signal@2.0.3"` | Signal class |
+| [Silo](https://sleitnick.github.io/RbxUtil/api/Silo) | `Silo = "sleitnick/silo@0.2.0"` | State container class |
+| [Spring](https://sleitnick.github.io/RbxUtil/api/Spring) | `Spring = "sleitnick/spring@1.0.0"` | Critically damped spring |
+| [Stream](https://sleitnick.github.io/RbxUtil/api/Stream) | `Stream = "sleitnick/stream@0.1.1"` | Stream abstraction wrapper around buffers |
+| [Streamable](https://sleitnick.github.io/RbxUtil/api/Streamable) | `Streamable = "sleitnick/streamable@1.2.4"` | Streamable class and StreamableUtil |
+| [Symbol](https://sleitnick.github.io/RbxUtil/api/Symbol) | `Symbol = "sleitnick/symbol@2.0.1"` | Symbol |
+| [TableUtil](https://sleitnick.github.io/RbxUtil/api/TableUtil) | `TableUtil = "sleitnick/table-util@1.2.1"` | Table utility functions |
+| [TaskQueue](https://sleitnick.github.io/RbxUtil/api/TaskQueue) | `TaskQueue = "sleitnick/task-queue@1.0.0"` | Batches tasks that occur on the same execution step |
+| [Timer](https://sleitnick.github.io/RbxUtil/api/Timer) | `Timer = "sleitnick/timer@2.0.0"` | Timer class |
+| [Tree](https://sleitnick.github.io/RbxUtil/api/Tree) | `Tree = "sleitnick/tree@1.1.0"` | Utility functions for accessing instances in the game hierarchy |
+| [Trove](https://sleitnick.github.io/RbxUtil/api/Trove) | `Trove = "sleitnick/trove@1.8.0"` | Trove class for tracking and cleaning up objects |
+| [TypedRemote](https://sleitnick.github.io/RbxUtil/api/TypedRemote) | `TypedRemote = "sleitnick/typed-remote@0.3.0"` | Simple networking package for typed RemoteEvents and RemoteFunctions |
+| [WaitFor](https://sleitnick.github.io/RbxUtil/api/WaitFor) | `WaitFor = "sleitnick/wait-for@1.0.0"` | WaitFor class for awaiting instances |
 
--- Fire
-onCoinChanged:Fire(100, 50)
-
--- Disconnect
-conn:Disconnect()
-
--- Or yield until next fire (in a coroutine)
-task.spawn(function()
-    local newAmount = onCoinChanged:Wait()
-    print("Got:", newAmount)
-end)
-```
-
-**API summary**:
-- `Signal.new()` — create a new signal
-- `signal:Connect(fn)` — returns a connection
-- `signal:Fire(...)` — invoke all connected handlers (sync, in order)
-- `signal:Wait()` — yields current thread until next fire; returns args
-- `signal:DisconnectAll()` — disconnect everything
-- `signal:Destroy()` — disconnect all + mark signal as dead
-
-**Pitfalls to avoid**:
-- Handlers fire synchronously — don't do heavy work in `:Fire()` or you'll stall
-- `:Wait()` only catches the NEXT fire; if you need every fire, use `:Connect()`
-- Don't connect the same fn twice expecting dedup — both will fire
-- For per-frame events (RenderStepped), prefer the native RBXScriptSignal instead

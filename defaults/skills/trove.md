@@ -1,66 +1,61 @@
 ---
 name: Trove
-version: 2.0.3
-source: wally
-package: sleitnick/trove@2.0.3
+version: "2.0.3"
+source: github
+repo: Sleitnick/RbxUtil
+url: https://github.com/Sleitnick/RbxUtil/tree/main/modules/trove
+homepage: https://sleitnick.github.io/RbxUtil/api/Trove
 category: roblox
+package: sleitnick/trove@2.0.3
 tags: [cleanup, lifecycle, memory-management, connections]
 ---
 
-# Trove
+> **Source:** This skill is the official README from [Sleitnick/RbxUtil](https://github.com/Sleitnick/RbxUtil/tree/main/modules/trove) on GitHub.
+> All credit goes to the original authors. Licensed under their respective licenses.
+> Fetched on 2026-06-17.
 
-**What it is**: A cleanup/lifecycle utility that batches together connections,
-instances, threads, and functions so they can all be cleaned up with a single
-`trove:Clean()` or `trove:Destroy()` call.
+---
 
-**When to use**:
-- You're wiring up multiple `:Connect()` calls and want to disconnect all at once
-- You're creating Instances procedurally and need to guarantee cleanup
-- You're spawning threads (`task.spawn`) that should be cancelled on teardown
-- You want RAII-style lifecycle management in Luau
+> **Note:** `Trove` is one module within the larger [Sleitnick/RbxUtil](https://github.com/Sleitnick/RbxUtil) project.
+> The README below is the parent project's README. See the dedicated docs page for `Trove`: https://sleitnick.github.io/RbxUtil/api/Trove
 
-**Installation** (in `wally.toml`):
-```toml
-[dependencies]
-Trove = "sleitnick/trove@2.0.3"
-```
+---
 
-**Common pattern** (Luau):
-```lua
-local Trove = require(game:GetService("ReplicatedStorage").Packages.Trove)
+[![CI](https://github.com/Sleitnick/RbxUtil/actions/workflows/ci.yaml/badge.svg)](https://github.com/Sleitnick/RbxUtil/actions/workflows/ci.yaml)
+[![Docs](https://github.com/Sleitnick/RbxUtil/actions/workflows/docs.yaml/badge.svg)](https://github.com/Sleitnick/RbxUtil/actions/workflows/docs.yaml)
 
-local function setupPlayerUI(player)
-    local self = Trove.new()
+# RbxUtil
 
-    local gui = self:Construct("ScreenGui")
-    gui.Parent = player:WaitForChild("PlayerGui")
+| Module | Dependency | Description |
+| -- | -- | -- |
+| [BufferUtil](https://sleitnick.github.io/RbxUtil/api/BufferUtil) | `BufferUtil = "sleitnick/buffer-util@0.3.2"` | Buffer utilities |
+| [Comm](https://sleitnick.github.io/RbxUtil/api/Comm) | `Comm = "sleitnick/comm@1.0.1"` | Comm library for remote communication |
+| [Component](https://sleitnick.github.io/RbxUtil/api/Component) | `Component = "sleitnick/component@2.4.8"` | Component class |
+| [Concur](https://sleitnick.github.io/RbxUtil/api/Concur) | `Concur = "sleitnick/concur@0.1.2"` | Concurrent task handler |
+| [EnumList](https://sleitnick.github.io/RbxUtil/api/EnumList) | `EnumList = "sleitnick/enum-list@2.1.0"` | Enum List class |
+| [Find](https://sleitnick.github.io/RbxUtil/api/Find) | `Find = "sleitnick/find@1.0.0"` | Utility function for finding an in the data model hierarchy |
+| [Input](https://sleitnick.github.io/RbxUtil/api/Input) | `Input = "sleitnick/input@3.0.0"` | Basic input classes |
+| [Loader](https://sleitnick.github.io/RbxUtil/api/Loader) | `Loader = "sleitnick/loader@2.0.0"` | Requires all modules within a given instance |
+| [Log](https://sleitnick.github.io/RbxUtil/api/Log) | `Log = "sleitnick/log@0.1.2"` | Log class for logging to PlayFab |
+| [Net](https://sleitnick.github.io/RbxUtil/api/Net) | `Net = "sleitnick/net@0.2.0"` | Static networking module |
+| [Option](https://sleitnick.github.io/RbxUtil/api/Option) | `Option = "sleitnick/option@1.0.5"` | Represent optional values in Lua |
+| [PID](https://sleitnick.github.io/RbxUtil/api/PID) | `PID = "sleitnick/pid@2.1.0"` | PID Controller class |
+| [Quaternion](https://sleitnick.github.io/RbxUtil/api/Quaternion) | `Quaternion = "sleitnick/quaternion@0.2.3"` | Quaternion class |
+| [Query](https://sleitnick.github.io/RbxUtil/api/Query) | `Query = "sleitnick/query@0.2.0"` | Query instances |
+| [Sequent](https://sleitnick.github.io/RbxUtil/api/Sequent) | `Sequent = "sleitnick/sequent@0.1.0"` | Sequent class |
+| [Ser](https://sleitnick.github.io/RbxUtil/api/Ser) | `Ser = "sleitnick/ser@1.0.5"` | Ser class for serialization and deserialization |
+| [Shake](https://sleitnick.github.io/RbxUtil/api/Shake) | `Shake = "sleitnick/shake@1.1.0"` | Shake class for making things shake |
+| [Signal](https://sleitnick.github.io/RbxUtil/api/Signal) | `Signal = "sleitnick/signal@2.0.3"` | Signal class |
+| [Silo](https://sleitnick.github.io/RbxUtil/api/Silo) | `Silo = "sleitnick/silo@0.2.0"` | State container class |
+| [Spring](https://sleitnick.github.io/RbxUtil/api/Spring) | `Spring = "sleitnick/spring@1.0.0"` | Critically damped spring |
+| [Stream](https://sleitnick.github.io/RbxUtil/api/Stream) | `Stream = "sleitnick/stream@0.1.1"` | Stream abstraction wrapper around buffers |
+| [Streamable](https://sleitnick.github.io/RbxUtil/api/Streamable) | `Streamable = "sleitnick/streamable@1.2.4"` | Streamable class and StreamableUtil |
+| [Symbol](https://sleitnick.github.io/RbxUtil/api/Symbol) | `Symbol = "sleitnick/symbol@2.0.1"` | Symbol |
+| [TableUtil](https://sleitnick.github.io/RbxUtil/api/TableUtil) | `TableUtil = "sleitnick/table-util@1.2.1"` | Table utility functions |
+| [TaskQueue](https://sleitnick.github.io/RbxUtil/api/TaskQueue) | `TaskQueue = "sleitnick/task-queue@1.0.0"` | Batches tasks that occur on the same execution step |
+| [Timer](https://sleitnick.github.io/RbxUtil/api/Timer) | `Timer = "sleitnick/timer@2.0.0"` | Timer class |
+| [Tree](https://sleitnick.github.io/RbxUtil/api/Tree) | `Tree = "sleitnick/tree@1.1.0"` | Utility functions for accessing instances in the game hierarchy |
+| [Trove](https://sleitnick.github.io/RbxUtil/api/Trove) | `Trove = "sleitnick/trove@1.8.0"` | Trove class for tracking and cleaning up objects |
+| [TypedRemote](https://sleitnick.github.io/RbxUtil/api/TypedRemote) | `TypedRemote = "sleitnick/typed-remote@0.3.0"` | Simple networking package for typed RemoteEvents and RemoteFunctions |
+| [WaitFor](https://sleitnick.github.io/RbxUtil/api/WaitFor) | `WaitFor = "sleitnick/wait-for@1.0.0"` | WaitFor class for awaiting instances |
 
-    self:Add(gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        -- handle resize
-    end))
-
-    self:Add(function()
-        print("Cleaning up UI for", player.Name)
-    end)
-
-    -- Later, on teardown
-    player.AncestryChanged:Once(function()
-        self:Clean()  -- disconnects, destroys, calls all added fns
-    end)
-
-    return self
-end
-```
-
-**API summary**:
-- `trove:Add(item)` — adds an RBXScriptConnection, Instance, thread, or function
-- `trove:Construct(className)` — creates an Instance and tracks it
-- `trove:Extend()` — returns a sub-trove that cleans up with the parent
-- `trove:Clean()` — runs all cleanups but keeps the trove usable
-- `trove:Destroy()` — cleans up AND marks the trove itself as dead
-
-**Pitfalls to avoid**:
-- Don't double-clean; `:Clean()` is idempotent but `:Destroy()` is final
-- Don't add raw Instances you don't own — `:Clean()` will `:Destroy()` them
-- For long-lived objects, prefer `:Extend()` over nested Troves for clarity
-- Trove 2.x has breaking API changes from 1.x (no more `:AddToClean`)

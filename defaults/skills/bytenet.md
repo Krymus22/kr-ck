@@ -1,68 +1,49 @@
 ---
 name: ByteNet
-version: 0.2.0
-source: wally
-package: ffrostflame/bytenet@0.2.0
+version: "0.2.0"
+source: github
+repo: ffrostfall/ByteNet
+url: https://github.com/ffrostfall/ByteNet
 category: roblox
+package: ffrostflame/bytenet@0.2.0
 tags: [networking, remote, serialization, typesafe]
 ---
 
+> **Source:** This skill is the official README from [ffrostfall/ByteNet](https://github.com/ffrostfall/ByteNet) on GitHub.
+> All credit goes to the original authors. Licensed under their respective licenses.
+> Fetched on 2026-06-17.
+
+---
+
+<div align="center">
+  
+  <img align="center" src="./docs/assets/bytenetLogo.png" width=100 height=100></img>
+
 # ByteNet
 
-**What it is**: A type-safe networking library for Roblox that replaces manual
-RemoteEvent/RemoteFunction boilerplate with declared request/response contracts.
+## Simple, buffer-based networking.
 
-**When to use**:
-- You need client↔server RPCs with TypeScript-like type safety in Luau
-- You want to avoid RemoteEvent name typos and mismatched argument shapes
-- You need bidirectional streams (server → client push or client → server pull)
-- You want automatic serialization of complex tables (vectors, instances, etc.)
+[GitHub](https://github.com/ffrostfall/ByteNet) | [Documentation](https://ffrostfall.github.io/ByteNet/)
 
-**Installation** (in `wally.toml`):
-```toml
-[dependencies]
-ByteNet = "ffrostflame/bytenet@0.2.0"
-```
+</div>
 
-**Common pattern** (Luau):
-```lua
-local ByteNet = require(game:GetService("ReplicatedStorage").Packages.ByteNet)
+ByteNet is an networking library which takes your Luau data, and serializes it into buffers. On the other end, ByteNet deserializes your data, and then feeds it back to your Luau code. You don't need to worry about type validation, optimization, packet structure, etc. ByteNet does all the hard parts for you! Strictly typed with an incredibly basic API that explains itself, ByteNet makes networking simple, easy, and quick. There's very few concepts you need to grasp in order to use ByteNet; it has an incredibly minimalistic & simplistic, yet powerful API.
 
-local Protocol = ByteNet.defineProtocol({
-    name = "GameProtocol",
-    types = {
-        Vector3 = ByteNet.serialized.struct({
-            x = ByteNet.serialized.f32,
-            y = ByteNet.serialized.f32,
-            z = ByteNet.serialized.f32,
-        }),
-    },
-    packets = {
-        MovePlayer = ByteNet.packet({
-            type = "reliable",
-            data = function(t)
-                return {
-                    position = t.Vector3,
-                }
-            end,
-        }),
-    },
-})
+## Installation
 
--- Server
-Protocol.packets.MovePlayer:onReceive(function(player, data)
-    -- data.position is typed
-    player.Character:SetPrimaryPartCFrame(CFrame.new(data.position))
-end)
+You can install ByteNet on Wally, or through the latest release's `.rbxm` file.
 
--- Client
-Protocol.packets.MovePlayer:send({
-    position = Vector3.new(10, 0, 5),
-})
-```
+## Performance
 
-**Pitfalls to avoid**:
-- Don't share the protocol module as a normal ModuleScript — must be required via ByteNet
-- Always declare packets as "reliable" or "unreliable" explicitly; defaults differ per version
-- Send rate limit: don't fire reliable packets every frame; batch them
-- ByteNet version 0.2.0 has breaking API changes from 0.1.x — read migration notes
+ByteNet performs incredibly well compared to non-buffer based libraries like BridgeNet2. This is because ByteNet has a **custom serializer** that takes your Luau data and transforms it into a buffer, sending that and deserializing it on the other side.
+
+## Further contact
+
+You can contact me directly under the ByteNet thread in the [Roblox OSS Server](https://discord.gg/5KjV64PA3d).
+
+Further documentation [here](https://ffrostfall.github.io/ByteNet/).
+
+## License
+
+This project is under the MIT license! so, it's open source
+

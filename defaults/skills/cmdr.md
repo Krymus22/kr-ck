@@ -1,76 +1,41 @@
 ---
 name: Cmdr
-version: 1.12.0
-source: wally
-package: evaera/cmdr@1.12.0
+version: "1.12.0"
+source: github
+repo: evaera/Cmdr
+url: https://github.com/evaera/Cmdr
+homepage: https://eryn.io/Cmdr/
 category: roblox
+package: evaera/cmdr@1.12.0
 tags: [admin, commands, console, debugging]
 ---
 
-# Cmdr
+> **Source:** This skill is the official README from [evaera/Cmdr](https://github.com/evaera/Cmdr) on GitHub.
+> All credit goes to the original authors. Licensed under their respective licenses.
+> Fetched on 2026-06-17.
 
-**What it is**: An in-game admin command bar and console for Roblox. Provides
-a built-in command palette, a permission system, and a registration API for
-custom commands. Used heavily in development to debug live games.
+---
 
-**When to use**:
-- You need an in-game console for admins to run commands (teleport, give items, ban)
-- You want to expose debug commands to testers without giving them Studio access
-- You want a typed, argument-parsed command system (no manual string parsing)
-- You want built-in autocomplete and history
+<div align="center">
+	<img src="assets/logo.png" alt="Cmdr" height="150" />
+	<br/>
+	<a href="https://discord.gg/xFzPVg5WXm"><img src="https://img.shields.io/discord/1497725941974040731.svg?label=discord" /></a>
+	<p><a href="https://eryn.io/Cmdr/">View Docs</a></p>
+</div>
 
-**Installation** (in `wally.toml`):
-```toml
-[dependencies]
-Cmdr = "evaera/cmdr@1.12.0"
-```
+<!--moonwave-hide-before-this-line-->
 
-**Common pattern** (Luau — server init):
-```lua
-local Cmdr = require(game:GetService("ServerScriptService").Packages.Cmdr)
+**Cmdr** is a fully extensible and type safe command console for Roblox developers.
 
-local cmdr = Cmdr:RegisterDefaultHooks()  -- registers :kick, :ban, :tp, etc.
-cmdr:RegisterHook("beforeRun", function(context)
-    -- context.Executor is the player running the command
-    if not context.Executor:GetAttribute("IsAdmin") then
-        return "You do not have permission to run commands."
-    end
-end)
+- Great for admin commands, but does much more.
+- Make commands that tie in specifically with your game systems.
+- Intelligent autocompletion and instant validation.
+- Run commands programmatically on behalf of the local user.
+- Bind commands to user input.
+- Secure: the client and server both validate input separately.
+- Embedded commands: dynamically use the output of an inner command when running a command.
 
-cmdr:RegisterCommandsIn(game:GetService("ServerScriptService").CmdrCommands)
-```
+<p align="center">
+  <a href="https://giant.gfycat.com/HatefulTanAzurewingedmagpie.mp4"><img src="https://thumbs.gfycat.com/HatefulTanAzurewingedmagpie-size_restricted.gif" alt="Demo video" /></a>
+</p>
 
-**Custom command** (Luau, in `CmdrCommands/GiveCoins.lua`):
-```lua
-return {
-    Name = "give-coins",
-    Aliases = { "gc" },
-    Description = "Give coins to a player",
-    Group = "Admin",
-    Args = {
-        {
-            Type = "player",
-            Name = "target",
-            Description = "Who to give coins to",
-        },
-        {
-            Type = "integer",
-            Name = "amount",
-            Description = "How many coins",
-        },
-    },
-    Run = function(context, target, amount)
-        target:SetAttribute("Coins", (target:GetAttribute("Coins") or 0) + amount)
-        return "Gave " .. amount .. " coins to " .. target.Name
-    end,
-}
-```
-
-**Client console**: Cmdr automatically injects a `CmdrClient` in StarterPlayerScripts.
-Players press `:` (default) to open the console, type a command, and Enter to run.
-
-**Pitfalls to avoid**:
-- Always hook `beforeRun` for permission checks — don't trust client-side validation
-- Custom command files must be in a Folder, not a ModuleScript directly
-- Don't yield in `Run` without returning a Promise — Cmdr treats returns as output
-- For client-only commands, mark `Group = "Default"` and register client-side

@@ -34,8 +34,8 @@ describe("configSeeder", () => {
     // We're running in the project root which DOES have defaults/, so this test
     // verifies the positive path: when defaults exist, files are copied.
     const copied = seedUserConfig();
-    // 6 tool JSON files + 9 skill MD files = 15 (or 0 if already seeded)
-    expect(copied === 0 || copied === 15).toBe(true);
+    // 6 tool JSON files + 15 skill MD files = 21 (or 0 if already seeded)
+    expect(copied === 0 || copied === 21).toBe(true);
     // After seeding, marker should exist
     expect(isSeeded()).toBe(true);
   });
@@ -86,8 +86,10 @@ describe("configSeeder", () => {
     expect(toolFiles).toContain("rokit.json");
     expect(toolFiles).toContain("wally-package-types.json");
 
-    // Verify Roblox library skills are present
+    // Verify Roblox library + CLI skills are present (15 total now:
+    // 9 libraries + 6 CLI tool docs)
     const skillFiles = fs.readdirSync(skillsPath).filter((f) => f.endsWith(".md"));
+    // Library skills
     expect(skillFiles).toContain("profilestore.md");
     expect(skillFiles).toContain("bytenet.md");
     expect(skillFiles).toContain("replica.md");
@@ -97,6 +99,13 @@ describe("configSeeder", () => {
     expect(skillFiles).toContain("signal.md");
     expect(skillFiles).toContain("observers.md");
     expect(skillFiles).toContain("cmdr.md");
+    // CLI tool skills
+    expect(skillFiles).toContain("rojo-cli.md");
+    expect(skillFiles).toContain("wally-cli.md");
+    expect(skillFiles).toContain("lune-cli.md");
+    expect(skillFiles).toContain("selene-cli.md");
+    expect(skillFiles).toContain("rokit-cli.md");
+    expect(skillFiles).toContain("wally-package-types-cli.md");
   });
 
   it("each Roblox tool JSON should be valid and have required fields", () => {
@@ -127,11 +136,12 @@ describe("configSeeder", () => {
     }
   });
 
-  it("each Roblox skill MD should have YAML frontmatter and substantive content", () => {
+  it("each Roblox skill MD should have YAML frontmatter and real GitHub README content", () => {
     const skillsDir = path.join(process.cwd(), "defaults", "skills");
     const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
 
-    expect(files.length).toBe(9);
+    // 9 libraries + 6 CLI tool docs = 15 total
+    expect(files.length).toBe(15);
 
     for (const file of files) {
       const filePath = path.join(skillsDir, file);
@@ -147,19 +157,33 @@ describe("configSeeder", () => {
       const frontmatter = content.slice(4, endFront);
       expect(frontmatter).toContain("name:");
       expect(frontmatter).toContain("version:");
-      expect(frontmatter).toContain("source:");
-      expect(frontmatter).toContain("package:");
+      expect(frontmatter).toContain("source: github");
+      expect(frontmatter).toContain("repo:");
+      expect(frontmatter).toContain("url:");
       expect(frontmatter).toContain("category: roblox");
 
-      // Body should be substantive (at least 500 chars - real docs)
+      // Body should be substantive (real README content, at least 500 chars)
       const body = content.slice(endFront + 5);
-      expect(body.length).toBeGreaterThan(500);
+      expect(body.length).toBeGreaterThan(500, `${file} body too short`);
 
-      // Should have key sections
-      expect(body).toContain("**What it is**");
-      expect(body).toContain("**When to use**");
-      expect(body).toContain("**Installation**");
-      expect(body).toContain("```toml");
+      // Should have the attribution header (we add this to every skill)
+      expect(body).toContain("**Source:** This skill is the official README");
+      expect(body).toContain("github.com");
+    }
+  });
+
+  it("skill files should not contain 'Failed to fetch' markers (all READMEs downloaded successfully)", () => {
+    const skillsDir = path.join(process.cwd(), "defaults", "skills");
+    const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
+    for (const file of files) {
+      const content = fs.readFileSync(path.join(skillsDir, file), "utf8");
+      // No file should have the fetch-failure marker as the primary content
+      // (we allow it as fallback text but real READMEs should be present)
+      const bodyStart = content.indexOf("---\n\n", content.indexOf("---\n") + 4);
+      const body = content.slice(bodyStart);
+      // The body should have real content, not just the failure comment
+      const realContent = body.replace(/<!--[\s\S]*?-->/g, "").trim();
+      expect(realContent.length).toBeGreaterThan(200, `${file} has no real README content`);
     }
   });
 

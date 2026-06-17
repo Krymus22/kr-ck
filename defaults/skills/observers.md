@@ -1,73 +1,57 @@
 ---
 name: Observers
-version: 1.12.0
-source: wally
-package: fireelysium/observers@1.12.0
+version: "1.12.0"
+source: github
+repo: Sleitnick/RbxObservers
+url: https://github.com/Sleitnick/RbxObservers
+homepage: https://sleitnick.github.io/RbxObservers/
 category: roblox
+package: sleitnick/observers@1.12.0
 tags: [observation, instances, tags, collectionservice]
 ---
 
-# Observers
+> **Source:** This skill is the official README from [Sleitnick/RbxObservers](https://github.com/Sleitnick/RbxObservers) on GitHub.
+> All credit goes to the original authors. Licensed under their respective licenses.
+> Fetched on 2026-06-17.
 
-**What it is**: A library that lets you write reactive code based on instances
-matching a Tag (CollectionService) or being added/removed from the DataModel.
-Combines the "spawn + cleanup" pattern into a single declaration.
+---
 
-**When to use**:
-- You want to react when Instances with a specific Tag appear/disappear
-- You're building systems that need setup/teardown per Instance (e.g. enemy AI)
-- You want to avoid manual `CollectionService:GetInstanceAddedSignal` boilerplate
-- You need deterministic cleanup when an Instance is destroyed
+[![CI](https://github.com/Sleitnick/RbxObservers/actions/workflows/ci.yaml/badge.svg)](https://github.com/Sleitnick/RbxObservers/actions/workflows/ci.yaml)
+[![Docs](https://github.com/Sleitnick/RbxObservers/actions/workflows/docs.yaml/badge.svg)](https://github.com/Sleitnick/RbxObservers/actions/workflows/docs.yaml)
 
-**Installation** (in `wally.toml`):
+# RbxObservers
+
+A collection of observer utility functions.
+
+## Installation
+
+### Wally
+
+Add `sleitnick/observers` to dependencies list:
 ```toml
+[package]
+name = "your_name/your_project"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
 [dependencies]
-Observers = "fireelysium/observers@1.12.0"
+Observers = "sleitnick/observers@^0.4.0"
 ```
 
-**Common pattern** (Luau):
-```lua
-local Observers = require(game:GetService("ReplicatedStorage").Packages.Observers)
-local Trove = require(game:GetService("ReplicatedStorage").Packages.Trove)
+### roblox-ts
 
--- React to all "Enemy" tagged instances
-Observers.observeTag("Enemy", function(enemy)
-    local trove = Trove.new()
+Add `@rbxts/observers` to your `package.json` dependencies list, or run the npm install command:
 
-    -- Setup
-    local hum = enemy:WaitForChild("Humanoid")
-    local conn = hum.Died:Connect(function()
-        print("Enemy defeated:", enemy.Name)
-    end)
-    trove:Add(conn)
-
-    -- Cleanup runs automatically when the enemy is untagged or destroyed
-    return function()
-        trove:Clean()
-    end
-end)
+```json
+{
+	"dependencies": {
+		"@rbxts/observers": "^0.4.0"
+	}
+}
 ```
 
-**Other observation modes**:
-```lua
--- Watch a specific instance for any descendant being added
-Observers.observeDescendantsAdded(model, function(child) ... end)
-
--- Watch the DataModel for new services
-Observers.observeAdded(game, function(inst) ... end)
-
--- Combine with Replica for cross-player state observation
-Observers.observeReplica("Inventory", function(replica, player) ... end)
+```sh
+npm i --save @rbxts/observers
 ```
 
-**API summary**:
-- `Observers.observeTag(tagName, setupFn)` — setupFn returns cleanupFn
-- `Observers.observeAdded(parent, fn)` — fires when child added to parent
-- `Observers.observeRemoved(parent, fn)` — fires when child removed
-- `Observers.observeProperty(inst, prop, fn)` — fires on prop change
-
-**Pitfalls to avoid**:
-- The setup function MUST return a cleanup function or you'll leak on teardown
-- Don't yield in the setup function (no `task.wait()`) — observeTag is synchronous
-- If you tag/untag rapidly, you'll get setup/cleanup spam; debounce at call site
-- Tags must be registered with CollectionService first (or via Studio Tag editor)
