@@ -1,5 +1,5 @@
 /**
- * index.ts — CLI entry point for Claude-Killer (Ink TUI edition).
+ * index.ts - CLI entry point for Claude-Killer (Ink TUI edition).
  *
  * Responsibilities:
  *  - Load extensions (skills + MCP servers)
@@ -15,7 +15,7 @@ import { render } from "ink";
 import { App } from "./tui/App.js";
 import { loadAllExtensions, shutdownMCPServers } from "./extensions.js";
 
-// ─── Entry Point ─────────────────────────────────────────────────────────
+// --- Entry Point ---------------------------------------------------------
 
 async function main(): Promise<void> {
   // Load skills and start MCP servers before rendering

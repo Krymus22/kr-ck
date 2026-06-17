@@ -1,5 +1,5 @@
 /**
- * apiKeyPool.ts — Multi-key pool for NVIDIA NIM API.
+ * apiKeyPool.ts - Multi-key pool for NVIDIA NIM API.
  *
  * Allows the agent to use multiple NVIDIA API keys in parallel, each with its
  * own 40 RPM / 1 concurrent request quota. Sub-agents can pick a free key
@@ -14,9 +14,9 @@
  *   - Metrics: per-key call count, 429 count, last latency
  *
  * Configuration:
- *   - NVIDIA_API_KEY (existing, single key) — kept for backwards compat
- *   - NVIDIA_API_KEYS (new, comma-separated) — preferred for multi-key
- *   - NVIDIA_API_KEYS_FILE (new, file path with one key per line) — for many keys
+ *   - NVIDIA_API_KEY (existing, single key) - kept for backwards compat
+ *   - NVIDIA_API_KEYS (new, comma-separated) - preferred for multi-key
+ *   - NVIDIA_API_KEYS_FILE (new, file path with one key per line) - for many keys
  *
  * If only NVIDIA_API_KEY is set, the pool has 1 entry and behavior is identical
  * to before (no regression for existing users).
@@ -26,11 +26,11 @@ import OpenAI from "openai";
 import https from "node:https";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface ApiKeyStats {
   index: number;
-  keyPrefix: string;       // first 12 chars only — never log full key
+  keyPrefix: string;       // first 12 chars only - never log full key
   totalCalls: number;
   successCount: number;
   errorCount: number;
@@ -52,7 +52,7 @@ interface PoolEntry {
   latencies: number[];     // last 50 latencies for avg
 }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// --- Config ------------------------------------------------------------------
 
 const RATE_LIMIT_RPM = 40;
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -60,7 +60,7 @@ const COOLDOWN_AFTER_429_MS = 60_000;
 const MAX_LATENCY_SAMPLES = 50;
 const BASE_URL = "https://integrate.api.nvidia.com/v1";
 
-// ─── Keepalive agent (reuse the same config as apiClient.ts) ─────────────────
+// --- Keepalive agent (reuse the same config as apiClient.ts) -----------------
 
 const keepAliveAgent = new https.Agent({
   keepAlive: true,
@@ -70,12 +70,12 @@ const keepAliveAgent = new https.Agent({
   scheduling: "lifo",
 });
 
-// ─── Pool State ──────────────────────────────────────────────────────────────
+// --- Pool State --------------------------------------------------------------
 
 let pool: PoolEntry[] = [];
 let nextIndex = 0; // round-robin pointer
 
-// ─── Initialization ──────────────────────────────────────────────────────────
+// --- Initialization ----------------------------------------------------------
 
 /**
  * Load API keys from env vars. Priority:
@@ -140,7 +140,7 @@ export function initApiKeyPool(): boolean {
 
   const keys = loadApiKeys();
   if (keys.length === 0) {
-    log.warn("[API_POOL] No API keys configured — falling back to single-key mode");
+    log.warn("[API_POOL] No API keys configured - falling back to single-key mode");
     return false;
   }
 
@@ -174,7 +174,7 @@ export function initApiKeyPool(): boolean {
     };
   });
 
-  log.success(`[API_POOL] Initialized with ${pool.length} key(s) — effective throughput ~${pool.length * RATE_LIMIT_RPM} RPM, ${pool.length} concurrent`);
+  log.success(`[API_POOL] Initialized with ${pool.length} key(s) - effective throughput ~${pool.length * RATE_LIMIT_RPM} RPM, ${pool.length} concurrent`);
   return true;
 }
 
@@ -185,7 +185,7 @@ export function getPoolSize(): number {
   return pool.length;
 }
 
-// ─── Mutex (1 concurrent per key) ────────────────────────────────────────────
+// --- Mutex (1 concurrent per key) --------------------------------------------
 
 async function acquireMutex(entry: PoolEntry): Promise<void> {
   if (!entry.mutex.locked) {
@@ -207,7 +207,7 @@ function releaseMutex(entry: PoolEntry): void {
   }
 }
 
-// ─── Rate limiter (40 RPM sliding window per key) ────────────────────────────
+// --- Rate limiter (40 RPM sliding window per key) ----------------------------
 
 function checkRateLimit(entry: PoolEntry): { allowed: boolean; waitMs: number } {
   const now = Date.now();
@@ -219,12 +219,12 @@ function checkRateLimit(entry: PoolEntry): { allowed: boolean; waitMs: number } 
   if (entry.callCount < RATE_LIMIT_RPM) {
     return { allowed: true, waitMs: 0 };
   }
-  // Window full — must wait until oldest call falls out
+  // Window full - must wait until oldest call falls out
   const waitMs = RATE_LIMIT_WINDOW_MS - (now - entry.windowStart) + 100;
   return { allowed: false, waitMs };
 }
 
-// ─── Key selection ───────────────────────────────────────────────────────────
+// --- Key selection -----------------------------------------------------------
 
 /**
  * Pick the next available key (round-robin, skipping cooled-down or rate-limited).
@@ -258,7 +258,7 @@ function pickNextKey(): PoolEntry | null {
  */
 async function acquireKey(maxWaitMs: number = 60_000): Promise<PoolEntry> {
   if (pool.length === 0) {
-    throw new Error("API key pool is empty — initialize with initApiKeyPool() first");
+    throw new Error("API key pool is empty - initialize with initApiKeyPool() first");
   }
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
@@ -269,10 +269,10 @@ async function acquireKey(maxWaitMs: number = 60_000): Promise<PoolEntry> {
       entry.stats.inFlight++;
       return entry;
     }
-    // No key available — wait 100ms and retry
+    // No key available - wait 100ms and retry
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`[API_POOL] All keys busy or rate-limited after ${maxWaitMs}ms — pool size: ${pool.length}`);
+  throw new Error(`[API_POOL] All keys busy or rate-limited after ${maxWaitMs}ms - pool size: ${pool.length}`);
 }
 
 function releaseKey(entry: PoolEntry, success: boolean, httpStatus: number | null, latencyMs: number): void {
@@ -287,22 +287,22 @@ function releaseKey(entry: PoolEntry, success: boolean, httpStatus: number | nul
     entry.stats.successCount++;
   } else {
     entry.stats.errorCount++;
-    // 429 → cooldown this key for 60s
+    // 429 -> cooldown this key for 60s
     if (httpStatus === 429) {
       entry.stats.rateLimitedCount++;
       entry.stats.cooldownUntil = Date.now() + COOLDOWN_AFTER_429_MS;
-      log.warn(`[API_POOL] Key #${entry.index} (${entry.stats.keyPrefix}) hit 429 — cooling down for ${COOLDOWN_AFTER_429_MS / 1000}s`);
+      log.warn(`[API_POOL] Key #${entry.index} (${entry.stats.keyPrefix}) hit 429 - cooling down for ${COOLDOWN_AFTER_429_MS / 1000}s`);
     }
   }
 
   releaseMutex(entry);
 }
 
-// ─── Public API: run a chat completion on the pool ───────────────────────────
+// --- Public API: run a chat completion on the pool ---------------------------
 
 /**
  * Execute a chat completion using an available key from the pool.
- * This is the main entry point — replaces direct calls to client.chat.completions.create.
+ * This is the main entry point - replaces direct calls to client.chat.completions.create.
  *
  * Automatically handles:
  *   - Key selection (round-robin, skipping cooled-down)
@@ -318,7 +318,7 @@ export async function poolChatCompletion(
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
   if (pool.length === 0) {
     if (!initApiKeyPool()) {
-      throw new Error("No API keys configured — set NVIDIA_API_KEY or NVIDIA_API_KEYS env var");
+      throw new Error("No API keys configured - set NVIDIA_API_KEY or NVIDIA_API_KEYS env var");
     }
   }
 
@@ -358,7 +358,7 @@ export async function acquireKeyForStreaming(): Promise<{
 }> {
   if (pool.length === 0) {
     if (!initApiKeyPool()) {
-      throw new Error("No API keys configured — set NVIDIA_API_KEY or NVIDIA_API_KEYS env var");
+      throw new Error("No API keys configured - set NVIDIA_API_KEY or NVIDIA_API_KEYS env var");
     }
   }
   const entry = await acquireKey();
@@ -369,7 +369,7 @@ export async function acquireKeyForStreaming(): Promise<{
   };
 }
 
-// ─── Metrics ─────────────────────────────────────────────────────────────────
+// --- Metrics -----------------------------------------------------------------
 
 export function getPoolStats(): ApiKeyStats[] {
   return pool.map((e) => ({ ...e.stats }));
@@ -380,14 +380,14 @@ export function formatPoolStats(): string {
   const lines = pool.map((e) => {
     const s = e.stats;
     const cd = s.cooldownUntil > Date.now() ? ` COOLDOWN ${Math.ceil((s.cooldownUntil - Date.now()) / 1000)}s` : "";
-    const inflight = s.inFlight > 0 ? ` ⏳${s.inFlight}` : "";
+    const inflight = s.inFlight > 0 ? ` ...${s.inFlight}` : "";
     return `  #${s.index} ${s.keyPrefix} | calls=${s.totalCalls} ok=${s.successCount} err=${s.errorCount} 429=${s.rateLimitedCount} | avg=${Math.round(s.avgLatencyMs)}ms last=${s.lastLatencyMs}ms${inflight}${cd}`;
   });
   return `[API_POOL] ${pool.length} key(s):\n${lines.join("\n")}`;
 }
 
 /**
- * Reset all stats — useful for testing.
+ * Reset all stats - useful for testing.
  */
 export function resetPoolStats(): void {
   for (const entry of pool) {
@@ -406,7 +406,7 @@ export function resetPoolStats(): void {
 }
 
 /**
- * Reset the entire pool — for tests that need to reinitialize with different keys.
+ * Reset the entire pool - for tests that need to reinitialize with different keys.
  */
 export function resetPool(): void {
   pool = [];

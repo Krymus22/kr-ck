@@ -1,5 +1,5 @@
 /**
- * subAgents.ts — In-process sub-agents for isolated exploration.
+ * subAgents.ts - In-process sub-agents for isolated exploration.
  *
  * IDEIA 5: Mirrors Claude Code's sub-agent pattern: spawn a child agent
  * with a CLEAN context window to do deep exploration (read N files, search
@@ -17,7 +17,7 @@
  *   - Ability to spawn their own sub-agents (no recursion)
  *
  * Cost: 1 extra API call per sub-agent (input: focused prompt + tools output;
- * output: 1-2k token summary). Reuses the same NIM key — no extra billing.
+ * output: 1-2k token summary). Reuses the same NIM key - no extra billing.
  *
  * Activation: only when effort level is high/max (shouldUseSubAgents()).
  */
@@ -50,7 +50,7 @@ RULES:
 ## Key Findings
 - [bullet points with file:line references]
 
-If you can't find the answer, say so explicitly — don't invent.`;
+If you can't find the answer, say so explicitly - don't invent.`;
 
 const SUB_AGENT_TOOLS = [
   {
@@ -125,7 +125,7 @@ interface SubAgentArgs {
  */
 export async function runSubAgent(args: SubAgentArgs): Promise<string | null> {
   if (!shouldUseSubAgents()) {
-    log.debug(`[SUB_AGENT] Skipped — effort level too low`);
+    log.debug(`[SUB_AGENT] Skipped - effort level too low`);
     return null;
   }
 
@@ -219,7 +219,7 @@ function handleSubAgentError(err: unknown, callNum: number, consecutiveFailures:
 
 /**
  * Wrapper around chat() that re-throws transient errors for the outer loop to handle.
- * The inner chat() already retries ECONNRESET (8x) and 429 (4x) — this just classifies
+ * The inner chat() already retries ECONNRESET (8x) and 429 (4x) - this just classifies
  * the error for the outer retry loop.
  */
 async function chatWithRetry(subHistory: any[], callNum: number) {
@@ -227,7 +227,7 @@ async function chatWithRetry(subHistory: any[], callNum: number) {
     return await chat(subHistory, undefined, undefined, undefined, SUB_AGENT_TOOLS);
   } catch (err) {
     if (!isTransientNetworkErrorPublic(err) && !is429ErrorPublic(err)) {
-      throw err; // non-transient — let caller give up immediately
+      throw err; // non-transient - let caller give up immediately
     }
     log.warn(`[SUB_AGENT] chat() exhausted inner retries at call ${callNum + 1}: ${(err as Error).message}`);
     throw err;

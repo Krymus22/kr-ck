@@ -1,5 +1,5 @@
 /**
- * go.ts — Go development tools
+ * go.ts - Go development tools
  * 
  * Tools for go build, go test, go mod, golangci-lint
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const GO_TOOLS: Tool[] = [
-  // ─── Go Build ─────────────────────────────────────────────────────────
+  // --- Go Build ---------------------------------------------------------
   {
     name: "go_build",
     description: "Build Go project",
@@ -43,7 +43,7 @@ export const GO_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Go Run ───────────────────────────────────────────────────────────
+  // --- Go Run -----------------------------------------------------------
   {
     name: "go_run",
     description: "Run Go program",
@@ -70,7 +70,7 @@ export const GO_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Go Test ──────────────────────────────────────────────────────────
+  // --- Go Test ----------------------------------------------------------
   {
     name: "go_test",
     description: "Run Go tests",
@@ -112,7 +112,7 @@ export const GO_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Go Mod ───────────────────────────────────────────────────────────
+  // --- Go Mod -----------------------------------------------------------
   {
     name: "go_mod_download",
     description: "Download Go modules",
@@ -184,7 +184,7 @@ export const GO_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Go Vet ───────────────────────────────────────────────────────────
+  // --- Go Vet -----------------------------------------------------------
   {
     name: "go_vet",
     description: "Vet Go code for suspicious constructs",
@@ -217,7 +217,7 @@ export const GO_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Go Fmt ───────────────────────────────────────────────────────────
+  // --- Go Fmt -----------------------------------------------------------
   {
     name: "go_fmt",
     description: "Format Go code",
@@ -243,7 +243,7 @@ export const GO_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Golangci-lint ────────────────────────────────────────────────────
+  // --- Golangci-lint ----------------------------------------------------
   {
     name: "golangci_lint",
     description: "Lint Go code with golangci-lint",

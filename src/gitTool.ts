@@ -1,5 +1,5 @@
 /**
- * gitTool.ts — Git integration: status, diff, log, commit, branch, blame.
+ * gitTool.ts - Git integration: status, diff, log, commit, branch, blame.
  */
 
 import { runShell } from "./shell.js";

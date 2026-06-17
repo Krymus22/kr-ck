@@ -1,5 +1,5 @@
 /**
- * session.ts — Session persistence: save/restore conversations to disk.
+ * session.ts - Session persistence: save/restore conversations to disk.
  */
 
 import * as fs from "node:fs";

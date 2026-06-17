@@ -1,18 +1,18 @@
 /**
- * config.ts — Centralized configuration loaded from environment variables.
+ * config.ts - Centralized configuration loaded from environment variables.
  * All runtime tunables live here; the rest of the codebase imports from this
  * module instead of reading process.env directly.
  */
 
 import "dotenv/config";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// --- Helpers ----------------------------------------------------------------
 
 function requireEnv(key: string): string {
   const value = process.env[key];
   if (!value || value.trim() === "") {
     console.error(
-      `\n❌  Missing required environment variable: ${key}\n` +
+      `\nX  Missing required environment variable: ${key}\n` +
         `   Set it in your shell or in a .env file.\n` +
         `   Example: NVIDIA_API_KEY=nvapi-xxxx\n`
     );
@@ -42,7 +42,7 @@ function optionalFloat(key: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-// ─── Validate: at least one key source must be set ─────────────────────────
+// --- Validate: at least one key source must be set -------------------------
 
 const hasSingleKey = process.env.NVIDIA_API_KEY?.trim();
 const hasMultiKeys = process.env.NVIDIA_API_KEYS?.trim();
@@ -50,7 +50,7 @@ const hasKeysFile = process.env.NVIDIA_API_KEYS_FILE?.trim();
 
 if (!hasSingleKey && !hasMultiKeys && !hasKeysFile) {
   console.error(
-    `\n❌  Missing NVIDIA API key configuration.\n` +
+    `\nX  Missing NVIDIA API key configuration.\n` +
     `   Set ONE of:\n` +
     `     NVIDIA_API_KEY=nvapi-xxx        (single key, 40 RPM, 1 concurrent)\n` +
     `     NVIDIA_API_KEYS=nvapi-x1,nvapi-x2,nvapi-x3   (multi-key pool, N x 40 RPM)\n` +
@@ -59,7 +59,7 @@ if (!hasSingleKey && !hasMultiKeys && !hasKeysFile) {
   process.exit(1);
 }
 
-// ─── Exported Config ────────────────────────────────────────────────────────
+// --- Exported Config --------------------------------------------------------
 
 export const config = {
   /** NVIDIA NIM API key (required if NVIDIA_API_KEYS not set). */
@@ -113,10 +113,10 @@ export const config = {
   /** Model's context window size in tokens (used for status bar). */
   contextWindowTokens: optionalInt("CONTEXT_WINDOW_TOKENS", 128000),
 
-  /** Threshold (0.0–1.0) of context window that triggers auto-compact. */
+  /** Threshold (0.0-1.0) of context window that triggers auto-compact. */
   contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.75),
 
-  /** Threshold (0.0–1.0) of context window that warns user with yellow bar. */
+  /** Threshold (0.0-1.0) of context window that warns user with yellow bar. */
   contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.6),
 
   /** Approximate USD cost per 1k prompt tokens (estimate only). */

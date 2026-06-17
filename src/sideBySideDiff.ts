@@ -1,5 +1,5 @@
 /**
- * sideBySideDiff.ts — Colorful side-by-side diff viewer for terminal.
+ * sideBySideDiff.ts - Colorful side-by-side diff viewer for terminal.
  */
 
 // Colors used for diff rendering (inline constants to avoid circular deps)
@@ -133,8 +133,8 @@ export function renderSideBySide(diff: DiffLine[], maxLineWidth: number = 80): s
 
   // Header
   lines.push(
-    `\x1b[1m\x1b[47m${"OLD".padEnd(halfWidth)} │ ${"NEW".padEnd(halfWidth)}\x1b[0m`,
-    `${"─".repeat(halfWidth)}─┼─${"─".repeat(halfWidth)}`
+    `\x1b[1m\x1b[47m${"OLD".padEnd(halfWidth)} | ${"NEW".padEnd(halfWidth)}\x1b[0m`,
+    `${"-".repeat(halfWidth)}-+-${"-".repeat(halfWidth)}`
   );
 
   for (const line of diff) {
@@ -165,7 +165,7 @@ export function renderSideBySide(diff: DiffLine[], maxLineWidth: number = 80): s
     const oldNum = line.oldNum === null ? "    " : String(line.oldNum).padStart(4);
     const newNum = line.newNum === null ? "    " : String(line.newNum).padStart(4);
 
-    lines.push(`${oldNum} ${coloredOld} │ ${newNum} ${coloredNew}`);
+    lines.push(`${oldNum} ${coloredOld} | ${newNum} ${coloredNew}`);
   }
 
   return lines.join("\n");

@@ -1,18 +1,18 @@
 /**
- * effortLevels.ts — User-controlled reasoning effort via prompt.
+ * effortLevels.ts - User-controlled reasoning effort via prompt.
  *
  * NVIDIA NIM API exposes thinking as on/off (no native Low/Medium/High/Max).
  * Fable 5 has 5 native effort levels; we approximate the same UX by adjusting
  * the SYSTEM PROMPT to instruct the model how much to reason.
  *
  * Levels:
- *   - low    → "Responda direto. Não use pensar() a menos que seja muito complexo."
+ *   - low    -> "Responda direto. Não use pensar() a menos que seja muito complexo."
  *              For trivial tasks (rename, format, simple Q&A). Skips self-validation.
- *   - medium → "Use pensar() para tarefas não-triviais. Mantenha raciocínio curto."
+ *   - medium -> "Use pensar() para tarefas não-triviais. Mantenha raciocínio curto."
  *              Default. Good balance.
- *   - high   → "Use pensar() antes de CADA escrita. Verifique tipos e edge cases."
+ *   - high   -> "Use pensar() antes de CADA escrita. Verifique tipos e edge cases."
  *              For complex refactors, multi-file changes.
- *   - max    → "Use pensar() antes de cada tool call. Valide cada passo. Considere
+ *   - max    -> "Use pensar() antes de cada tool call. Valide cada passo. Considere
  *              alternativas. Reflita sobre o trabalho feito antes de terminar."
  *              Mirrors Fable 5 max effort: "reflects on and validates its own work".
  *
@@ -31,7 +31,7 @@ const STORAGE_KEY = "claude-killer:effort-level";
 let currentLevel: EffortLevel = loadInitialLevel();
 
 function loadInitialLevel(): EffortLevel {
-  // 1. Env var wins (highest priority — for CLI/scripted use)
+  // 1. Env var wins (highest priority - for CLI/scripted use)
   const envVal = (process.env[ENV_KEY] ?? "").toLowerCase();
   if (VALID_LEVELS.has(envVal as EffortLevel)) return envVal as EffortLevel;
   // 2. Persistent storage (set via /effort slash command)
@@ -72,7 +72,7 @@ export function getEffortPromptSnippet(): string {
     case "low":
       return `## EFFORT LEVEL: LOW
 Responda direto e conciso. Use pensar() APENAS para tarefas complexas (multi-arquivo, algoritmos, debugging).
-Não valide cada passo — foque em velocidade.
+Não valide cada passo - foque em velocidade.
 Pule auto-testes pós-diff a menos que o usuário peça.`;
 
     case "medium":
@@ -106,10 +106,10 @@ Se não tiver certeza, faça mais research antes de agir.`;
  */
 export function getEffortLabel(): string {
   const labels: Record<EffortLevel, string> = {
-    low: "LOW ⚡",
-    medium: "MEDIUM ⚙",
-    high: "HIGH 🔍",
-    max: "MAX 🧠",
+    low: "LOW !",
+    medium: "MEDIUM G",
+    high: "HIGH Q",
+    max: "MAX B",
   };
   return labels[currentLevel];
 }

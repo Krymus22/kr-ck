@@ -1,23 +1,23 @@
 /**
- * memory.ts — Persistent memory system for Claude Killer.
+ * memory.ts - Persistent memory system for Claude Killer.
  *
  * 4-layer memory architecture:
- *   1. Session checkpoint (checkpoint.md) — current session state
- *   2. Project memory (MEMORY.md) — persistent project knowledge
- *   3. Global memory (~/.claude-killer/memory/global.md) — user preferences
- *   4. History (JSON files) — full session traces for search
+ *   1. Session checkpoint (checkpoint.md) - current session state
+ *   2. Project memory (MEMORY.md) - persistent project knowledge
+ *   3. Global memory (~/.claude-killer/memory/global.md) - user preferences
+ *   4. History (JSON files) - full session traces for search
  *
  * Storage structure:
  *   ~/.claude-killer/
- *   ├── memory/
- *   │   ├── global.md          # User preferences
- *   │   ├── history/           # Session traces
- *   │   └── skills/            # Extracted reusable skills
- *   └── <project>/
- *       └── .claude-killer/
- *           ├── MEMORY.md      # Project knowledge
- *           ├── checkpoint.md  # Current session state
- *           └── notes.md       # Scratch notes
+ *   +-- memory/
+ *   |   +-- global.md          # User preferences
+ *   |   +-- history/           # Session traces
+ *   |   +-- skills/            # Extracted reusable skills
+ *   +-- <project>/
+ *       +-- .claude-killer/
+ *           +-- MEMORY.md      # Project knowledge
+ *           +-- checkpoint.md  # Current session state
+ *           +-- notes.md       # Scratch notes
  */
 
 import * as fs from "node:fs";
@@ -25,7 +25,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface MemoryConfig {
   globalDir: string;
@@ -89,7 +89,7 @@ export interface TraceMessage {
   timestamp: string;
 }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// --- Config ------------------------------------------------------------------
 
 const HOME = os.homedir();
 
@@ -107,7 +107,7 @@ export function getMemoryConfig(projectRoot?: string): MemoryConfig {
   };
 }
 
-// ─── Directory Management ────────────────────────────────────────────────────
+// --- Directory Management ----------------------------------------------------
 
 export function ensureMemoryDirs(config: MemoryConfig): void {
   const dirs = [
@@ -124,7 +124,7 @@ export function ensureMemoryDirs(config: MemoryConfig): void {
   }
 }
 
-// ─── File Operations ─────────────────────────────────────────────────────────
+// --- File Operations ---------------------------------------------------------
 
 function readMarkdown(filePath: string): string {
   try {
@@ -173,7 +173,7 @@ function writeJson(filePath: string, data: unknown): void {
   }
 }
 
-// ─── Project Memory ──────────────────────────────────────────────────────────
+// --- Project Memory ----------------------------------------------------------
 
 export function getProjectMemoryPath(config: MemoryConfig): string {
   return path.join(config.projectDir, "MEMORY.md");
@@ -194,7 +194,7 @@ export function appendProjectMemory(config: MemoryConfig, entry: string): void {
   writeProjectMemory(config, existing + newEntry);
 }
 
-// ─── Session Checkpoint ──────────────────────────────────────────────────────
+// --- Session Checkpoint ------------------------------------------------------
 
 export function getCheckpointPath(config: MemoryConfig): string {
   return path.join(config.projectDir, "checkpoint.md");
@@ -265,7 +265,7 @@ export function writeCheckpoint(config: MemoryConfig, checkpoint: SessionCheckpo
 
   content += `\n## File Changes\n\n`;
   for (const change of checkpoint.fileChanges) {
-    content += `- ${change.action}: ${change.path} — ${change.summary}\n`;
+    content += `- ${change.action}: ${change.path} - ${change.summary}\n`;
   }
 
   content += `\n## Active Tools\n\n`;
@@ -275,7 +275,7 @@ export function writeCheckpoint(config: MemoryConfig, checkpoint: SessionCheckpo
   writeMarkdown(filePath, content);
 }
 
-// ─── Global Memory ───────────────────────────────────────────────────────────
+// --- Global Memory -----------------------------------------------------------
 
 export function getGlobalMemoryPath(config: MemoryConfig): string {
   return path.join(config.globalDir, "global.md");
@@ -296,7 +296,7 @@ export function appendGlobalMemory(config: MemoryConfig, entry: string): void {
   writeGlobalMemory(config, existing + newEntry);
 }
 
-// ─── Notes ───────────────────────────────────────────────────────────────────
+// --- Notes -------------------------------------------------------------------
 
 export function getNotesPath(config: MemoryConfig): string {
   return path.join(config.projectDir, "notes.md");
@@ -317,7 +317,7 @@ export function appendNotes(config: MemoryConfig, entry: string): void {
   writeNotes(config, existing + newEntry);
 }
 
-// ─── Session History ─────────────────────────────────────────────────────────
+// --- Session History ---------------------------------------------------------
 
 export function saveSessionTrace(config: MemoryConfig, trace: SessionTrace): void {
   const fileName = `session_${trace.startTime.replaceAll(":", "-").replaceAll(".", "-")}.json`;
@@ -389,7 +389,7 @@ function countFileChangeMatches(changes: FileChange[], queryLower: string): numb
   return count;
 }
 
-// ─── Skills ──────────────────────────────────────────────────────────────────
+// --- Skills ------------------------------------------------------------------
 
 export interface Skill {
   id: string;
@@ -434,7 +434,7 @@ export function findMatchingSkills(config: MemoryConfig, context: string): Skill
     .sort((a, b) => b.usageCount - a.usageCount);
 }
 
-// ─── Memory Injection ────────────────────────────────────────────────────────
+// --- Memory Injection --------------------------------------------------------
 
 export interface InjectedMemory {
   projectMemory: string;
@@ -529,7 +529,7 @@ export function formatInjectedMemory(mem: InjectedMemory): string {
   return output;
 }
 
-// ─── Dream (Periodic Memory Review) ──────────────────────────────────────────
+// --- Dream (Periodic Memory Review) ------------------------------------------
 
 export interface DreamResult {
   reviewedSessions: number;
@@ -540,7 +540,7 @@ export interface DreamResult {
 }
 
 export async function runDream(config: MemoryConfig): Promise<DreamResult> {
-  log.info("Starting /dream — reviewing and compressing memory...");
+  log.info("Starting /dream - reviewing and compressing memory...");
 
   const result: DreamResult = {
     reviewedSessions: 0,
@@ -611,14 +611,14 @@ function extractPatterns(traces: SessionTrace[]): string[] {
   // Find frequently used tools
   for (const [tool, count] of toolFrequency) {
     if (count >= 5) {
-      patterns.push(`Tool "${tool}" used ${count} times — consider optimizing workflow`);
+      patterns.push(`Tool "${tool}" used ${count} times - consider optimizing workflow`);
     }
   }
 
   // Find frequently modified files
   for (const [file, count] of fileFrequency) {
     if (count >= 3) {
-      patterns.push(`File "${file}" modified ${count} times — may need refactoring`);
+      patterns.push(`File "${file}" modified ${count} times - may need refactoring`);
     }
   }
 
@@ -656,7 +656,7 @@ function generateNgrams(
 ): void {
   for (let n = 3; n <= Math.min(5, tools.length); n++) {
     for (let i = 0; i <= tools.length - n; i++) {
-      const sequence = tools.slice(i, i + n).join(" →");
+      const sequence = tools.slice(i, i + n).join(" ->");
       const existing = sequences.get(sequence) ?? { count: 0, traces: [] };
       existing.count++;
       existing.traces.push(trace);
@@ -666,7 +666,7 @@ function generateNgrams(
 }
 
 function createSkillFromSequence(sequence: string, count: number): Skill {
-  const parts = sequence.split(" →");
+  const parts = sequence.split(" ->");
   return {
     id: `skill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     name: `Auto: ${parts[0]} workflow`,
@@ -700,7 +700,7 @@ function deduplicateMemory(memory: string): string {
   return result.join("\n");
 }
 
-// ─── Distill (Extract Workflow Skills) ───────────────────────────────────────
+// --- Distill (Extract Workflow Skills) ---------------------------------------
 
 export interface DistillResult {
   skillsExtracted: number;
@@ -708,7 +708,7 @@ export interface DistillResult {
 }
 
 export async function runDistill(config: MemoryConfig): Promise<DistillResult> {
-  log.info("Starting /distill — extracting reusable workflow skills...");
+  log.info("Starting /distill - extracting reusable workflow skills...");
 
   const traces = listSessionTraces(config);
   const skills = extractSkillsFromTraces(traces);
@@ -725,7 +725,7 @@ export async function runDistill(config: MemoryConfig): Promise<DistillResult> {
   };
 }
 
-// ─── Checkpoint Writer ───────────────────────────────────────────────────────
+// --- Checkpoint Writer -------------------------------------------------------
 
 export interface CheckpointWriterConfig {
   contextBudget: number; // max tokens

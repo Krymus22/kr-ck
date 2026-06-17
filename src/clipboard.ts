@@ -1,5 +1,5 @@
 /**
- * clipboard.ts — Clipboard integration: copy/paste text and images.
+ * clipboard.ts - Clipboard integration: copy/paste text and images.
  */
 
 import { execSync } from "node:child_process";

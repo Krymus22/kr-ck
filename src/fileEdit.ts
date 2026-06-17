@@ -1,5 +1,5 @@
 /**
- * fileEdit.ts — Precise file editing by string match/replace with context awareness.
+ * fileEdit.ts - Precise file editing by string match/replace with context awareness.
  */
 
 import * as fs from "node:fs";
@@ -102,7 +102,7 @@ export function editFile(
   fs.writeFileSync(resolved, result.content, "utf8");
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
-  return `[SUCESSO] ${result.replacements}替换(s) aplicada(s) em ${resolved}`;
+  return `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
 }
 
 function countOccurrences(text: string, search: string): number {

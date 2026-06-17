@@ -1,5 +1,5 @@
 /**
- * ThinkingIndicator.tsx — Animated thinking status with dots.
+ * ThinkingIndicator.tsx - Animated thinking status with dots.
  */
 
 import React, { useState, useEffect } from "react";
@@ -26,6 +26,6 @@ export function ThinkingIndicator({ active }: Readonly<ThinkingIndicatorProps>) 
   if (!active) return null;
 
   return (
-    <Text color={colors.muted}> ◆ PENSANDO{dots} </Text>
+    <Text color={colors.muted}> * PENSANDO{dots} </Text>
   );
 }

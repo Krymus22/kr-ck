@@ -1,5 +1,5 @@
 /**
- * syntaxHighlight.ts — Syntax highlighting for terminal output using ANSI colors.
+ * syntaxHighlight.ts - Syntax highlighting for terminal output using ANSI colors.
  */
 
 // Simple regex-based syntax highlighter for common languages

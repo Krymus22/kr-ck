@@ -1,5 +1,5 @@
 /**
- * rust.ts — Rust development tools
+ * rust.ts - Rust development tools
  * 
  * Tools for cargo, clippy, rustfmt
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const RUST_TOOLS: Tool[] = [
-  // ─── Cargo Build ──────────────────────────────────────────────────────
+  // --- Cargo Build ------------------------------------------------------
   {
     name: "cargo_build",
     description: "Build Rust project with Cargo",
@@ -44,7 +44,7 @@ export const RUST_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Cargo Run ────────────────────────────────────────────────────────
+  // --- Cargo Run --------------------------------------------------------
   {
     name: "cargo_run",
     description: "Run Rust binary with Cargo",
@@ -71,7 +71,7 @@ export const RUST_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Cargo Test ───────────────────────────────────────────────────────
+  // --- Cargo Test -------------------------------------------------------
   {
     name: "cargo_test",
     description: "Run Rust tests with Cargo",
@@ -112,7 +112,7 @@ export const RUST_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Cargo Clippy ─────────────────────────────────────────────────────
+  // --- Cargo Clippy -----------------------------------------------------
   {
     name: "cargo_clippy",
     description: "Lint Rust code with Clippy",
@@ -151,7 +151,7 @@ export const RUST_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Cargo fmt ────────────────────────────────────────────────────────
+  // --- Cargo fmt --------------------------------------------------------
   {
     name: "cargo_fmt",
     description: "Format Rust code with rustfmt",
@@ -178,7 +178,7 @@ export const RUST_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Cargo Add ────────────────────────────────────────────────────────
+  // --- Cargo Add --------------------------------------------------------
   {
     name: "cargo_add",
     description: "Add dependency to Cargo.toml",
@@ -206,7 +206,7 @@ export const RUST_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Cargo Doc ────────────────────────────────────────────────────────
+  // --- Cargo Doc --------------------------------------------------------
   {
     name: "cargo_doc",
     description: "Generate Rust documentation",
@@ -234,7 +234,7 @@ export const RUST_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Rustup ───────────────────────────────────────────────────────────
+  // --- Rustup -----------------------------------------------------------
   {
     name: "rustup_update",
     description: "Update Rust toolchain",

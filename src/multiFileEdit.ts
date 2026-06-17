@@ -1,5 +1,5 @@
 /**
- * multiFileEdit.ts — Edit multiple files in one atomic operation with rollback.
+ * multiFileEdit.ts - Edit multiple files in one atomic operation with rollback.
  */
 
 import * as fs from "node:fs";

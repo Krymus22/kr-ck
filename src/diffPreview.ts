@@ -1,9 +1,9 @@
 /**
- * diffPreview.ts — Render a unified diff between two strings and optionally
+ * diffPreview.ts - Render a unified diff between two strings and optionally
  * prompt the user for approval before writing to disk.
  *
  * Two modes:
- *   - computeUnifiedDiff(before, after) → returns the "@@ ... @@" lines you
+ *   - computeUnifiedDiff(before, after) -> returns the "@@ ... @@" lines you
  *     would feed to `diff -u`, used by the /preview command and by the
  *     guardrail logger.
  *   - previewAndApprove(filePath, currentContent, newContent): when
@@ -23,7 +23,7 @@ import * as path from "node:path";
 import { config } from "./config.js";
 import * as log from "./logger.js";
 
-// ─── Minimal LCS-based unified diff ─────────────────────────────────────────
+// --- Minimal LCS-based unified diff -----------------------------------------
 
 function splitLines(s: string): string[] {
   if (s.length === 0) return [];
@@ -148,7 +148,7 @@ export function computeUnifiedDiff(before: string, after: string, filePath: stri
     k = hunkEnd;
     if (changedInHunk === 0) break;
     if (out.length > MAX_DIFF_LINES_PER_HUNK * 4) {
-      out.push("@@ (diff truncated for preview — file too large) @@");
+      out.push("@@ (diff truncated for preview - file too large) @@");
       break;
     }
   }
@@ -157,7 +157,7 @@ export function computeUnifiedDiff(before: string, after: string, filePath: stri
   return out.join("\n");
 }
 
-// ─── Coloured renderer ────────────────────────────────────────────────────────
+// --- Coloured renderer --------------------------------------------------------
 
 function colour(s: string, hex: string): string {
   const r = Number.parseInt(hex.slice(1, 3), 16);
@@ -169,17 +169,17 @@ function colour(s: string, hex: string): string {
 export function renderColoredDiff(unified: string): string {
   const out: string[] = [];
   for (const line of unified.split("\n")) {
-    if (line.startsWith("+++")) out.push(colour(line, "#A78BFA"));       // violet — new file
-    else if (line.startsWith("---")) out.push(colour(line, "#F87171"));  // red    — old file
-    else if (line.startsWith("@@")) out.push(colour(line, "#6EE7F7"));   // cyan   — hunk header
-    else if (line.startsWith("+")) out.push(colour(line, "#34D399"));    // green  — addition
-    else if (line.startsWith("-")) out.push(colour(line, "#F87171"));    // red    — removal
-    else out.push(colour(line, "#6B7280"));                              // grey   — context
+    if (line.startsWith("+++")) out.push(colour(line, "#A78BFA"));       // violet - new file
+    else if (line.startsWith("---")) out.push(colour(line, "#F87171"));  // red    - old file
+    else if (line.startsWith("@@")) out.push(colour(line, "#6EE7F7"));   // cyan   - hunk header
+    else if (line.startsWith("+")) out.push(colour(line, "#34D399"));    // green  - addition
+    else if (line.startsWith("-")) out.push(colour(line, "#F87171"));    // red    - removal
+    else out.push(colour(line, "#6B7280"));                              // grey   - context
   }
   return out.join("\n");
 }
 
-// ─── Approval prompt ─────────────────────────────────────────────────────────
+// --- Approval prompt ---------------------------------------------------------
 
 /**
  * If config.diffPreview is true, print the colored unified diff to stderr and
@@ -187,13 +187,13 @@ export function renderColoredDiff(unified: string): string {
  * the write, false to abort.
  *
  * Behavior:
- *   - non-TTY (CI, piped input)  → auto-approves (returns true)
- *   - empty input (Enter)        → approves
- *   - 'y' / 'yes'                → approves
- *   - 'n' / 'no' / anything else → rejects (returns false)
+ *   - non-TTY (CI, piped input)  -> auto-approves (returns true)
+ *   - empty input (Enter)        -> approves
+ *   - 'y' / 'yes'                -> approves
+ *   - 'n' / 'no' / anything else -> rejects (returns false)
  *
  * The prompt is a single-line readline that does NOT pause the rest of the
- * agent loop — tools.ts is called synchronously, but readline.question is
+ * agent loop - tools.ts is called synchronously, but readline.question is
  * async; await on its promise is enough.
  */
 export async function previewAndApprove(
@@ -205,14 +205,14 @@ export async function previewAndApprove(
 
   const unified = computeUnifiedDiff(currentContent, newContent, path.relative(process.cwd(), filePath) || filePath);
   if (unified === "") {
-    // No real change — silently approve.
+    // No real change - silently approve.
     return true;
   }
 
   const rel = path.relative(process.cwd(), filePath) || filePath;
-  process.stderr.write("\n" + colour(`─── Diff preview: ${rel} ───`, "#6EE7F7") + "\n");
+  process.stderr.write("\n" + colour(`--- Diff preview: ${rel} ---`, "#6EE7F7") + "\n");
   process.stderr.write(renderColoredDiff(unified) + "\n");
-  process.stderr.write(colour(`(end of diff — ${unified.split("\n").length} lines)\n`, "#6B7280"));
+  process.stderr.write(colour(`(end of diff - ${unified.split("\n").length} lines)\n`, "#6B7280"));
 
   // Stats summary
   const adds = unified.split("\n").filter(l => l.startsWith("+") && !l.startsWith("+++")).length;

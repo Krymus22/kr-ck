@@ -1,5 +1,5 @@
 /**
- * extensionCenter.ts — Extension Hub: unified control center for skills, tools, MCPs, and plugins.
+ * extensionCenter.ts - Extension Hub: unified control center for skills, tools, MCPs, and plugins.
  *
  * Provides:
  *   - Central registry of all extensions across categories
@@ -19,7 +19,7 @@ import path from "node:path";
 import os from "node:os";
 import * as log from "./logger.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export type ExtensionCategory = "skill" | "tool" | "mcp" | "plugin" | "feature";
 export type TriggerMode = "disabled" | "on_file" | "on_task" | "always";
@@ -60,7 +60,7 @@ export interface TriggerResult {
   duration: number;
 }
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// --- Constants --------------------------------------------------------------
 
 const HUB_VERSION = 1;
 const HUB_FILENAME = "hub.json";
@@ -73,7 +73,7 @@ const TRIGGER_LABELS: Record<TriggerMode, string> = {
   always: "EVERY",
 };
 
-// ─── Persistence ────────────────────────────────────────────────────────────
+// --- Persistence ------------------------------------------------------------
 
 function getHubPath(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
@@ -113,7 +113,7 @@ function saveState(state: ExtensionHubState): void {
   }
 }
 
-// ─── Registry ───────────────────────────────────────────────────────────────
+// --- Registry ---------------------------------------------------------------
 
 let hubState: ExtensionHubState = loadState();
 
@@ -220,7 +220,7 @@ export function disableAll(): void {
   saveState(hubState);
 }
 
-// ─── Trigger Engine ─────────────────────────────────────────────────────────
+// --- Trigger Engine ---------------------------------------------------------
 
 type ExtensionExecutor = (ext: ExtensionEntry, ctx: TriggerContext) => Promise<string>;
 
@@ -267,7 +267,7 @@ export async function executeTrigger(
   return results;
 }
 
-// ─── Auto-Discovery ─────────────────────────────────────────────────────────
+// --- Auto-Discovery ---------------------------------------------------------
 
 /**
  * Scan all extension sources and sync to hub.
@@ -361,7 +361,7 @@ function discoverMCPServers(entries: Omit<ExtensionEntry, "enabled" | "triggerMo
   }
 }
 
-// ─── Feature Discovery ─────────────────────────────────────────────────────
+// --- Feature Discovery -----------------------------------------------------
 
 function discoverFeatures(entries: Omit<ExtensionEntry, "enabled" | "triggerMode">[]): void {
   const features = [
@@ -470,7 +470,7 @@ function discoverFeatures(entries: Omit<ExtensionEntry, "enabled" | "triggerMode
   }
 }
 
-// ─── UI Helpers ─────────────────────────────────────────────────────────────
+// --- UI Helpers -------------------------------------------------------------
 
 export function getTriggerLabel(mode: TriggerMode): string {
   return TRIGGER_LABELS[mode];
@@ -482,11 +482,11 @@ export function getTriggerModes(): readonly TriggerMode[] {
 
 export function getCategoryIcon(category: ExtensionCategory): string {
   switch (category) {
-    case "skill": return "📚";
-    case "tool": return "🔧";
-    case "mcp": return "🔌";
-    case "plugin": return "🧩";
-    case "feature": return "⚙️";
+    case "skill": return "[S]";
+    case "tool": return "[T]";
+    case "mcp": return "[M]";
+    case "plugin": return "[P]";
+    case "feature": return "[F]";
   }
 }
 
@@ -500,7 +500,7 @@ export function getCategoryColor(category: ExtensionCategory): string {
   }
 }
 
-// ─── Summary ────────────────────────────────────────────────────────────────
+// --- Summary ----------------------------------------------------------------
 
 export function getHubSummary(): {
   total: number;

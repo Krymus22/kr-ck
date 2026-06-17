@@ -1,5 +1,5 @@
 /**
- * ExtensionHub.tsx — 3x3 grid panel for managing extensions.
+ * ExtensionHub.tsx - 3x3 grid panel for managing extensions.
  *
  * Layout:
  *   - Category tabs at top: [Skills] [Tools] [MCPs] [Plugins] [All]
@@ -8,8 +8,8 @@
  *   - Bottom: keyboard shortcuts + stats
  *
  * Keyboard:
- *   ← →     Navigate between items
- *   ↑ ↓     Scroll page
+ *   <- ->     Navigate between items
+ *   ^ v     Scroll page
  *   Enter   Toggle enabled/disabled
  *   T       Cycle trigger mode
  *   1-4     Quick-set trigger mode (1=OFF, 2=FILE, 3=TASK, 4=EVERY)
@@ -35,7 +35,7 @@ import {
   type TriggerMode,
 } from "../extensionCenter.js";
 
-// ─── Constants ──────────────────────────────────────────────────────────────
+// --- Constants --------------------------------------------------------------
 
 const GRID_COLS = 3;
 const GRID_ROWS = 3;
@@ -57,13 +57,13 @@ const TRIGGER_COLORS: Record<TriggerMode, string> = {
   always: colors.success,
 };
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export interface ExtensionHubProps {
   onClose: () => void;
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
+// --- Component --------------------------------------------------------------
 
 export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   const [tabIndex, setTabIndex] = useState(0);
@@ -84,7 +84,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
     return Math.max(0, Math.min(idx, items.length - 1));
   }, []);
 
-  // ── Keyboard handling ───────────────────────────────────────────────
+  // -- Keyboard handling -----------------------------------------------
   useInput((inputChar, key) => {
     if (key.escape) { onClose(); return; }
     if (key.tab) {
@@ -146,7 +146,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
     }
   }
 
-  // ── Render ──────────────────────────────────────────────────────────
+  // -- Render ----------------------------------------------------------
   const summary = getHubSummary();
 
   return (
@@ -154,7 +154,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       {/* Header */}
       <Box justifyContent="center" marginBottom={0}>
         <Text color={colors.primary} bold>
-          ═══════════════ EXTENSION HUB ═══════════════
+          ======= EXTENSION HUB ========
         </Text>
       </Box>
 
@@ -172,7 +172,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
               color={isActive ? colors.primary : colors.muted}
               bold={isActive}
             >
-              {isActive ? "▶ " : "  "}
+              {isActive ? "> " : "  "}
               {cat.label}
               <Text color={colors.muted}>({count})</Text>
             </Text>
@@ -207,8 +207,8 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       {totalPages > 1 && (
         <Box justifyContent="center" marginTop={0}>
           <Text color={colors.muted}>
-            {"▓".repeat(currentPage + 1)}
-            {"░".repeat(totalPages - currentPage - 1)}
+            {"#".repeat(currentPage + 1)}
+            {"-".repeat(totalPages - currentPage - 1)}
             {" "}
             Page {currentPage + 1}/{totalPages}
           </Text>
@@ -218,7 +218,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       {/* Bottom bar */}
       <Box justifyContent="space-between" marginTop={1} borderTop borderTopColor={colors.muted}>
         <Text color={colors.muted} dimColor>
-          ←→ select  ↑↓ scroll  ↵ toggle  T mode  1-4 quick  Tab switch  Esc close
+          {"<->"} select  {"^v"} scroll  {"<-"} toggle  T mode  1-4 quick  Tab switch  Esc close
         </Text>
         <Text color={colors.primary}>
           {summary.enabled}/{summary.total} active
@@ -228,7 +228,7 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   );
 }
 
-// ─── Extension Card ─────────────────────────────────────────────────────────
+// --- Extension Card ---------------------------------------------------------
 
 function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; selected: boolean }>) {
   if (!item) return <Box width={22} />;
@@ -249,21 +249,21 @@ function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; sel
       {/* Name row */}
       <Box>
         <Text color={item.enabled ? colors.white : colors.muted} bold={selected}>
-          {selected ? "▸" : " "} {icon} {item.name.slice(0, 14)}
+          {selected ? ">" : " "} {icon} {item.name.slice(0, 14)}
         </Text>
       </Box>
 
       {/* Status + Trigger */}
       <Box>
         <Text color={item.enabled ? colors.success : colors.muted}>
-          {item.enabled ? "●" : "○"}
+          {item.enabled ? "[x]" : "[ ]"}
         </Text>
         <Text color={colors.muted}> </Text>
         <Text color={triggerColor} bold={item.triggerMode !== "disabled"}>
           [{triggerLabel}]
         </Text>
         {!item.installed && (
-          <Text color={colors.error}> ⚠</Text>
+          <Text color={colors.error}> !</Text>
         )}
       </Box>
     </Box>

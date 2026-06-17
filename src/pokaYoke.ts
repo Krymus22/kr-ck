@@ -1,5 +1,5 @@
 /**
- * pokaYoke.ts — Error-proofing helpers for tool calls.
+ * pokaYoke.ts - Error-proofing helpers for tool calls.
  *
  * Enforces invariants that prevent common model mistakes BEFORE
  * the tool actually runs:
@@ -7,19 +7,19 @@
  *   1. File-path tools (aplicar_diff, editar_arquivo, desfazer_edicao,
  *      ler_arquivo, etc.) MUST receive a non-empty path.
  *   2. Edit tools (aplicar_diff, editar_arquivo) should resolve to
- *      absolute paths — relative paths work but are ambiguous when
+ *      absolute paths - relative paths work but are ambiguous when
  *      the agent's cwd differs from the user's mental model.
  *   3. aplicar_diff requires a non-empty `bloco_diff` with at least
  *      one `<<<<<<< SEARCH` / `>>>>>>> REPLACE` pair.
  *   4. editar_arquivo requires either `edits` (array) OR `search`+`replace`.
  *
  * Returns clear, actionable error messages telling the model exactly
- * what's wrong — inspired by Anthropic's poka-yoke approach.
+ * what's wrong - inspired by Anthropic's poka-yoke approach.
  */
 
 import * as path from "node:path";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface PokaYokeResult {
   ok: boolean;
@@ -28,7 +28,7 @@ export interface PokaYokeResult {
   resolvedPath?: string;
 }
 
-// ─── Tools that take a single file path ──────────────────────────────────────
+// --- Tools that take a single file path --------------------------------------
 
 const PATH_TAKING_TOOLS = new Set([
   "ler_arquivo",
@@ -41,13 +41,13 @@ const PATH_TAKING_TOOLS = new Set([
   "parse_ast",
 ]);
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === "string" && val.trim().length > 0;
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// --- Public API --------------------------------------------------------------
 
 /**
  * Validate a tool call's arguments against poka-yoke rules.
@@ -58,7 +58,7 @@ export function pokaYokeCheck(
   toolName: string,
   args: Record<string, unknown>
 ): PokaYokeResult {
-  // ── Path-taking tools: must have a non-empty path ──────────────────────
+  // -- Path-taking tools: must have a non-empty path ----------------------
   if (PATH_TAKING_TOOLS.has(toolName)) {
     const rawPath = args.caminho ?? args.path ?? args.filePath ?? args.file;
     if (!isNonEmptyString(rawPath)) {
@@ -70,18 +70,18 @@ export function pokaYokeCheck(
           `Exemplo: ${toolName}({ caminho: "/abs/path/to/file.ts" })`,
       };
     }
-    // path is present — fall through to tool-specific checks below
+    // path is present - fall through to tool-specific checks below
     // (we'll attach resolvedPath to the final return)
   }
 
-  // ── Tool-specific structural checks ────────────────────────────────────
+  // -- Tool-specific structural checks ------------------------------------
   const toolCheck = TOOL_SPECIFIC_CHECKS.get(toolName);
   if (toolCheck) {
     const result = toolCheck(args);
     if (!result.ok) return result;
   }
 
-  // All checks passed — return ok with resolved path (if applicable)
+  // All checks passed - return ok with resolved path (if applicable)
   if (PATH_TAKING_TOOLS.has(toolName)) {
     const rawPath = (args.caminho ?? args.path ?? args.filePath ?? args.file) as string;
     return { ok: true, resolvedPath: path.resolve(rawPath) };
@@ -89,7 +89,7 @@ export function pokaYokeCheck(
   return { ok: true };
 }
 
-// ─── Tool-specific check functions ───────────────────────────────────────────
+// --- Tool-specific check functions -------------------------------------------
 
 type ToolSpecificCheck = (args: Record<string, unknown>) => PokaYokeResult;
 
@@ -176,7 +176,7 @@ function checkEditarMultiArquivos(args: Record<string, unknown>): PokaYokeResult
   return { ok: true };
 }
 
-// ─── Expanded Tool Descriptions ──────────────────────────────────────────────
+// --- Expanded Tool Descriptions ----------------------------------------------
 //
 // These are appended to the existing tool descriptions in apiClient.ts to
 // provide the model with concrete examples and edge-case guidance, in line
@@ -201,8 +201,8 @@ EXAMPLES:
 EDGE CASES:
   - Whitespace differences are tolerated (the matcher normalizes runs of whitespace).
   - If SEARCH matches multiple locations, only the FIRST is replaced. To replace all, use multiple blocks.
-  - After applying, a syntax validator runs. If it fails, the file is STILL saved — you'll receive the validator log as a warning. Use desfazer_edicao to roll back if needed.
-  - Always read the file with ler_arquivo BEFORE calling aplicar_diff — the system enforces this.
+  - After applying, a syntax validator runs. If it fails, the file is STILL saved - you'll receive the validator log as a warning. Use desfazer_edicao to roll back if needed.
+  - Always read the file with ler_arquivo BEFORE calling aplicar_diff - the system enforces this.
   - Use ABSOLUTE paths to avoid ambiguity. Relative paths are resolved against the agent's cwd.`,
 
   editar_arquivo: `
@@ -227,7 +227,7 @@ EXAMPLES:
   editar_arquivo({ path: "/abs/path/new.ts", search: "", replace: "export const x = 1;", createIfMissing: true })
 
 EDGE CASES:
-  - If search string is not found, the tool returns an error — nothing is written.
+  - If search string is not found, the tool returns an error - nothing is written.
   - Empty search string + createIfMissing=true creates a new file with the replace content.
   - For multi-file atomic edits with rollback, use editar_multi_arquivos instead.
   - Use ABSOLUTE paths to avoid ambiguity.`,
@@ -243,7 +243,7 @@ EXAMPLE:
 
 EDGE CASES:
   - Se não houver backup (arquivo era novo, ou backup expirou), retorna erro.
-  - Cada chamada restaura O backup mais recente e o remove da pilha — chamadas sucessivas desfezem edições mais antigas.
+  - Cada chamada restaura O backup mais recente e o remove da pilha - chamadas sucessivas desfezem edições mais antigas.
   - Não desfaz criações de arquivo (apenas edições em arquivos existentes).`,
 
   executar_comando: `
@@ -272,8 +272,8 @@ EXAMPLES:
   ler_arquivo({ caminho: "/abs/path/src" })  # lista o diretório
 
 EDGE CASES:
-  - Arquivos muito grandes (>1MB) serão lidos inteiros — use ler_arquivo_avancado com offset/limit para arquivos grandes.
+  - Arquivos muito grandes (>1MB) serão lidos inteiros - use ler_arquivo_avancado com offset/limit para arquivos grandes.
   - Para buscar linhas específicas com grep, use ler_arquivo_avancado({ path, grep: "pattern" }).
-  - SEMPRE chame ler_arquivo ANTES de aplicar_diff/editar_arquivo — o sistema BLOQUEIA edições em arquivos não lidos.
+  - SEMPRE chame ler_arquivo ANTES de aplicar_diff/editar_arquivo - o sistema BLOQUEIA edições em arquivos não lidos.
   - Use ABSOLUTE paths.`,
 };

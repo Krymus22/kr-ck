@@ -1,5 +1,5 @@
 /**
- * testRunner.ts — Integrated test runner with auto-fix loop.
+ * testRunner.ts - Integrated test runner with auto-fix loop.
  * Detects test framework, runs tests, parses failures, suggests fixes.
  * Supports: vitest, jest, pytest, cargo test, go test, npm test.
  */
@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface TestFailure {
   file: string;
@@ -40,7 +40,7 @@ export interface FixSuggestion {
   newCode?: string;
 }
 
-// ─── Framework Detection ────────────────────────────────────────────────────
+// --- Framework Detection ----------------------------------------------------
 
 type FrameworkDetector = {
   name: string;
@@ -108,7 +108,7 @@ export function detectFramework(dir: string): string {
   return "unknown";
 }
 
-// ─── Test Execution ─────────────────────────────────────────────────────────
+// --- Test Execution ---------------------------------------------------------
 
 function extractExecError(err: unknown): { stdout: string; stderr: string; exitCode: number } {
   if (err != null && typeof err === "object") {
@@ -200,7 +200,7 @@ function runGoTest(dir: string, fileFilter?: string): TestResult {
   return parseGoTestOutput(output, exitCode, duration);
 }
 
-// ─── Output Parsers ─────────────────────────────────────────────────────────
+// --- Output Parsers ---------------------------------------------------------
 
 function parseVitestJson(output: string, exitCode: number, duration: number): TestResult {
   try {
@@ -251,7 +251,7 @@ function parseVitestText(output: string, exitCode: number, duration: number): Te
   const skipMatch = /(\d+) skipped/.exec(output);
 
   // Parse individual failures
-  const failBlocks = output.split(/(?:FAIL|✗|❌)\s+/);
+  const failBlocks = output.split(/(?:FAIL|X|X)\s+/);
   for (let i = 1; i < failBlocks.length; i++) {
     const block = failBlocks[i] ?? "";
     const fileMatch = /^([^\n]+)/.exec(block);
@@ -437,13 +437,13 @@ function parseGenericOutput(output: string, framework: string, exitCode: number,
 
 function extractLineNumber(text?: string): number | undefined {
   if (!text) return undefined;
-  const lineRegex = /(?:at|→|line)\s+(\d+)/i;
+  const lineRegex = /(?:at|->|line)\s+(\d+)/i;
   const colonRegex = /:(\d+):\d+/;
   const match = lineRegex.exec(text) ?? colonRegex.exec(text);
   return match ? Number.parseInt(match[1], 10) : undefined;
 }
 
-// ─── Main Entry Point ──────────────────────────────────────────────────────
+// --- Main Entry Point ------------------------------------------------------
 
 export async function runTests(dir: string, fileFilter?: string): Promise<TestResult> {
   const framework = detectFramework(dir);
@@ -475,7 +475,7 @@ function runNpmTest(dir: string): TestResult {
   return parseGenericOutput(output, "npm-test", exitCode, duration);
 }
 
-// ─── Fix Suggestions ───────────────────────────────────────────────────────
+// --- Fix Suggestions -------------------------------------------------------
 
 export function suggestFixes(result: TestResult, sourceFiles?: Map<string, string>): FixSuggestion[] {
   const suggestions: FixSuggestion[] = [];
@@ -545,7 +545,7 @@ export function suggestFixes(result: TestResult, sourceFiles?: Map<string, strin
   return suggestions;
 }
 
-// ─── Auto-fix Loop ─────────────────────────────────────────────────────────
+// --- Auto-fix Loop ---------------------------------------------------------
 
 export interface AutoFixOptions {
   maxRetries?: number;
@@ -593,11 +593,11 @@ export async function runTestsWithAutoFix(options: AutoFixOptions): Promise<{
   return { finalResult, attempts, fixesApplied };
 }
 
-// ─── Formatting ────────────────────────────────────────────────────────────
+// --- Formatting ------------------------------------------------------------
 
 export function formatTestResult(result: TestResult): string {
   const duration = (result.duration / 1000).toFixed(1);
-  const status = result.success ? "✓ PASS" : "✗ FAIL";
+  const status = result.success ? "OK PASS" : "X FAIL";
   const lines: string[] = [
     `Framework: ${result.framework}`,
     `Duration: ${duration}s`,
@@ -609,7 +609,7 @@ export function formatTestResult(result: TestResult): string {
     lines.push("", "Failures:");
     for (const f of result.failures) {
       const lineNum = f.line ? `:${f.line}` : "";
-      lines.push(`  ${f.file}${lineNum} — ${f.name}`, `    ${f.message.slice(0, 150)}`);
+      lines.push(`  ${f.file}${lineNum} - ${f.name}`, `    ${f.message.slice(0, 150)}`);
     }
   }
 
@@ -622,7 +622,7 @@ export function formatFixSuggestions(suggestions: FixSuggestion[]): string {
   const lines = ["Fix Suggestions:"];
   for (const s of suggestions) {
     const location = s.line ? `:${s.line}` : "";
-    lines.push(`  ${s.file}${location} — ${s.description}`);
+    lines.push(`  ${s.file}${location} - ${s.description}`);
   }
   return lines.join("\n");
 }

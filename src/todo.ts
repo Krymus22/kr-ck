@@ -5,9 +5,9 @@
  * of the REPL via `renderTodoBar()` after each model turn.
  *
  * Statuses:
- *   - "pending"      → not started
- *   - "in_progress"  → currently being worked on (only one allowed at a time)
- *   - "completed"    → done
+ *   - "pending"      -> not started
+ *   - "in_progress"  -> currently being worked on (only one allowed at a time)
+ *   - "completed"    -> done
  *
  * Each item carries both `content` (past tense, what was done) and
  * `active_form` (present continuous, shown when status is in_progress).
@@ -75,11 +75,11 @@ export function todoWrite(args: { items?: TodoItem[]; todos?: TodoItem[]; todo?:
     `${currentTodos.filter((t) => t.status === "pending").length} pending).`;
 }
 
-// ─── Bar renderer (used by index.ts) ──────────────────────────────────────
+// --- Bar renderer (used by index.ts) --------------------------------------
 
 function pad(s: string, n: number): string {
   s = s.replaceAll(/\s+/g, " ");
-  if (s.length > n) s = s.slice(0, Math.max(1, n - 1)) + "…";
+  if (s.length > n) s = s.slice(0, Math.max(1, n - 1)) + "...";
   return s.padEnd(n);
 }
 
@@ -98,21 +98,21 @@ export function renderTodoBar(maxWidth = 80): string {
   const grey = (s: string) => `\x1b[38;2;107;114;128m${s}\x1b[0m`;
 
   const header = ` ${cyan("[" + currentTodos.length + " tasks]")}`;
-  lines.push(grey("  ┌" + "─".repeat(innerWidth) + "┐") + "\n" + "  │" + header + " ".repeat(Math.max(0, innerWidth - header.length)) + "│");
+  lines.push(grey("  +" + "-".repeat(innerWidth) + "+") + "\n" + "  |" + header + " ".repeat(Math.max(0, innerWidth - header.length)) + "|");
 
   for (const t of currentTodos) {
     let icon: string;
     if (t.status === "completed") {
-      icon = green("✓");
+      icon = green("OK");
     } else if (t.status === "in_progress") {
-      icon = violet("●");
+      icon = violet("[*]");
     } else {
-      icon = grey("○");
+      icon = grey("[ ]");
     }
     const display = t.status === "in_progress" && t.active_form ? t.active_form : t.content;
     const padded = pad(" " + icon + " " + display, innerWidth);
-    lines.push("  │" + violet(padded.slice(0, innerWidth + 30)) + "│");
+    lines.push("  |" + violet(padded.slice(0, innerWidth + 30)) + "|");
   }
-  lines.push(grey("  └" + "─".repeat(innerWidth) + "┘"));
+  lines.push(grey("  +" + "-".repeat(innerWidth) + "+"));
   return lines.join("\n");
 }

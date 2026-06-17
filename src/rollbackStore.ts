@@ -1,5 +1,5 @@
 /**
- * rollbackStore.ts — Automatic backup + rollback for file edits.
+ * rollbackStore.ts - Automatic backup + rollback for file edits.
  *
  * Before EVERY successful write via aplicar_diff / editar_arquivo /
  * editar_multi_arquivos, the original content is snapshotted into a
@@ -11,10 +11,10 @@
  *
  * Storage layout:
  *   <projectRoot>/.rollback/
- *     ├── index.json                  # ordered list of snapshots
- *     └── snapshots/
- *         ├── <timestamp>_<rand>.bak  # raw content
- *         └── <timestamp>_<rand>.meta.json  # { originalPath, toolName, timestamp, size }
+ *     +-- index.json                  # ordered list of snapshots
+ *     +-- snapshots/
+ *         +-- <timestamp>_<rand>.bak  # raw content
+ *         +-- <timestamp>_<rand>.meta.json  # { originalPath, toolName, timestamp, size }
  *
  * Snapshots older than 5 minutes are auto-pruned on every save() call
  * and on session exit.
@@ -31,7 +31,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface BackupRecord {
   /** Absolute path of the file that was backed up */
@@ -55,7 +55,7 @@ interface IndexFile {
   entries: BackupRecord[];
 }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// --- Config ------------------------------------------------------------------
 
 const ROLLBACK_DIR_NAME = ".rollback";
 const SNAPSHOTS_SUBDIR = "snapshots";
@@ -65,7 +65,7 @@ const MAX_ENTRIES = 200; // hard cap to prevent unbounded growth
 
 let cachedProjectRoot: string | null = null;
 
-// ─── Path Helpers ────────────────────────────────────────────────────────────
+// --- Path Helpers ------------------------------------------------------------
 
 /**
  * Resolve the project root by walking up from cwd looking for a marker
@@ -123,7 +123,7 @@ function ensureRollbackDirs(): void {
   }
 }
 
-// ─── Index File ──────────────────────────────────────────────────────────────
+// --- Index File --------------------------------------------------------------
 
 function readIndex(): IndexFile {
   const indexFile = getIndexFilePath();
@@ -151,7 +151,7 @@ function writeIndex(index: IndexFile): void {
   }
 }
 
-// ─── Pruning ─────────────────────────────────────────────────────────────────
+// --- Pruning -----------------------------------------------------------------
 
 /**
  * Remove backups older than maxAgeMs. Returns count of pruned entries.
@@ -203,18 +203,18 @@ function enforceMaxEntries(remaining: BackupRecord[]): { finalRemaining: BackupR
 
 /** Delete a backup's .bak + .meta.json files (best-effort). */
 function deleteSnapshotFiles(entry: BackupRecord, reason: "prune" | "cap" | "clear"): void {
-  try { fs.unlinkSync(entry.backupPath); } catch (err) { log.debug(`[ROLLBACK] ${reason}: ${entry.backupPath} — ${(err as Error).message}`); }
-  try { fs.unlinkSync(entry.metaPath); } catch (err) { log.debug(`[ROLLBACK] ${reason}: ${entry.metaPath} — ${(err as Error).message}`); }
+  try { fs.unlinkSync(entry.backupPath); } catch (err) { log.debug(`[ROLLBACK] ${reason}: ${entry.backupPath} - ${(err as Error).message}`); }
+  try { fs.unlinkSync(entry.metaPath); } catch (err) { log.debug(`[ROLLBACK] ${reason}: ${entry.metaPath} - ${(err as Error).message}`); }
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// --- Public API --------------------------------------------------------------
 
 /**
  * Save a backup of the current file content before it gets overwritten.
  * Returns the BackupRecord or null if the backup could not be created.
  *
  * If the file doesn't exist yet (new file creation), no backup is saved
- * — there's nothing to roll back to.
+ * - there's nothing to roll back to.
  */
 export function saveBackup(
   originalPath: string,
@@ -360,7 +360,7 @@ export function clearAllBackups(): number {
 }
 
 /**
- * Reset internal state — clears the cached project root so the next call
+ * Reset internal state - clears the cached project root so the next call
  * re-discovers it. Primarily useful for tests that chdir between cases.
  */
 export function resetRollbackState(): void {

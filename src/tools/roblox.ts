@@ -1,5 +1,5 @@
 /**
- * roblox.ts — Roblox development tools
+ * roblox.ts - Roblox development tools
  * 
  * Tools for Rojo, Wally, Lune, Selene, Rokit
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const ROBLOX_TOOLS: Tool[] = [
-  // ─── Rojo ──────────────────────────────────────────────────────────────
+  // --- Rojo --------------------------------------------------------------
   {
     name: "rojo_build",
     description: "Build .rbxl place file from Rojo project",
@@ -88,7 +88,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Wally ─────────────────────────────────────────────────────────────
+  // --- Wally -------------------------------------------------------------
   {
     name: "wally_install",
     description: "Install Wally packages from wally.toml",
@@ -160,7 +160,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Lune ──────────────────────────────────────────────────────────────
+  // --- Lune --------------------------------------------------------------
   {
     name: "lune_run",
     description: "Run Luau script via Lune",
@@ -187,7 +187,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Selene ────────────────────────────────────────────────────────────
+  // --- Selene ------------------------------------------------------------
   {
     name: "selene_lint",
     description: "Lint Luau code with Selene",
@@ -234,7 +234,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Rokit ─────────────────────────────────────────────────────────────
+  // --- Rokit -------------------------------------------------------------
   {
     name: "rokit_install",
     description: "Install tools via Rokit",
@@ -281,7 +281,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── wally-package-types ───────────────────────────────────────────────
+  // --- wally-package-types -----------------------------------------------
   {
     name: "generate_types",
     description: "Generate type definitions for Wally packages",
@@ -308,7 +308,7 @@ export const ROBLOX_TOOLS: Tool[] = [
     outputParser: "raw"
   },
 
-  // ─── Pseudotools: Luau Library Code Generation ──────────────────────────
+  // --- Pseudotools: Luau Library Code Generation --------------------------
 
   {
     name: "profilestore_pattern",

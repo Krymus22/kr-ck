@@ -1,5 +1,5 @@
 /**
- * shell.ts — Shell/Bash execution tool with timeout, cwd, and output limits.
+ * shell.ts - Shell/Bash execution tool with timeout, cwd, and output limits.
  */
 
 import { execSync, exec as execCb } from "node:child_process";

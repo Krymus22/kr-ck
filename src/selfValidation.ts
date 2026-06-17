@@ -1,5 +1,5 @@
 /**
- * selfValidation.ts — Forces model to self-validate before finishing.
+ * selfValidation.ts - Forces model to self-validate before finishing.
  *
  * Inspired by Rakuten's report on Fable 5: "At the highest effort setting,
  * Claude Fable 5 reflects on and validates its own work. For us, that's what
@@ -26,7 +26,7 @@ import { getEffortLevel } from "./effortLevels.js";
 let validationCountThisTurn = 0;
 const MAX_VALIDATIONS_PER_TURN = 1;
 
-/** Reset counter — call at the start of each user turn. */
+/** Reset counter - call at the start of each user turn. */
 export function resetSelfValidation(): void {
   validationCountThisTurn = 0;
 }

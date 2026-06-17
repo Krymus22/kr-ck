@@ -45,31 +45,31 @@ describe("theme.ts", () => {
     });
 
     it("check should be a checkmark", () => {
-      expect(icons.check).toBe("\u2713");
+      expect(icons.check).toBe("OK");
     });
 
     it("dot should be a bullet", () => {
-      expect(icons.dot).toBe("\u25CF");
+      expect(icons.dot).toBe("[x]");
     });
 
     it("circle should be empty circle", () => {
-      expect(icons.circle).toBe("\u25CB");
+      expect(icons.circle).toBe("[ ]");
     });
 
     it("arrow should be right arrow", () => {
-      expect(icons.arrow).toBe("\u2192");
+      expect(icons.arrow).toBe("->");
     });
 
     it("warn should be warning sign", () => {
-      expect(icons.warn).toBe("\u26A0");
+      expect(icons.warn).toBe("!");
     });
 
     it("error should be cross mark", () => {
-      expect(icons.error).toBe("\u2716");
+      expect(icons.error).toBe("x");
     });
 
     it("thinking should be diamond", () => {
-      expect(icons.thinking).toBe("\u25C6");
+      expect(icons.thinking).toBe("*");
     });
   });
 });

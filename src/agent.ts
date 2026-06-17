@@ -1,19 +1,19 @@
 /**
- * agent.ts — The core agentic query loop.
+ * agent.ts - The core agentic query loop.
  *
  * Orchestrates the full ReAct-style cycle:
- *   User message → API call → tool execution (if needed) → repeat → final reply
+ *   User message -> API call -> tool execution (if needed) -> repeat -> final reply
  *
  * Also handles the auto-heal sub-loop for escrever_arquivo:
- *   guardrail fail → inject error → retry API → up to MAX_HEAL_RETRIES times
+ *   guardrail fail -> inject error -> retry API -> up to MAX_HEAL_RETRIES times
  *
  * Architecture:
  *   runAgentLoop(userInput)
- *     └── sendAndProcess()               ← recursive until no more tool calls
- *           ├── chat(history)            ← throttled API call
- *           ├── dispatchToolCall()       ← routes to all tools via handler table
- *           │     └── [escrever] healLoop() ← up to 3 retries on guardrail fail
- *           └── recurse until finish_reason === "stop"
+ *     +-- sendAndProcess()               <- recursive until no more tool calls
+ *           +-- chat(history)            <- throttled API call
+ *           +-- dispatchToolCall()       <- routes to all tools via handler table
+ *           |     +-- [escrever] healLoop() <- up to 3 retries on guardrail fail
+ *           +-- recurse until finish_reason === "stop"
  */
 
 import OpenAI from "openai";
@@ -81,7 +81,7 @@ import {
 type ToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
 type ToolResult = { resultStr: string; usedHeal: boolean };
 
-// ─── Memory State ─────────────────────────────────────────────────────────────
+// --- Memory State -------------------------------------------------------------
 
 const memoryConfig = getMemoryConfig();
 ensureMemoryDirs(memoryConfig);
@@ -90,14 +90,14 @@ let sessionFileChanges: FileChange[] = [];
 let sessionToolsUsed: string[] = [];
 let sessionStartTime = "";
 let lastCheckpointTokens = 0;
-/** Paths touched by write tools in the current turn — used by the strict quality gate */
+/** Paths touched by write tools in the current turn - used by the strict quality gate */
 let turnTouchedFiles: Set<string> = new Set();
 /** Counter of stop_reason hits in the current turn (for quality gate loop) */
 let turnStopHits = 0;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ------------------------------------------------------------------
 
 function parseArgs(raw: string): Record<string, unknown> {
   try {
@@ -227,7 +227,7 @@ function alreadyInHistory(toolCallId: string): boolean {
   return lastMsg?.role === "tool" && lastMsg?.tool_call_id === toolCallId;
 }
 
-// ─── Tool Handlers ────────────────────────────────────────────────────────────
+// --- Tool Handlers ------------------------------------------------------------
 
 type ToolHandler = (
   args: Record<string, unknown>,
@@ -255,7 +255,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     if (!result.written && healRetry < config.maxHealRetries) {
       log.warn(
         `Falha ao aplicar diff ou guardrail rejeitou o código. Auto-cura iniciada ` +
-          `(tentativa ${healRetry + 1}/${config.maxHealRetries})…`
+          `(tentativa ${healRetry + 1}/${config.maxHealRetries})...`
       );
       history.addToolResult(toolCall.id, result.toolMessage);
       history.optimizeContext();
@@ -493,7 +493,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: formatFixSuggestions(suggestions), usedHeal: false };
   },
 
-  // ─── External Tools ────────────────────────────────────────────────────
+  // --- External Tools ----------------------------------------------------
 
   "executar_tool": async (args) => {
     const toolName = asString(args.tool);
@@ -504,7 +504,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     const result = await executor.execute(toolName, toolArgs, { cwd });
     
     const output = [
-      result.success ? "✅ Sucesso" : "❌ Falha",
+      result.success ? "OK Sucesso" : "X Falha",
       result.output,
       result.errors?.length ? `Erros:\n${result.errors.join("\n")}` : "",
       result.suggestions?.length ? `Sugestões:\n${result.suggestions.join("\n")}` : "",
@@ -523,15 +523,15 @@ const toolHandlers: Record<string, ToolHandler> = {
     const notInstalled = tools.filter(t => !registry.isInstalled(t.name));
     
     const output = [
-      `📊 Total: ${tools.length} tools`,
-      `✅ Instaladas: ${installed.length}`,
-      `❌ Não instaladas: ${notInstalled.length}`,
+      `G Total: ${tools.length} tools`,
+      `OK Instaladas: ${installed.length}`,
+      `X Não instaladas: ${notInstalled.length}`,
       "",
       "Tools instaladas:",
-      ...installed.map(t => `  • ${t.name} (${t.category}) - ${t.description}`),
+      ...installed.map(t => `  * ${t.name} (${t.category}) - ${t.description}`),
       "",
       "Tools não instaladas:",
-      ...notInstalled.map(t => `  • ${t.name} (${t.category}) - ${t.description}`)
+      ...notInstalled.map(t => `  * ${t.name} (${t.category}) - ${t.description}`)
     ].filter(Boolean).join("\n");
     
     return { resultStr: output, usedHeal: false };
@@ -573,7 +573,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
     
     const output = [
-      "🔍 Tools sugeridas:",
+      "Q Tools sugeridas:",
       ...suggestions.slice(0, 5).map((s, i) => 
         `${i + 1}. ${s.tool.name} (${s.tool.category}) - Confiança: ${(s.confidence * 100).toFixed(0)}%\n   Motivo: ${s.reason}`
       )
@@ -590,21 +590,21 @@ const toolHandlers: Record<string, ToolHandler> = {
     const detection = detector.detect(message, dir);
     
     const output = [
-      "🔍 Detecção de Tools:",
+      "Q Detecção de Tools:",
       "",
       "Por intenção:",
-      detection.intent ? `  • ${detection.intent.tool}` : "  • Nenhuma",
+      detection.intent ? `  * ${detection.intent.tool}` : "  * Nenhuma",
       "",
       "Por contexto do projeto:",
       detection.context.length > 0 
-        ? detection.context.map(t => `  • ${t.name} (${t.category})`).join("\n")
-        : "  • Nenhuma"
+        ? detection.context.map(t => `  * ${t.name} (${t.category})`).join("\n")
+        : "  * Nenhuma"
     ].join("\n");
     
     return { resultStr: output, usedHeal: false };
   },
 
-  // ─── Think Tool (3.1) ────────────────────────────────────────────────────
+  // --- Think Tool (3.1) ----------------------------------------------------
   "pensar": async (args) => {
     const result = await think({
       pensamento: asString(args.pensamento),
@@ -619,7 +619,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result.message, usedHeal: false };
   },
 
-  // ─── Rollback Tools (3.3) ────────────────────────────────────────────────
+  // --- Rollback Tools (3.3) ------------------------------------------------
   "desfazer_edicao": async (args) => {
     const result = desfazerEdicao({ caminho: asString(args.caminho ?? args.path) });
     return { resultStr: result, usedHeal: false };
@@ -630,7 +630,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result, usedHeal: false };
   },
 
-  // ─── Task State Tools (3.7) ──────────────────────────────────────────────
+  // --- Task State Tools (3.7) ----------------------------------------------
   "atualizar_estado": async (args) => {
     const patch: Partial<TaskState> = {};
     if (args.title) patch.title = asString(args.title);
@@ -669,7 +669,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  // ─── IDEIA 5: Sub-agent for isolated exploration ────────────────────────
+  // --- IDEIA 5: Sub-agent for isolated exploration ------------------------
   "explorar_subagente": async (args) => {
     const question = asString(args.questao ?? args.question);
     if (!question) {
@@ -687,7 +687,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result, usedHeal: false };
   },
 
-  // ─── Multi-key pool status (IDEIA Fase 1) ──────────────────────────────
+  // --- Multi-key pool status (IDEIA Fase 1) ------------------------------
   "status_pool": async () => {
     if (getPoolSize() === 0) {
       return {
@@ -699,10 +699,10 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 };
 
-// ─── Tool Dispatcher ──────────────────────────────────────────────────────────
+// --- Tool Dispatcher ----------------------------------------------------------
 
 /**
- * Map tool name → JSON Schema (used for argument validation).
+ * Map tool name -> JSON Schema (used for argument validation).
  * Built once at startup from TOOL_DEFINITIONS + THINK_TOOL_DEFINITION + MCP tools.
  */
 function getToolSchemaMap(): Map<string, Record<string, unknown>> {
@@ -726,26 +726,26 @@ async function dispatchToolCall(
   const rawArgs = parseArgs(toolCall.function.arguments);
   const finalArgs = await resolvePreCallHooks(name, rawArgs);
   if (finalArgs === null) {
-    // Pre-hook skipped — the override is already in resultOverride
+    // Pre-hook skipped - the override is already in resultOverride
     const preResult = await executePreToolCallHooks(name, rawArgs);
     return { resultStr: preResult.resultOverride ?? `[HOOK] Tool "${name}" skipped by pre-hook.`, usedHeal: false };
   }
 
-  // ── Run gate chain: schema → poka-yoke → read-before-write ────────────
+  // -- Run gate chain: schema -> poka-yoke -> read-before-write ------------
   const gateBlock = runDispatchGates(name, finalArgs);
   if (gateBlock) return { resultStr: gateBlock, usedHeal: false };
 
-  // ── Track reads + touched files ───────────────────────────────────────
+  // -- Track reads + touched files ---------------------------------------
   trackFileAccess(name, finalArgs);
 
-  // ── Cache check ───────────────────────────────────────────────────────
+  // -- Cache check -------------------------------------------------------
   const cached = shouldCacheResult(name) ? readOnlyCache.get(name, finalArgs) : null;
   if (cached !== null) {
     recordToolCall(name, Date.now() - startTime, true);
     return { resultStr: cached, usedHeal: false };
   }
 
-  // ── Execute handler ───────────────────────────────────────────────────
+  // -- Execute handler ---------------------------------------------------
   const result = await executeHandler(name, finalArgs, toolCall, healRetry);
 
   if (shouldCacheResult(name)) {
@@ -758,7 +758,7 @@ async function dispatchToolCall(
     result.resultStr = postResult.modifiedResult;
   }
 
-  // ── IDEIA 1: Auto-inject TASK_STATE context before next decision ──────
+  // -- IDEIA 1: Auto-inject TASK_STATE context before next decision ------
   // Anthropic's Fable 5 reads its own notes before each decision; we
   // replicate this by appending a compact state snapshot to write/command
   // tool results so the model re-aligns with its plan.
@@ -767,7 +767,7 @@ async function dispatchToolCall(
     result.resultStr += ctxInjection;
   }
 
-  // ── IDEIA 7: After successful file edits, suggest generating a test ───
+  // -- IDEIA 7: After successful file edits, suggest generating a test ---
   // Skip Luau/Roblox and other unsupported extensions explicitly.
   if (WRITE_FILE_TOOLS.has(name) && !result.resultStr.startsWith("[ERRO") && !result.resultStr.startsWith("[BLOQUEADO")) {
     const editedPath = asString(finalArgs.caminho ?? finalArgs.path ?? finalArgs.filePath ?? "");
@@ -836,7 +836,7 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
   return { resultStr: unknown, usedHeal: false };
 }
 
-// ─── Tool Call Processing ─────────────────────────────────────────────────────
+// --- Tool Call Processing -----------------------------------------------------
 
 const READ_ONLY_TOOLS = new Set([
   "ler_arquivo", "ler_arquivo_avancado", "buscar_arquivos", "buscar_texto",
@@ -854,7 +854,7 @@ const FILE_TOOLS = new Set([
   "aplicar_diff", "editar_arquivo", "editar_multi_arquivos",
 ]);
 
-/** File-mutating tools — used to populate turnTouchedFiles for the strict quality gate */
+/** File-mutating tools - used to populate turnTouchedFiles for the strict quality gate */
 const WRITE_FILE_TOOLS = new Set([
   "aplicar_diff", "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao",
 ]);
@@ -889,7 +889,7 @@ async function executeToolCallsSequentially(toolCalls: ToolCall[]): Promise<void
   }
 }
 
-// ─── Auto-Heal: detect test/lint failures and inject retry context ────────────
+// --- Auto-Heal: detect test/lint failures and inject retry context ------------
 
 const TEST_TOOLS = new Set(["executar_testes", "executar_comando", "sugerir_fixes"]);
 const MAX_AUTO_HEAL_RETRIES = 2;
@@ -900,7 +900,7 @@ function isTestFailure(resultStr: string): boolean {
     lower.includes("fail") ||
     lower.includes("error") ||
     lower.includes("failed") ||
-    lower.includes("❌") ||
+    lower.includes("X") ||
     lower.includes("failing")
   ) && (
     lower.includes("test") ||
@@ -966,7 +966,7 @@ function checkAutoHeal(toolCalls: ToolCall[]): void {
   }
 }
 
-// ─── Main Agent Loop ─────────────────────────────────────────────────────────
+// --- Main Agent Loop ---------------------------------------------------------
 
 async function sendAndProcess(
   depth: number = 0,
@@ -1007,7 +1007,7 @@ async function sendAndProcess(
     return sendAndProcess(depth + 1, onStreamStart, onToken, onThinking, onUsage);
   }
 
-  // ── Stop-reason branch: quality gate + task state ──────────────────────
+  // -- Stop-reason branch: quality gate + task state ----------------------
   const recurseReason = await handleStopReason(message);
   if (recurseReason) {
     return sendAndProcess(depth + 1, onStreamStart, onToken, onThinking, onUsage);
@@ -1059,7 +1059,7 @@ function fireTrigger(name: "always" | "on_task"): void {
 async function handleStopReason(message: { content?: string | null }): Promise<boolean> {
   turnStopHits++;
 
-  // IDEIA 2: Self-validation — force the model to reflect before finishing.
+  // IDEIA 2: Self-validation - force the model to reflect before finishing.
   // Must run BEFORE the strict quality gate so the model can fix issues
   // it discovers during reflection before we measure with tsc/lint.
   if (shouldSelfValidate(turnTouchedFiles.size)) {
@@ -1067,7 +1067,7 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
     return true; // recurse so the model runs the validation
   }
 
-  // Strict quality gate — may inject errors and force a recursion
+  // Strict quality gate - may inject errors and force a recursion
   const gateBlocked = await runStrictGateIfActive();
   if (gateBlocked) return true;
 
@@ -1082,7 +1082,7 @@ async function runStrictGateIfActive(): Promise<boolean> {
   if (!isStrictModeEnabled() || turnTouchedFiles.size === 0) return false;
   const gateResult = await runQualityGate([...turnTouchedFiles]);
   if (gateResult.allowed || !gateResult.errorLog) return false;
-  log.warn(`[STRICT_GATE] Blocking finish #${turnStopHits} — injecting errors into context.`);
+  log.warn(`[STRICT_GATE] Blocking finish #${turnStopHits} - injecting errors into context.`);
   history.addSystemMessage(gateResult.errorLog);
   return true;
 }
@@ -1099,7 +1099,7 @@ function updateTaskStateOnStop(message: { content?: string | null }): void {
   }
 }
 
-// ─── Public Entry Point ───────────────────────────────────────────────────────
+// --- Public Entry Point -------------------------------------------------------
 
 export async function runAgentLoop(
   userInput: string,

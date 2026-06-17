@@ -1,5 +1,5 @@
 /**
- * docker.ts — Docker development tools
+ * docker.ts - Docker development tools
  * 
  * Tools for docker build, docker compose, docker run
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const DOCKER_TOOLS: Tool[] = [
-  // ─── Docker Build ─────────────────────────────────────────────────────
+  // --- Docker Build -----------------------------------------------------
   {
     name: "docker_build",
     description: "Build Docker image",
@@ -36,7 +36,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Run ───────────────────────────────────────────────────────
+  // --- Docker Run -------------------------------------------------------
   {
     name: "docker_run",
     description: "Run Docker container",
@@ -66,7 +66,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Compose ───────────────────────────────────────────────────
+  // --- Docker Compose ---------------------------------------------------
   {
     name: "docker_compose_up",
     description: "Start Docker Compose services",
@@ -121,7 +121,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker PS ────────────────────────────────────────────────────────
+  // --- Docker PS --------------------------------------------------------
   {
     name: "docker_ps",
     description: "List Docker containers",
@@ -147,7 +147,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Logs ──────────────────────────────────────────────────────
+  // --- Docker Logs ------------------------------------------------------
   {
     name: "docker_logs",
     description: "View Docker container logs",
@@ -174,7 +174,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Exec ──────────────────────────────────────────────────────
+  // --- Docker Exec ------------------------------------------------------
   {
     name: "docker_exec",
     description: "Execute command in Docker container",
@@ -201,7 +201,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Image ─────────────────────────────────────────────────────
+  // --- Docker Image -----------------------------------------------------
   {
     name: "docker_images",
     description: "List Docker images",
@@ -225,7 +225,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Pull ──────────────────────────────────────────────────────
+  // --- Docker Pull ------------------------------------------------------
   {
     name: "docker_pull",
     description: "Pull Docker image",
@@ -250,7 +250,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker Push ──────────────────────────────────────────────────────
+  // --- Docker Push ------------------------------------------------------
   {
     name: "docker_push",
     description: "Push Docker image to registry",
@@ -275,7 +275,7 @@ export const DOCKER_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Docker System ────────────────────────────────────────────────────
+  // --- Docker System ----------------------------------------------------
   {
     name: "docker_prune",
     description: "Clean up Docker resources",

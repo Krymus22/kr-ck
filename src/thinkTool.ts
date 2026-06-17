@@ -1,8 +1,8 @@
 /**
- * thinkTool.ts — Structured thinking space for the model.
+ * thinkTool.ts - Structured thinking space for the model.
  *
- * Inspired by Anthropic's "Think Tool" research (+54% on τ-Bench).
- * The tool itself does nothing except return a confirmation — but it gives
+ * Inspired by Anthropic's "Think Tool" research (+54% on tau-Bench).
+ * The tool itself does nothing except return a confirmation - but it gives
  * the model a dedicated space to reason BEFORE acting, which dramatically
  * improves multi-step consistency and reduces hallucinations.
  *
@@ -32,7 +32,7 @@ export async function think(args: ThinkArgs): Promise<ThinkResult> {
   
   return {
     confirmed: true,
-    message: `[PENSAMENTO REGISTRADO — categoria: ${category}, ${thoughtLength} chars]\n` +
+    message: `[PENSAMENTO REGISTRADO - categoria: ${category}, ${thoughtLength} chars]\n` +
       `Use este espaço para raciocinar antes de agir. ` +
       `Agora prossiga com a ação planejada.`,
   };

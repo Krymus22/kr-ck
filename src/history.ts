@@ -1,5 +1,5 @@
 /**
- * history.ts — Stateless in-memory conversation history manager.
+ * history.ts - Stateless in-memory conversation history manager.
  *
  * Maintains a flat array of OpenAI-format messages that grows as the
  * conversation progresses. The entire array is sent to the API on every
@@ -19,7 +19,7 @@ import type OpenAI from "openai";
 import { getActiveSkills } from "./extensions.js";
 import { getEffortPromptSnippet } from "./effortLevels.js";
 
-// ─── Project Memory (CLAUDE.md / AGENTS.md) ──
+// --- Project Memory (CLAUDE.md / AGENTS.md) --
 
 const MEMORY_FILENAMES = ["CLAUDE.md", "AGENTS.md", ".claude-killer/AGENTS.md"];
 
@@ -56,7 +56,7 @@ function loadProjectMemory(): string | null {
     .join("\n\n");
 }
 
-// ─── System Prompt ────────────────────────────────────────────────────────────
+// --- System Prompt ------------------------------------------------------------
 
 const BASE_SYSTEM_PROMPT = `You are Claude-Killer, an expert AI software engineer and code assistant.
 You are running inside a developer's terminal and have direct access to their local filesystem.
@@ -75,15 +75,15 @@ You are running inside a developer's terminal and have direct access to their lo
 - buscar_arquivos(pattern, path): glob file search
 - buscar_conteudo(pattern, path?): regex content search
 - git_status/diff/log/commit/blame: git operations
-- pensar(pensamento, categoria?): structured thinking space — use BEFORE every write
+- pensar(pensamento, categoria?): structured thinking space - use BEFORE every write
 - atualizar_estado(...): updates TASK_STATE.md (done/todo/decisions/bugs/dependencies)
 - marcar_feito(item): moves an item from 'todo' to 'done' in TASK_STATE.md
 - ler_estado(): reads current TASK_STATE.md content
 
-## THINK TOOL — MANDATORY BEFORE WRITES (Anthropic +54% on τ-Bench)
+## THINK TOOL - MANDATORY BEFORE WRITES (Anthropic +54% on tau-Bench)
 
 You MUST call 'pensar' BEFORE every write operation (aplicar_diff, editar_arquivo, editar_multi_arquivos, desfazer_edicao).
-The tool itself does nothing — it just gives you a structured space to reason.
+The tool itself does nothing - it just gives you a structured space to reason.
 
 In the 'pensamento' field, follow this checklist:
 1. REAFFIRM: What will I change and why?
@@ -98,7 +98,7 @@ Example:
     categoria: "verification"
   })
 
-Then proceed with the write. The system ENFORCES read-before-write — without a prior ler_arquivo, your edit will be blocked.
+Then proceed with the write. The system ENFORCES read-before-write - without a prior ler_arquivo, your edit will be blocked.
 
 ## Problem-Solving Approach
 
@@ -129,7 +129,7 @@ For any task, follow this structured approach:
 5. After editing, ALWAYS run tests/linter to verify:
    executar_comando("npm test") or executar_testes()
 6. If tests fail, fix the code and re-run until clean.
-7. If STRICT_MODE is on, the system will BLOCK your finish_reason until tsc + lint pass — you cannot "give up" with broken code.
+7. If STRICT_MODE is on, the system will BLOCK your finish_reason until tsc + lint pass - you cannot "give up" with broken code.
 
 ## Poka-Yoke (Error-Proofing)
 
@@ -137,21 +137,21 @@ For any task, follow this structured approach:
 - aplicar_diff REQUIRES at least one <<<<<<< SEARCH / >>>>>>> REPLACE pair.
 - editar_arquivo REQUIRES either edits[] or search+replace.
 - All paths must be non-empty strings.
-- Schema validation runs BEFORE tool execution — invalid args return an error immediately.
+- Schema validation runs BEFORE tool execution - invalid args return an error immediately.
 
 ## Parallel Tool Calls (IDEIA 6)
 
 You CAN batch multiple read-only tool calls in a single response (ler_arquivo, buscar_texto, buscar_arquivos, parse_ast, git_status/diff/log, explorar_subagente, status_pool, ler_estado).
-When you need to inspect 2+ files OR search in 2+ places, EMIT ALL those tool calls together in one response — they will run in parallel.
+When you need to inspect 2+ files OR search in 2+ places, EMIT ALL those tool calls together in one response - they will run in parallel.
 This is much faster than serializing. The system supports parallel_tool_calls natively.
 
-PARALLEL SUB-AGENTS: You can invoke 2+ explorar_subagente calls in the SAME response — they run in TRUE parallel using different API keys from the pool (requires NVIDIA_API_KEYS with multiple keys). Use this when you need to explore independent aspects of a codebase simultaneously (e.g., one sub-agent maps the auth flow while another maps the data layer).
+PARALLEL SUB-AGENTS: You can invoke 2+ explorar_subagente calls in the SAME response - they run in TRUE parallel using different API keys from the pool (requires NVIDIA_API_KEYS with multiple keys). Use this when you need to explore independent aspects of a codebase simultaneously (e.g., one sub-agent maps the auth flow while another maps the data layer).
 
 ## Multi-Key Pool (Fase 1)
 
 If multiple NVIDIA API keys are configured (NVIDIA_API_KEYS env var), the system uses a key pool:
 - Each key has its own 40 RPM / 1 concurrent quota
-- Sub-agents (explorar_subagente) automatically pick a different key — they run truly in parallel
+- Sub-agents (explorar_subagente) automatically pick a different key - they run truly in parallel
 - Call status_pool to see per-key metrics (calls, errors, 429s, latency)
 - If a key returns 429, it's cooled down for 60s and the next call uses another key
 
@@ -177,7 +177,7 @@ When solving SWE-bench style tasks:
 
 let currentCavemanLevel: string | null = null; // 'lite', 'full', 'ultra', 'wenyan-lite', 'wenyan-full', 'wenyan-ultra', or null (disabled)
 
-// ─── Plan Mode ─────────────────────────────────────────────────────────────
+// --- Plan Mode -------------------------------------------------------------
 let planMode = false;
 
 export function isPlanMode(): boolean {
@@ -254,11 +254,11 @@ export function reloadProjectMemory(): string | null {
   return loadProjectMemoryCached();
 }
 
-// ─── History Store ────────────────────────────────────────────────────────────
+// --- History Store ------------------------------------------------------------
 
 let history: Message[] = [];
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// --- Public API ---------------------------------------------------------------
 
 /** Initialize history if empty. */
 function ensureHistoryInitialized() {
@@ -371,7 +371,7 @@ export function compactHistory(): CompactResult | null {
 
   const summary: Message = {
     role: "system",
-    content: `[CONTEXT COMPACTADO — ${dropped} mensagens antigas removidas para caber na janela. Mantive apenas as últimas ${COMPACT_KEEP_RECENT} mensagens recentes e o prompt de sistema. Os IDs de tool_call históricos ficaram desatualizados: se o modelo quiser referenciar ferramentas passadas, peça ao usuário para repetir a informação.]`,
+    content: `[CONTEXT COMPACTADO - ${dropped} mensagens antigas removidas para caber na janela. Mantive apenas as últimas ${COMPACT_KEEP_RECENT} mensagens recentes e o prompt de sistema. Os IDs de tool_call históricos ficaram desatualizados: se o modelo quiser referenciar ferramentas passadas, peça ao usuário para repetir a informação.]`,
   };
 
   history = [system, summary, ...recent];

@@ -1,5 +1,5 @@
 /**
- * logger.ts — Minimal, styled terminal output using chalk.
+ * logger.ts - Minimal, styled terminal output using chalk.
  * All user-visible output goes through here so we can easily control
  * verbosity, colour, and format from a single location.
  */
@@ -7,19 +7,19 @@
 import chalk from "chalk";
 import { config } from "./config.js";
 
-// ─── Colour Palette ──────────────────────────────────────────────────────────
+// --- Colour Palette ----------------------------------------------------------
 
 const c = {
-  primary:   chalk.hex("#6EE7F7"),   // cyan-ish — Claude-Killer brand
-  secondary: chalk.hex("#A78BFA"),   // violet   — assistant messages
-  success:   chalk.hex("#34D399"),   // green    — OK / saved
-  warning:   chalk.hex("#FBBF24"),   // amber    — warnings / retries
-  error:     chalk.hex("#F87171"),   // red      — errors / failures
-  muted:     chalk.hex("#6B7280"),   // grey     — internal logs
+  primary:   chalk.hex("#6EE7F7"),   // cyan-ish - Claude-Killer brand
+  secondary: chalk.hex("#A78BFA"),   // violet   - assistant messages
+  success:   chalk.hex("#34D399"),   // green    - OK / saved
+  warning:   chalk.hex("#FBBF24"),   // amber    - warnings / retries
+  error:     chalk.hex("#F87171"),   // red      - errors / failures
+  muted:     chalk.hex("#6B7280"),   // grey     - internal logs
   bold:      chalk.bold,
 };
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// --- Public API -------------------------------------------------------------
 
 /** Print a banner line (Claude-Killer brand) */
 export function banner(text: string): void {
@@ -63,15 +63,15 @@ function renderFencedCode(lang: string, body: string): string {
     80
   );
   const width = Math.max(maxLen, 20);
-  const bottom = "└" + "─".repeat(width + 2) + "┘";
+  const bottom = "+" + "-".repeat(width + 2) + "+";
   const header = chalk.hex("#6B7280")(
-    "─".repeat(3) + (lang ? ` ${lang} ` : "") + "─".repeat(Math.max(0, width + 2 - (lang ? lang.length + 3 : 3)))
+    "-".repeat(3) + (lang ? ` ${lang} ` : "") + "-".repeat(Math.max(0, width + 2 - (lang ? lang.length + 3 : 3)))
   );
 
   const rendered = lines.map((line) => {
     const visible = getVisibleLength(line);
     const pad = Math.max(0, width - visible);
-    return chalk.hex("#0EA5E9")("│ ") + line + " ".repeat(pad) + chalk.hex("#0EA5E9")(" │");
+    return chalk.hex("#0EA5E9")("| ") + line + " ".repeat(pad) + chalk.hex("#0EA5E9")(" |");
   });
 
   return [header, ...rendered, bottom].join("\n");
@@ -81,7 +81,7 @@ function renderFencedCode(lang: string, body: string): string {
 function renderBlock(body: string, barColor: string): string {
   return body
     .split("\n")
-    .map((l) => (l.length > 0 ? chalk.hex(barColor)("│ ") + l : ""))
+    .map((l) => (l.length > 0 ? chalk.hex(barColor)("| ") + l : ""))
     .join("\n");
 }
 
@@ -114,7 +114,7 @@ function padCell(text: string, width: number): string {
 }
 
 function buildTableBorder(colWidths: number[], char: string, joiner: string): string {
-  return char + colWidths.map(w => "─".repeat(w + 2)).join(joiner) + char;
+  return char + colWidths.map(w => "-".repeat(w + 2)).join(joiner) + char;
 }
 
 function renderStyledTable(tableLines: string[]): string {
@@ -138,16 +138,16 @@ function renderStyledTable(tableLines: string[]): string {
   }
 
   const grey = chalk.hex("#6B7280");
-  const topBorder = buildTableBorder(colWidths, "┌", "┬");
-  const midBorder = buildTableBorder(colWidths, "├", "┼");
-  const bottomBorder = buildTableBorder(colWidths, "└", "┴");
+  const topBorder = buildTableBorder(colWidths, "+", "-");
+  const midBorder = buildTableBorder(colWidths, "+", "+");
+  const bottomBorder = buildTableBorder(colWidths, "+", "-");
 
-  const renderedHeader = "│" + headerRow.map((cell, idx) => {
+  const renderedHeader = "|" + headerRow.map((cell, idx) => {
     return chalk.hex("#6EE7F7").bold(padCell(cell, colWidths[idx] + 2));
-  }).join("│") + "│";
+  }).join("|") + "|";
 
   const renderedData = dataRows.map(row => {
-    return "│" + row.map((cell, idx) => padCell(cell, colWidths[idx] + 2)).join("│") + "│";
+    return "|" + row.map((cell, idx) => padCell(cell, colWidths[idx] + 2)).join("|") + "|";
   });
 
   const result: string[] = [grey(topBorder), renderedHeader, grey(midBorder), ...renderedData, grey(bottomBorder)];
@@ -185,7 +185,7 @@ function renderHeading(line: string): string[] {
   const styles = ["#6EE7F7", "#A78BFA", "#34D399", "#FBBF24", "#F87171", "#6B7280"];
   const ch = styles[Math.min(level, 6) - 1];
   if (level <= 2) {
-    return ["", chalk.hex(ch).bold(ht), chalk.hex(ch)("─".repeat(Math.min(ht.length + 4, 40))), ""];
+    return ["", chalk.hex(ch).bold(ht), chalk.hex(ch)("-".repeat(Math.min(ht.length + 4, 40))), ""];
   }
   return [chalk.hex(ch).bold(ht), ""];
 }
@@ -232,7 +232,7 @@ function processMarkdownLine(lines: string[], i: number, result: string[]): numb
   }
 
   if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
-    result.push(chalk.hex("#6B7280")("─".repeat(60)));
+    result.push(chalk.hex("#6B7280")("-".repeat(60)));
     return i + 1;
   }
 
@@ -245,14 +245,14 @@ function processMarkdownLine(lines: string[], i: number, result: string[]): numb
   const taskMatch = /^(\s*)[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line);
   if (taskMatch) {
     const checked = taskMatch[2].toLowerCase() === "x";
-    const icon = checked ? chalk.hex("#34D399")("[✓]") : chalk.hex("#6B7280")("[ ]");
+    const icon = checked ? chalk.hex("#34D399")("[OK]") : chalk.hex("#6B7280")("[ ]");
     result.push(`${icon} ${taskMatch[3]}`);
     return i + 1;
   }
 
   const bulletMatch = /^(\s*)[-*]\s+(.+)$/.exec(line);
   if (bulletMatch) {
-    const bullet = chalk.hex("#6EE7F7")("•");
+    const bullet = chalk.hex("#6EE7F7")("*");
     result.push(`${bulletMatch[1] ?? ""}${bullet} ${bulletMatch[2]}`);
     return i + 1;
   }
@@ -290,22 +290,22 @@ export function reply(text: string): void {
 /** Print a tool-call notification. */
 export function toolCall(toolName: string, args: Record<string, unknown>): void {
   const preview = JSON.stringify(args).slice(0, 120);
-  console.log(c.muted(`  [TOOL CALL] ${toolName}(${preview}${preview.length >= 120 ? "…" : ""})`));
+  console.log(c.muted(`  [TOOL CALL] ${toolName}(${preview}${preview.length >= 120 ? "..." : ""})`));
 }
 
 /** Print a tool-call result summary. */
 export function toolResult(toolName: string, ok: boolean, detail?: string): void {
   const icon = ok ? c.success("  [OK]") : c.error("  [FAIL]");
-  const suffix = detail ? c.muted(` — ${detail}`) : "";
+  const suffix = detail ? c.muted(` - ${detail}`) : "";
   console.log(`${icon}  ${toolName}${suffix}`);
 }
 
 /** Print a rate-limiter / concurrency throttle notice. */
 export function throttle(reason: string): void {
-  console.log(c.muted(`  ⏳ ${reason}`));
+  console.log(c.muted(`  ... ${reason}`));
 }
 
-/** Debug output — only shown when DEBUG=true. */
+/** Debug output - only shown when DEBUG=true. */
 export function debug(text: string): void {
   if (config.debug) {
     console.debug(c.muted(`[DBG] ${text}`));
@@ -314,10 +314,10 @@ export function debug(text: string): void {
 
 /** A styled horizontal divider. */
 export function divider(): void {
-  console.log(c.muted("─".repeat(60)));
+  console.log(c.muted("-".repeat(60)));
 }
 
-// ─── Status Bar (context window usage) ────────────────────────────────────
+// --- Status Bar (context window usage) ------------------------------------
 
 export interface StatusBarInput {
   promptTokens: number;
@@ -334,10 +334,10 @@ export interface StatusBarInput {
  * Render a compact one-line status bar showing context usage.
  *
  * Format:
- *       27.4k / 128k · 21% · session $0.012
- *   ┌──────────────────────────────────────┐
- *   │████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░│
- *   └──────────────────────────────────────┘
+ *       27.4k / 128k . 21% . session $0.012
+ *   +--------------------------------------+
+ *   |########------------------------------|
+ *   +--------------------------------------+
  *
  * Color of the bar shifts: green when < warnThreshold,
  * amber when between warn and compact, red when >= compact.
@@ -357,7 +357,7 @@ export function statusBar(input: StatusBarInput): void {
   if (pct >= compactThreshold) color = "#F87171";      // red
   else if (pct >= warnThreshold) color = "#FBBF24";    // amber
 
-  const bar = chalk.hex(color)("█".repeat(fillCount)) + chalk.hex("#374151")("░".repeat(emptyCount));
+  const bar = chalk.hex(color)("#".repeat(fillCount)) + chalk.hex("#374151")("-".repeat(emptyCount));
 
   // Estimate cost if rates configured (both must be > 0)
   let costStr = "";
@@ -367,7 +367,7 @@ export function statusBar(input: StatusBarInput): void {
       (completionTokens / 1000) * costPerKCompletion;
     if (cost > 0) {
       const costDisplay = `$${cost.toFixed(4)}`;
-      costStr = ` · session ${chalk.hex("#FBBF24")(costDisplay)}`;
+      costStr = ` . session ${chalk.hex("#FBBF24")(costDisplay)}`;
     }
   }
 
@@ -379,19 +379,19 @@ export function statusBar(input: StatusBarInput): void {
   const ioDisplay = `in ${formatTok(promptTokens)} / out ${formatTok(completionTokens)}`;
 
   const line1 = `  ${chalk.hex("#6B7280")("ctx")} ` +
-    `${chalk.white(tokDisplay)} · ` +
+    `${chalk.white(tokDisplay)} . ` +
     `${chalk.hex(color).bold(pctDisplay)}` +
-    ` · ${chalk.hex("#6B7280")(ioDisplay)}` +
+    ` . ${chalk.hex("#6B7280")(ioDisplay)}` +
     costStr;
 
-  const line2 = `  ┌${"─".repeat(40)}┐\n` +
-    `  │${bar}│\n` +
-    `  └${"─".repeat(40)}┘`;
+  const line2 = `  +${"-".repeat(40)}+\n` +
+    `  |${bar}|\n` +
+    `  +${"-".repeat(40)}+`;
 
   if (pct >= compactThreshold) {
-    console.log(c.warning(`⚠  Context ${Math.round(pct * 100)}% cheio — compactação recomendada.`));
+    console.log(c.warning(`!  Context ${Math.round(pct * 100)}% cheio - compactação recomendada.`));
   } else if (pct >= warnThreshold) {
-    console.log(c.warning(`⚠  Context em ${Math.round(pct * 100)}% — aproxime-se do limite em breve.`));
+    console.log(c.warning(`!  Context em ${Math.round(pct * 100)}% - aproxime-se do limite em breve.`));
   }
 
   console.log(line1);

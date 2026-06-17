@@ -1,5 +1,5 @@
 /**
- * contextCompaction.ts — Intelligent context compaction: summarize old messages,
+ * contextCompaction.ts - Intelligent context compaction: summarize old messages,
  * compress tool results, merge similar messages.
  *
  * IDEIA 3: Added "model-based compaction" strategy that calls the LLM to
@@ -145,7 +145,7 @@ export function smartCompact(maxTokens: number = 50000): { compacted: boolean; s
 
   // IDEIA 3: When context is critically full AND effort allows, use the
   // model to produce a high-fidelity summary. This preserves architectural
-  // decisions, unresolved bugs, and planned next steps — much better than
+  // decisions, unresolved bugs, and planned next steps - much better than
   // blind truncation. Mirrors Claude Code's compaction approach.
   if (shouldUseIntelligentCompaction() && before > maxTokens * 1.2) {
     const modelCompacted = modelBasedCompactionSync();
@@ -186,12 +186,12 @@ export function smartCompact(maxTokens: number = 50000): { compacted: boolean; s
  * so the caller can fall back to heuristic compaction.
  *
  * Note: this is a SYNCHRONOUS wrapper that kicks off the model call but doesn't
- * await it — actual model-based compaction happens via modelBasedCompactionAsync.
+ * await it - actual model-based compaction happens via modelBasedCompactionAsync.
  * The sync version returns the cached result of the last successful async run,
  * or false if none exists yet. This keeps smartCompact's signature synchronous.
  */
 function modelBasedCompactionSync(): { compacted: boolean; savedTokens: number } {
-  // Kick off async compaction in the background — next call to smartCompact
+  // Kick off async compaction in the background - next call to smartCompact
   // will pick up the result. This avoids blocking the main loop.
   if (!modelCompactionInProgress) {
     modelCompactionInProgress = true;
@@ -240,14 +240,14 @@ async function modelBasedCompactionAsync(): Promise<{ compacted: boolean; savedT
     // Replace the summarized portion with a single system message containing the summary
     const compactedHistory = [
       systemMsg,
-      { role: "system", content: `[CONTEXTO COMPACTADO POR IA — ${toSummarize.length} mensagens antigas resumidas preservando decisões arquiteturais, bugs não resolvidos e próximos passos]\n\n${summary}` } as any,
+      { role: "system", content: `[CONTEXTO COMPACTADO POR IA - ${toSummarize.length} mensagens antigas resumidas preservando decisões arquiteturais, bugs não resolvidos e próximos passos]\n\n${summary}` } as any,
       ...toKeep,
     ];
 
     // Replace history in-place
     history.replaceHistory(compactedHistory as any);
     const afterTokens = history.estimateTokens();
-    log.debug(`[COMPACTION] Model-based: ${toSummarize.length} msgs → 1 summary (${beforeTokens - afterTokens} tokens saved)`);
+    log.debug(`[COMPACTION] Model-based: ${toSummarize.length} msgs -> 1 summary (${beforeTokens - afterTokens} tokens saved)`);
     return { compacted: true, savedTokens: beforeTokens - afterTokens };
   } catch (err) {
     log.warn(`[COMPACTION] Model-based call failed: ${(err as Error).message}`);
@@ -290,7 +290,7 @@ Responda SOMENTE com o seguinte formato (sem preâmbulo):
 ## Contexto Técnico Crítico
 - (qualquer detalhe que seria perdido sem este resumo)
 
-Se uma seção não tiver conteúdo, escreva "N/A". Seja conciso mas completo — outro agente vai continuar o trabalho baseado apenas neste resumo.`;
+Se uma seção não tiver conteúdo, escreva "N/A". Seja conciso mas completo - outro agente vai continuar o trabalho baseado apenas neste resumo.`;
 }
 
 function renderMessageContent(m: any): string {

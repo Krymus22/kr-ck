@@ -1,5 +1,5 @@
 /**
- * telemetry.ts — Telemetry/metrics collection: session stats, API calls, tool usage.
+ * telemetry.ts - Telemetry/metrics collection: session stats, API calls, tool usage.
  */
 
 import * as fs from "node:fs";

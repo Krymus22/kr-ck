@@ -1,5 +1,5 @@
 /**
- * ChatDisplay.tsx — Renders the conversation history with styled messages.
+ * ChatDisplay.tsx - Renders the conversation history with styled messages.
  */
 
 import React from "react";

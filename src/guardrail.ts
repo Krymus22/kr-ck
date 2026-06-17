@@ -1,5 +1,5 @@
 /**
- * guardrail.ts — Post-write syntax validation for generated code.
+ * guardrail.ts - Post-write syntax validation for generated code.
  *
  * IMPORTANT: This module is now advisory-only.
  * - For TypeScript/JavaScript: runs validators AFTER the file has been written
@@ -9,13 +9,13 @@
  *   decide autonomously whether to fix the code or treat the error as a false positive.
  *
  * Supported extensions:
- *   .ts  .tsx         → npx tsc --noEmit in the real project root
- *   .js  .mjs  .cjs   → node --check on a temp copy (no project context needed)
- *   .json             → JSON.parse()
- *   .py               → python -m py_compile on a temp copy
- *   .java             → javac on a temp copy
- *   .css  .html       → best-effort heuristic
- *   everything else   → passthrough (no check)
+ *   .ts  .tsx         -> npx tsc --noEmit in the real project root
+ *   .js  .mjs  .cjs   -> node --check on a temp copy (no project context needed)
+ *   .json             -> JSON.parse()
+ *   .py               -> python -m py_compile on a temp copy
+ *   .java             -> javac on a temp copy
+ *   .css  .html       -> best-effort heuristic
+ *   everything else   -> passthrough (no check)
  */
 
 import { execSync } from "node:child_process";
@@ -24,7 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface ValidationResult {
   /** true = no issues found; false = errors captured (file was already saved) */
@@ -33,11 +33,11 @@ export interface ValidationResult {
   errorMessage?: string;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 /**
  * Run a shell command synchronously and capture stdout+stderr.
- * Returns { ok, output } — never throws.
+ * Returns { ok, output } - never throws.
  */
 function runCommand(
   command: string,
@@ -90,10 +90,10 @@ function findProjectRoot(filePath: string): string {
   return path.dirname(path.resolve(filePath));
 }
 
-// ─── Per-language Validators ─────────────────────────────────────────────────
+// --- Per-language Validators -------------------------------------------------
 
 /**
- * TypeScript — runs `npx tsc --noEmit` in the REAL project root.
+ * TypeScript - runs `npx tsc --noEmit` in the REAL project root.
  * The file must already be written to disk before this is called.
  * No temp files are created.
  */
@@ -105,11 +105,11 @@ function validateTs(filePath: string): ValidationResult {
   if (ok) return { valid: true };
   return {
     valid: false,
-    errorMessage: `TypeScript compilation error (full project — ${projectRoot}):\n${output}`,
+    errorMessage: `TypeScript compilation error (full project - ${projectRoot}):\n${output}`,
   };
 }
 
-/** JavaScript / CommonJS / ESM — uses Node.js built-in parser on a temp copy */
+/** JavaScript / CommonJS / ESM - uses Node.js built-in parser on a temp copy */
 function validateJs(content: string): ValidationResult {
   const tmp = writeTempFile(content, ".mjs");
   try {
@@ -124,7 +124,7 @@ function validateJs(content: string): ValidationResult {
   }
 }
 
-/** JSON — uses native JSON.parse */
+/** JSON - uses native JSON.parse */
 function validateJson(content: string): ValidationResult {
   try {
     JSON.parse(content);
@@ -137,7 +137,7 @@ function validateJson(content: string): ValidationResult {
   }
 }
 
-/** Python — uses `python -m py_compile` on a temp copy (requires python in PATH) */
+/** Python - uses `python -m py_compile` on a temp copy (requires python in PATH) */
 function validatePython(content: string): ValidationResult {
   const tmp = writeTempFile(content, ".py");
   try {
@@ -153,7 +153,7 @@ function validatePython(content: string): ValidationResult {
   }
 }
 
-/** Java — uses `javac` on a temp copy (requires JDK in PATH) */
+/** Java - uses `javac` on a temp copy (requires JDK in PATH) */
 function validateJava(content: string): ValidationResult {
   const classMatch = /public\s+class\s+(\w+)/.exec(content);
   const className = classMatch ? classMatch[1] : "__ClaudeKillerCheck";
@@ -172,7 +172,7 @@ function validateJava(content: string): ValidationResult {
   }
 }
 
-/** HTML — heuristic tag-balance check */
+/** HTML - heuristic tag-balance check */
 function validateHtml(content: string): ValidationResult {
   const openCount = (content.match(/<[a-zA-Z][^/!][^>]*>/g) ?? []).length;
   const closeCount = (content.match(/<\/[a-zA-Z][^>]*>/g) ?? []).length;
@@ -188,7 +188,7 @@ function validateHtml(content: string): ValidationResult {
   return { valid: true };
 }
 
-/** CSS — heuristic brace-balance check */
+/** CSS - heuristic brace-balance check */
 function validateCss(content: string): ValidationResult {
   const open = (content.match(/\{/g) ?? []).length;
   const close = (content.match(/\}/g) ?? []).length;
@@ -202,17 +202,17 @@ function validateCss(content: string): ValidationResult {
   return { valid: true };
 }
 
-// ─── Public Validate Function ─────────────────────────────────────────────────
+// --- Public Validate Function -------------------------------------------------
 
 /**
  * Run the appropriate post-write validator for `filePath`.
  *
  * For TypeScript files the file MUST already be written to disk before calling
- * this function — validation runs `npx tsc --noEmit` over the real project.
+ * this function - validation runs `npx tsc --noEmit` over the real project.
  *
  * @param filePath  Path of the file that was just saved (used for extension + project root detection).
  * @param content   File content (used by validators that don't need project context).
- * @returns         ValidationResult — { valid, errorMessage? }
+ * @returns         ValidationResult - { valid, errorMessage? }
  */
 export async function validateSyntax(
   filePath: string,
@@ -250,7 +250,7 @@ export async function validateSyntax(
       return validateCss(content);
 
     default:
-      log.debug(`No validator for extension "${ext}" — skipping syntax check.`);
+      log.debug(`No validator for extension "${ext}" - skipping syntax check.`);
       return { valid: true };
   }
 }

@@ -1,5 +1,5 @@
 /**
- * App.tsx — Main Ink application component.
+ * App.tsx - Main Ink application component.
  *
  * Layout:
  *   - Chat history (scrollable)
@@ -30,11 +30,11 @@ import { TodoPanel, TodoItem } from "./TodoPanel.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { ExtensionHub } from "./ExtensionHub.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 type AppStatus = "idle" | "thinking" | "streaming";
 
-// ─── Slash command definitions ──────────────────────────────────────────────
+// --- Slash command definitions ----------------------------------------------
 
 const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/help", desc: "Show help" },
@@ -85,14 +85,14 @@ function handleHistoryCommand(): CommandResult {
 function handleSkillsCommand(): CommandResult {
   const skills = getActiveSkills();
   if (skills.length === 0) return { handled: true, message: "Nenhuma skill carregada." };
-  const text = skills.map((s) => `  • ${s.name}: ${s.description}`).join("\n");
+  const text = skills.map((s) => `  * ${s.name}: ${s.description}`).join("\n");
   return { handled: true, message: `Skills:\n${text}` };
 }
 
 function handlePluginsCommand(): CommandResult {
   const servers = getActiveMCPServers();
   if (servers.length === 0) return { handled: true, message: "Nenhum servidor MCP ativo." };
-  const text = servers.map((s) => `  • ${s}`).join("\n");
+  const text = servers.map((s) => `  * ${s}`).join("\n");
   return { handled: true, message: `MCP Servers:\n${text}` };
 }
 
@@ -130,8 +130,8 @@ function handlePlanCommand(): CommandResult {
   return {
     handled: true,
     message: current
-      ? "Modo Plan DESATIVADO — ferramentas executadas normalmente."
-      : "Modo Plan ATIVADO — modelo cria plano sem executar ferramentas.",
+      ? "Modo Plan DESATIVADO - ferramentas executadas normalmente."
+      : "Modo Plan ATIVADO - modelo cria plano sem executar ferramentas.",
   };
 }
 
@@ -140,7 +140,7 @@ function handleCompactCommand(): CommandResult {
   if (!result) return { handled: true, message: "Nada para compactar." };
   return {
     handled: true,
-    message: `Compactado: ${result.removed} msgs removidas, ${result.beforeTokens} → ${result.afterTokens} tokens.`,
+    message: `Compactado: ${result.removed} msgs removidas, ${result.beforeTokens} -> ${result.afterTokens} tokens.`,
   };
 }
 
@@ -148,28 +148,28 @@ function handleDreamCommand(): CommandResult {
   import("../memory.js").then(({ runDream, getMemoryConfig }) => {
     const config = getMemoryConfig();
     runDream(config).then((result) => {
-      console.log(`\n✦ Dream completo: ${result.reviewedSessions} sessões revisadas, ${result.extractedSkills} skills extraídas, ${result.deduplicatedEntries} duplicatas removidas.`);
+      console.log(`\n* Dream completo: ${result.reviewedSessions} sessões revisadas, ${result.extractedSkills} skills extraídas, ${result.deduplicatedEntries} duplicatas removidas.`);
     }).catch((err) => {
-      console.error(`\n✗ Dream falhou: ${(err as Error).message}`);
+      console.error(`\nX Dream falhou: ${(err as Error).message}`);
     });
   }).catch(() => {
-    console.error("\n✗ Failed to load memory module");
+    console.error("\nX Failed to load memory module");
   });
-  return { handled: true, message: "Executando /dream — revisando memória..." };
+  return { handled: true, message: "Executando /dream - revisando memória..." };
 }
 
 function handleDistillCommand(): CommandResult {
   import("../memory.js").then(({ runDistill, getMemoryConfig }) => {
     const config = getMemoryConfig();
     runDistill(config).then((result) => {
-      console.log(`\n✦ Distill completo: ${result.skillsExtracted} skills extraídos.`);
+      console.log(`\n* Distill completo: ${result.skillsExtracted} skills extraídos.`);
     }).catch((err) => {
-      console.error(`\n✗ Distill falhou: ${(err as Error).message}`);
+      console.error(`\nX Distill falhou: ${(err as Error).message}`);
     });
   }).catch(() => {
-    console.error("\n✗ Failed to load memory module");
+    console.error("\nX Failed to load memory module");
   });
-  return { handled: true, message: "Executando /distill — extraindo workflow skills..." };
+  return { handled: true, message: "Executando /distill - extraindo workflow skills..." };
 }
 
 function handleHubCommand(): CommandResult {
@@ -191,22 +191,22 @@ function handleToolsCommand(arg: string | null): CommandResult {
   const notInstalled = tools.filter((t: any) => !registry.isInstalled(t.name));
   
   const lines: string[] = [
-    `📊 Tools: ${tools.length} total (${installed.length} ✅ / ${notInstalled.length} ❌)`,
+    `G Tools: ${tools.length} total (${installed.length} OK / ${notInstalled.length} X)`,
     ""
   ];
   
   if (installed.length > 0) {
-    lines.push("✅ Instaladas:");
+    lines.push("OK Instaladas:");
     installed.forEach((t: any) => {
-      lines.push(`  • ${t.name} (${t.category}) — ${t.description.slice(0, 50)}`);
+      lines.push(`  * ${t.name} (${t.category}) - ${t.description.slice(0, 50)}`);
     });
     lines.push("");
   }
   
   if (notInstalled.length > 0) {
-    lines.push("❌ Não instaladas:");
+    lines.push("X Não instaladas:");
     notInstalled.forEach((t: any) => {
-      lines.push(`  • ${t.name} (${t.category}) — ${t.description.slice(0, 50)}`);
+      lines.push(`  * ${t.name} (${t.category}) - ${t.description.slice(0, 50)}`);
     });
   }
   
@@ -229,17 +229,17 @@ function handleToolInfoCommand(arg: string | null): CommandResult {
   const installed = registry.isInstalled(tool.name);
   
   const lines: string[] = [
-    `🔧 ${tool.name}`,
+    `[T] ${tool.name}`,
     `   Descrição: ${tool.description}`,
     `   Categoria: ${tool.category}`,
     `   Comando: ${tool.command} ${tool.args.join(" ")}`,
-    `   Status: ${installed ? "✅ Instalada" : "❌ Não instalada"}`,
+    `   Status: ${installed ? "OK Instalada" : "X Não instalada"}`,
     "",
     "   Quando usar:"
   ];
   
   tool.context.whenToUse.forEach((pattern: string) => {
-    lines.push(`     • ${pattern}`);
+    lines.push(`     * ${pattern}`);
   });
   
   if (tool.context.examples.length > 0) {
@@ -316,7 +316,7 @@ function handleSlashCommand(input: string): CommandResult {
   return { handled: false };
 }
 
-// ─── @-mention expansion ────────────────────────────────────────────────────
+// --- @-mention expansion ----------------------------------------------------
 
 const MAX_AT_FILE_BYTES = 200 * 1024;
 
@@ -347,7 +347,7 @@ function expandAtMentions(input: string): string {
   });
 }
 
-// ─── Autocomplete Component ─────────────────────────────────────────────────
+// --- Autocomplete Component -------------------------------------------------
 
 interface AutocompleteProps {
   query: string;
@@ -369,7 +369,7 @@ function Autocomplete({ query, selectedIndex, onSelect }: Readonly<AutocompleteP
       {matches.map((m, i) => (
         <Box key={m.cmd}>
           <Text color={i === selectedIndex ? colors.primary : colors.muted} bold={i === selectedIndex}>
-            {i === selectedIndex ? "❯ " : "  "}
+            {i === selectedIndex ? "> " : "  "}
           </Text>
           <Text color={i === selectedIndex ? colors.primary : colors.white} bold={i === selectedIndex}>
             {m.cmd.padEnd(14)}
@@ -381,12 +381,12 @@ function Autocomplete({ query, selectedIndex, onSelect }: Readonly<AutocompleteP
   );
 }
 
-// ─── App Component ──────────────────────────────────────────────────────────
+// --- App Component ----------------------------------------------------------
 
 export function App() {
   const { exit } = useApp();
 
-  // ── State ──────────────────────────────────────────────────────────────
+  // -- State --------------------------------------------------------------
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<AppStatus>("idle");
@@ -404,7 +404,7 @@ export function App() {
 
   const isProcessing = useRef(false);
 
-  // ── Autocomplete state ─────────────────────────────────────────────────
+  // -- Autocomplete state -------------------------------------------------
   const showAutocomplete = input.startsWith("/") && input.length > 0 && !input.includes(" ");
   const acMatches = useMemo(() => {
     if (!showAutocomplete) return [];
@@ -412,7 +412,7 @@ export function App() {
     return SLASH_COMMANDS.filter((s) => s.cmd.startsWith(lower));
   }, [input, showAutocomplete]);
 
-  // ── Discover extensions on mount ────────────────────────────────────
+  // -- Discover extensions on mount ------------------------------------
   useMemo(() => {
     // Initialize external tools registry BEFORE discovering extensions
     // so the Hub can see all available tools (Roblox, Python, etc.)
@@ -428,13 +428,13 @@ export function App() {
     });
   }, []);
 
-  // ── Update todos from shared state ─────────────────────────────────────
+  // -- Update todos from shared state -------------------------------------
   const syncTodos = useCallback(() => {
     const current = todo.getTodos();
     setTodos([...current]);
   }, []);
 
-  // ── Streaming helpers (extracted to reduce handleSubmit complexity) ───
+  // -- Streaming helpers (extracted to reduce handleSubmit complexity) ---
   const runStreaming = useCallback(async (fullInput: string) => {
     let streamContent = "";
     let streamStarted = false;
@@ -529,7 +529,7 @@ export function App() {
     return false;
   }, [exit]);
 
-  // ── Submit handler ─────────────────────────────────────────────────────
+  // -- Submit handler -----------------------------------------------------
   const handleSubmit = useCallback(
     async (value: string) => {
       const trimmed = value.trim();
@@ -588,15 +588,15 @@ export function App() {
     [exit, syncTodos, showAutocomplete, acMatches, acIndex]
   );
 
-  // ── Input change handler ───────────────────────────────────────────────
+  // -- Input change handler -----------------------------------------------
   const handleChange = useCallback((val: string) => {
     setInput(val);
     setAcIndex(0);
   }, []);
 
-  // ── Keyboard navigation for autocomplete + global shortcuts ───────────
+  // -- Keyboard navigation for autocomplete + global shortcuts -----------
   useInput((inputChar, key) => {
-    // Ctrl+E opens Extension Hub — must clear input to prevent 'e' leak
+    // Ctrl+E opens Extension Hub - must clear input to prevent 'e' leak
     if (key.ctrl && inputChar === "e") {
       setInput("");
       setShowHub((prev) => !prev);
@@ -618,16 +618,16 @@ export function App() {
     }
   });
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  // -- Render -------------------------------------------------------------
   return (
     <Box flexDirection="column" padding={1}>
       {/* Banner */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={colors.primary} bold>{"═".repeat(50)}</Text>
-        <Text color={colors.primary} bold> Claude-Killer · Ink TUI</Text>
+        <Text color={colors.primary} bold>{"=".repeat(50)}</Text>
+        <Text color={colors.primary} bold> Claude-Killer . Ink TUI</Text>
         <Text color={colors.muted}> Model: {config.model}</Text>
-        <Text color={colors.muted}> Type /help for commands · Ctrl+E for Hub · ↑↓ to navigate</Text>
-        <Text color={colors.primary} bold>{"═".repeat(50)}</Text>
+        <Text color={colors.muted}> Type /help for commands . Ctrl+E for Hub . ^v to navigate</Text>
+        <Text color={colors.primary} bold>{"=".repeat(50)}</Text>
       </Box>
 
       {/* Extension Hub overlay */}
@@ -664,13 +664,13 @@ export function App() {
 
       {/* Bottom bar: Input (left) + Status (right) */}
       <Box flexDirection="row" marginTop={1}>
-        {/* Input section — hidden when Hub is open to prevent key leaks */}
+        {/* Input section - hidden when Hub is open to prevent key leaks */}
         <Box flexGrow={1}>
           {showHub ? (
-            <Text color={colors.muted}>〔 Hub aberto — pressione Esc para fechar 〕</Text>
+            <Text color={colors.muted}>[ Hub aberto - pressione Esc para fechar ]</Text>
           ) : (
             <>
-              <Text color={colors.primary} bold>❯ </Text>
+              <Text color={colors.primary} bold>{"> "}</Text>
               <TextInput
                 value={input}
                 onChange={handleChange}

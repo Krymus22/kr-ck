@@ -1,5 +1,5 @@
 /**
- * node.ts — Node.js development tools
+ * node.ts - Node.js development tools
  * 
  * Tools for npm, yarn, pnpm, eslint, prettier, tsc
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const NODE_TOOLS: Tool[] = [
-  // ─── NPM ──────────────────────────────────────────────────────────────
+  // --- NPM --------------------------------------------------------------
   {
     name: "npm_install",
     description: "Install Node.js dependencies with npm",
@@ -89,7 +89,7 @@ export const NODE_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Yarn ─────────────────────────────────────────────────────────────
+  // --- Yarn -------------------------------------------------------------
   {
     name: "yarn_install",
     description: "Install Node.js dependencies with Yarn",
@@ -138,7 +138,7 @@ export const NODE_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── PNPM ─────────────────────────────────────────────────────────────
+  // --- PNPM -------------------------------------------------------------
   {
     name: "pnpm_install",
     description: "Install Node.js dependencies with pnpm",
@@ -163,7 +163,7 @@ export const NODE_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── ESLint ───────────────────────────────────────────────────────────
+  // --- ESLint -----------------------------------------------------------
   {
     name: "eslint_lint",
     description: "Lint JavaScript/TypeScript code with ESLint",
@@ -201,7 +201,7 @@ export const NODE_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Prettier ─────────────────────────────────────────────────────────
+  // --- Prettier ---------------------------------------------------------
   {
     name: "prettier_format",
     description: "Format code with Prettier",
@@ -229,7 +229,7 @@ export const NODE_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── TypeScript Compiler ──────────────────────────────────────────────
+  // --- TypeScript Compiler ----------------------------------------------
   {
     name: "tsc_build",
     description: "Build TypeScript project with tsc",
@@ -266,7 +266,7 @@ export const NODE_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Node ─────────────────────────────────────────────────────────────
+  // --- Node -------------------------------------------------------------
   {
     name: "node_run",
     description: "Run Node.js script",
@@ -293,7 +293,7 @@ export const NODE_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Npx ──────────────────────────────────────────────────────────────
+  // --- Npx --------------------------------------------------------------
   {
     name: "npx_run",
     description: "Run package binary with npx",

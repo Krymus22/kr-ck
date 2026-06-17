@@ -1,9 +1,9 @@
 /**
- * toolSchemaValidation.ts — Validates tool call arguments against their JSON Schema.
+ * toolSchemaValidation.ts - Validates tool call arguments against their JSON Schema.
  *
  * Prevents the model from calling tools with missing/invalid parameters.
  * Returns clear, actionable error messages that tell the model exactly
- * what's wrong and how to fix it — inspired by Anthropic's poka-yoke approach.
+ * what's wrong and how to fix it - inspired by Anthropic's poka-yoke approach.
  */
 
 import * as log from "./logger.js";
@@ -163,7 +163,7 @@ export function validateToolCall(
 export function formatValidationErrors(toolName: string, errors: string[]): string {
   return (
     `[ERRO: VALIDAÇÃO DE SCHEMA] A chamada "${toolName}" tem argumentos inválidos:\n\n` +
-    errors.map((e) => `  ✗ ${e}`).join("\n") +
+    errors.map((e) => `  X ${e}`).join("\n") +
     `\n\nCorrija os argumentos e tente novamente. Verifique os tipos e campos obrigatórios.`
   );
 }

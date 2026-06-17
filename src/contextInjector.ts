@@ -1,5 +1,5 @@
 /**
- * contextInjector.ts — Auto-injects high-signal context into tool results.
+ * contextInjector.ts - Auto-injects high-signal context into tool results.
  *
  * Inspired by Anthropic's "context engineering" article: Fable 5 improves its
  * outputs by reading its own notes before each decision. We replicate this by
@@ -13,7 +13,7 @@
  *
  * The injection is:
  *   - Compact (~200-400 tokens max)
- *   - Only attached to write/command tools (not read-only — would bloat cache)
+ *   - Only attached to write/command tools (not read-only - would bloat cache)
  *   - Suppressed when TASK_STATE.md is empty or doesn't exist
  *   - Throttled (at most once every 3 tool calls to avoid noise)
  */
@@ -21,7 +21,7 @@
 import { getTaskStateSummary } from "./taskState.js";
 import * as log from "./logger.js";
 
-// Tools where decision context matters most — these change state, so the
+// Tools where decision context matters most - these change state, so the
 // model benefits from re-reading its plan/bugs before committing.
 const DECISION_CRITICAL_TOOLS = new Set([
   "aplicar_diff",
@@ -61,7 +61,7 @@ export function getContextInjection(toolName: string): string {
 
 /**
  * Reduce the full TASK_STATE summary to only decision-critical fields.
- * Drops "Done" items (past) and notes — keeps Pending, Bugs, Decisions.
+ * Drops "Done" items (past) and notes - keeps Pending, Bugs, Decisions.
  */
 function compactSummary(full: string): string {
   const lines = full.split("\n");
@@ -98,7 +98,7 @@ function compactSummary(full: string): string {
 }
 
 /**
- * Reset throttle counter — call at the start of a new user turn.
+ * Reset throttle counter - call at the start of a new user turn.
  */
 export function resetContextInjection(): void {
   callsSinceLastInjection = 0;

@@ -1,5 +1,5 @@
 /**
- * streaming.ts — Streaming improvements: token counting, backpressure, buffered streaming.
+ * streaming.ts - Streaming improvements: token counting, backpressure, buffered streaming.
  */
 
 export class TokenCounter {

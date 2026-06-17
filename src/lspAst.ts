@@ -1,5 +1,5 @@
 /**
- * lspAst.ts — Language-agnostic AST parsing via tree-sitter WASM.
+ * lspAst.ts - Language-agnostic AST parsing via tree-sitter WASM.
  * Provides symbol extraction, function/class detection, and import analysis
  * with real syntax tree parsing for 7 languages.
  */
@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface Symbol {
   name: string;
@@ -37,7 +37,7 @@ export interface ParseResult {
   lineCount: number;
 }
 
-// ─── Tree-sitter WASM Loader ────────────────────────────────────────────────
+// --- Tree-sitter WASM Loader ------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let TreeSitterParser: any = null;
@@ -132,7 +132,7 @@ function detectLanguage(filePath: string): string {
   return EXT_TO_GRAMMAR[ext] ?? "tree-sitter-typescript";
 }
 
-// ─── Symbol Extraction ──────────────────────────────────────────────────────
+// --- Symbol Extraction ------------------------------------------------------
 
 const FUNCTION_NODE_TYPES = new Set([
   "function_declaration", "function", "function_definition", "function_item",
@@ -347,7 +347,7 @@ function extractSignature(lines: string[], lineIndex: number): string {
   return match?.[1]?.trim() ?? line.trim().slice(0, 120);
 }
 
-// ─── Import Extraction ──────────────────────────────────────────────────────
+// --- Import Extraction ------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractImports(tree: any, sourceCode: string, langName: string): ImportInfo[] {
@@ -421,7 +421,7 @@ function extractImports(tree: any, sourceCode: string, langName: string): Import
   return imports;
 }
 
-// ─── Export Extraction ──────────────────────────────────────────────────────
+// --- Export Extraction ------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractExports(tree: any, sourceCode: string): string[] {
@@ -458,7 +458,7 @@ function extractExports(tree: any, sourceCode: string): string[] {
   return [...new Set(exports)];
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// --- Public API -------------------------------------------------------------
 
 export async function parseSource(
   sourceCode: string,
@@ -543,7 +543,7 @@ export function findDependencies(parseResult: ParseResult): ImportInfo[] {
   return parseResult.imports;
 }
 
-// ─── Fallback (regex-based) ─────────────────────────────────────────────────
+// --- Fallback (regex-based) -------------------------------------------------
 
 interface LangConfig {
   symbolPatterns: RegExp[];

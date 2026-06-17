@@ -1,5 +1,5 @@
 /**
- * taskState.ts — Structured task-state note-taking.
+ * taskState.ts - Structured task-state note-taking.
  *
  * The model maintains a TASK_STATE.md file in the project's
  * .claude-killer/ directory with a structured snapshot of:
@@ -24,7 +24,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface TaskState {
   /** Human-readable task title (set from the first user message) */
@@ -47,7 +47,7 @@ export interface TaskState {
   notes: string;
 }
 
-// ─── Path Helpers ────────────────────────────────────────────────────────────
+// --- Path Helpers ------------------------------------------------------------
 
 const DEFAULT_TASK_TITLE = "Untitled task";
 
@@ -67,11 +67,11 @@ function ensureDir(): void {
   }
 }
 
-// ─── Persistence ─────────────────────────────────────────────────────────────
+// --- Persistence -------------------------------------------------------------
 
 /**
  * Read the current TASK_STATE.md (if any). Returns null if not present.
- * Tolerant of partially-broken files — fills missing fields with defaults.
+ * Tolerant of partially-broken files - fills missing fields with defaults.
  */
 export function readTaskState(): TaskState | null {
   const filePath = getTaskStatePath();
@@ -153,7 +153,7 @@ export function markTaskItemDone(itemSubstring: string): TaskState {
   return updateTaskState({ todo, done });
 }
 
-// ─── Markdown Serialization ──────────────────────────────────────────────────
+// --- Markdown Serialization --------------------------------------------------
 
 function serializeTaskStateMarkdown(state: TaskState): string {
   const lines: string[] = [];
@@ -221,7 +221,7 @@ function parseTaskStateMarkdown(raw: string): TaskState | null {
   state.bugs = extractListSection(raw, "## Bugs");
   state.dependencies = extractListSection(raw, "## Dependencies");
 
-  // Notes — everything after "## Notes" until EOF
+  // Notes - everything after "## Notes" until EOF
   const notesMatch = /## Notes\s*\n([\s\S]*?)$/.exec(raw);
   if (notesMatch) {
     const notes = notesMatch[1].trim();
@@ -253,7 +253,7 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// ─── Public Helpers ──────────────────────────────────────────────────────────
+// --- Public Helpers ----------------------------------------------------------
 
 /**
  * Initialize the task state from a user message (the first message of a session).
@@ -288,14 +288,14 @@ export function getTaskStateSummary(): string | null {
   const parts: string[] = [];
   parts.push(`## TASK_STATE (auto-maintained)`);
   parts.push(`Title: ${state.title}`);
-  parts.push(`Started: ${state.startedAt} — Updated: ${state.updatedAt}`);
+  parts.push(`Started: ${state.startedAt} - Updated: ${state.updatedAt}`);
 
   const sections: Array<{ label: string; items: string[]; marker: string }> = [
-    { label: "Done", items: state.done, marker: "✓" },
-    { label: "Todo", items: state.todo, marker: "○" },
-    { label: "Decisions", items: state.decisions, marker: "•" },
+    { label: "Done", items: state.done, marker: "OK" },
+    { label: "Todo", items: state.todo, marker: "[ ]" },
+    { label: "Decisions", items: state.decisions, marker: "*" },
     { label: "Bugs", items: state.bugs, marker: "!" },
-    { label: "Dependencies", items: state.dependencies, marker: "⚠" },
+    { label: "Dependencies", items: state.dependencies, marker: "!" },
   ];
   for (const s of sections) {
     if (s.items.length > 0) {

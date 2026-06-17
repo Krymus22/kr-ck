@@ -1,8 +1,8 @@
 /**
- * lspClient.ts — Real LSP integration with graceful fallback.
+ * lspClient.ts - Real LSP integration with graceful fallback.
  *
  * Connects to actual LSP servers (tsserver, pylsp) for type-aware
- * diagnostics — much more precise than the tree-sitter-based
+ * diagnostics - much more precise than the tree-sitter-based
  * `lspAst.ts` for catching type errors, unused imports, etc.
  *
  * Design:
@@ -29,7 +29,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// --- Types -------------------------------------------------------------------
 
 export interface LspDiagnostic {
   file: string;
@@ -60,7 +60,7 @@ interface LspServerConfig {
   pylspPath: string | null;
 }
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// --- Config ------------------------------------------------------------------
 
 function envBool(key: string, fallback: boolean): boolean {
   const raw = process.env[key]?.toLowerCase();
@@ -88,7 +88,7 @@ function detectTsserverPath(): string | null {
     "typescript-language-server",
     "npx --yes typescript-language-server --stdio",
   ];
-  return candidates[1]; // default to npx form — most portable
+  return candidates[1]; // default to npx form - most portable
 }
 
 function detectPylspPath(): string | null {
@@ -121,7 +121,7 @@ function getLspConfig(): LspServerConfig {
   };
 }
 
-// ─── LSP Server Manager ──────────────────────────────────────────────────────
+// --- LSP Server Manager ------------------------------------------------------
 
 interface ServerEntry {
   proc: ChildProcess;
@@ -158,7 +158,7 @@ function startLspServer(language: string): ServerEntry | null {
   }
 }
 
-/** Resolve language → { command, args }, or null if language is unsupported / server missing. */
+/** Resolve language -> { command, args }, or null if language is unsupported / server missing. */
 function resolveLspCommand(cfg: LspServerConfig, language: string): { command: string; args: string[] } | null {
   if (language === LANG_TYPESCRIPT || language === LANG_JAVASCRIPT) {
     if (!cfg.tsserverPath) return null;
@@ -220,7 +220,7 @@ function sendLspInitialize(entry: ServerEntry, language: string): void {
   });
 }
 
-// ─── JSON-RPC over stdio ─────────────────────────────────────────────────────
+// --- JSON-RPC over stdio -----------------------------------------------------
 
 function sendLspMessage(entry: ServerEntry, message: unknown): void {
   const json = JSON.stringify(message);
@@ -319,7 +319,7 @@ function normalizeDiagnostic(d: any, uri: string): LspDiagnostic {
   };
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
+// --- Public API --------------------------------------------------------------
 
 /**
  * Analyze a file using a real LSP server when available. Falls back to

@@ -1,5 +1,5 @@
 /**
- * StatusBar.tsx — Context window usage bar + session cost + effort level + tok/s.
+ * StatusBar.tsx - Context window usage bar + session cost + effort level + tok/s.
  * Compact single-line format for inline display next to input.
  */
 
@@ -50,8 +50,8 @@ export function StatusBar({
   if (pct >= compactThreshold) barColor = colors.error;
   else if (pct >= warnThreshold) barColor = colors.warning;
 
-  const fill = "█".repeat(fillCount);
-  const empty = "░".repeat(emptyCount);
+  const fill = "#".repeat(fillCount);
+  const empty = "-".repeat(emptyCount);
 
   let costStr = "";
   if (costPerKPrompt > 0 || costPerKCompletion > 0) {

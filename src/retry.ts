@@ -1,5 +1,5 @@
 /**
- * retry.ts — Retry with exponential backoff and jitter.
+ * retry.ts - Retry with exponential backoff and jitter.
  */
 
 import * as log from "./logger.js";
@@ -53,7 +53,7 @@ function calculateDelay(attempt: number, options: Required<Omit<RetryOptions, "r
   delay = Math.min(delay, options.maxDelayMs);
 
   if (options.jitter) {
-    // Add ±25% jitter
+    // Add +/-25% jitter
     const jitterRange = delay * 0.25;
     delay += (Math.random() * 2 - 1) * jitterRange;
   }

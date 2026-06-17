@@ -1,5 +1,5 @@
 /**
- * theme.ts — Color palette and style constants for the Ink TUI.
+ * theme.ts - Color palette and style constants for the Ink TUI.
  */
 
 export const colors = {
@@ -14,11 +14,11 @@ export const colors = {
 } as const;
 
 export const icons = {
-  check: "✓",
-  dot: "●",
-  circle: "○",
-  arrow: "→",
-  warn: "⚠",
-  error: "✖",
-  thinking: "◆",
+  check: "OK",
+  dot: "[x]",
+  circle: "[ ]",
+  arrow: "->",
+  warn: "!",
+  error: "x",
+  thinking: "*",
 } as const;

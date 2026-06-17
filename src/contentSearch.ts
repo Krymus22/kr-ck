@@ -1,5 +1,5 @@
 /**
- * contentSearch.ts — Content search (Grep) with regex support.
+ * contentSearch.ts - Content search (Grep) with regex support.
  */
 
 import * as fs from "node:fs";
@@ -128,7 +128,7 @@ export function formatGrepResults(matches: GrepMatch[], maxDisplay: number = 50)
         lines.push(`  ${m.file}:${m.line - m.before.indexOf(b) - 1}: ${b}`);
       }
     }
-    lines.push(`→ ${m.file}:${m.line}: ${m.content}`);
+    lines.push(`-> ${m.file}:${m.line}: ${m.content}`);
     if (m.after?.length) {
       for (const a of m.after) {
         lines.push(`  ${m.file}:${m.line + m.after.indexOf(a) + 1}: ${a}`);

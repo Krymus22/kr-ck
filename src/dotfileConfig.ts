@@ -1,5 +1,5 @@
 /**
- * dotfileConfig.ts — Dotfile config system (~/.claude-killer/config.json)
+ * dotfileConfig.ts - Dotfile config system (~/.claude-killer/config.json)
  */
 
 import * as fs from "node:fs";

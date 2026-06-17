@@ -1,5 +1,5 @@
 /**
- * index.ts — Central registry for all external tools
+ * index.ts - Central registry for all external tools
  * 
  * This file exports all tool categories and provides
  * a function to register them all at once.
@@ -13,7 +13,7 @@ import { RUST_TOOLS } from "./rust.js";
 import { GO_TOOLS } from "./go.js";
 import { DOCKER_TOOLS } from "./docker.js";
 
-// ─── All Tools ──────────────────────────────────────────────────────────────
+// --- All Tools --------------------------------------------------------------
 
 export const ALL_TOOLS: Tool[] = [
   ...ROBLOX_TOOLS,
@@ -24,7 +24,7 @@ export const ALL_TOOLS: Tool[] = [
   ...DOCKER_TOOLS
 ];
 
-// ─── Tool Counts ────────────────────────────────────────────────────────────
+// --- Tool Counts ------------------------------------------------------------
 
 export const TOOL_COUNTS = {
   roblox: ROBLOX_TOOLS.length,
@@ -36,7 +36,7 @@ export const TOOL_COUNTS = {
   total: ALL_TOOLS.length
 };
 
-// ─── Get Tools by Category ──────────────────────────────────────────────────
+// --- Get Tools by Category --------------------------------------------------
 
 export function getToolsByCategory(category: string): Tool[] {
   switch (category) {
@@ -57,7 +57,7 @@ export function getToolsByCategory(category: string): Tool[] {
   }
 }
 
-// ─── Search Tools ───────────────────────────────────────────────────────────
+// --- Search Tools -----------------------------------------------------------
 
 export function searchTools(query: string): Tool[] {
   const lower = query.toLowerCase();
@@ -68,7 +68,7 @@ export function searchTools(query: string): Tool[] {
   );
 }
 
-// ─── List All Tool Names ────────────────────────────────────────────────────
+// --- List All Tool Names ----------------------------------------------------
 
 export function listAllToolNames(): string[] {
   return ALL_TOOLS.map(tool => tool.name);

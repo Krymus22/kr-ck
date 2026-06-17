@@ -1,5 +1,5 @@
 /**
- * parallelTools.ts — Parallel tool execution with concurrency control.
+ * parallelTools.ts - Parallel tool execution with concurrency control.
  */
 
 import * as log from "./logger.js";

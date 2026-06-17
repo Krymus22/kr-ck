@@ -1,5 +1,5 @@
 /**
- * externalTools.ts — Framework for external CLI tools
+ * externalTools.ts - Framework for external CLI tools
  * 
  * This module provides a unified interface for invoking external tools
  * like Rojo, Wally, pytest, cargo, npm, etc. Tools are self-describing
@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export type ToolCategory = 
   | "roblox" 
@@ -93,7 +93,7 @@ export interface ToolInvocation {
   context?: string;
 }
 
-// ─── Tool Registry ──────────────────────────────────────────────────────────
+// --- Tool Registry ----------------------------------------------------------
 
 export class ToolRegistry {
   private readonly tools: Map<string, Tool> = new Map();
@@ -418,7 +418,7 @@ export class ToolRegistry {
   }
 }
 
-// ─── Tool Detector ──────────────────────────────────────────────────────────
+// --- Tool Detector ----------------------------------------------------------
 
 export class ToolDetector {
   private readonly registry: ToolRegistry;
@@ -480,7 +480,7 @@ export class ToolDetector {
   }
 }
 
-// ─── Tool Executor ──────────────────────────────────────────────────────────
+// --- Tool Executor ----------------------------------------------------------
 
 export class ToolExecutor {
   private readonly registry: ToolRegistry;
@@ -649,7 +649,7 @@ export class ToolExecutor {
   }
 }
 
-// ─── Tool Suggester ─────────────────────────────────────────────────────────
+// --- Tool Suggester ---------------------------------------------------------
 
 export class ToolSuggester {
   private readonly registry: ToolRegistry;
@@ -729,7 +729,7 @@ export class ToolSuggester {
   }
 }
 
-// ─── Singleton Instances ────────────────────────────────────────────────────
+// --- Singleton Instances ----------------------------------------------------
 
 let _registry: ToolRegistry | null = null;
 let _detector: ToolDetector | null = null;

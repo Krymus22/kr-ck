@@ -1,5 +1,5 @@
 /**
- * hooks.ts — Lifecycle hook system for tool call interception.
+ * hooks.ts - Lifecycle hook system for tool call interception.
  *
  * Plugins and extensions can register callbacks at various lifecycle points:
  *   - preToolCall:   before a tool is executed (can modify args or skip)
@@ -12,7 +12,7 @@
  * returned instead.
  */
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export interface HookContext {
   /** Name of the tool being called */
@@ -51,7 +51,7 @@ export type PostToolCallHook = (ctx: HookContext, result: string) => PostToolCal
 export type PreFileWriteHook = (filePath: string, content: string) => PreFileWriteResult | Promise<PreFileWriteResult>;
 export type PostFileWriteHook = (filePath: string, content: string) => void | Promise<void>;
 
-// ─── Hook Registry ──────────────────────────────────────────────────────────
+// --- Hook Registry ----------------------------------------------------------
 
 interface HookEntry<T> {
   id: string;
@@ -86,14 +86,14 @@ class HookRegistry<T extends (...args: any[]) => any> {
   }
 }
 
-// ─── Singleton Registries ───────────────────────────────────────────────────
+// --- Singleton Registries ---------------------------------------------------
 
 const preToolCallHooks = new HookRegistry<PreToolCallHook>();
 const postToolCallHooks = new HookRegistry<PostToolCallHook>();
 const preFileWriteHooks = new HookRegistry<PreFileWriteHook>();
 const postFileWriteHooks = new HookRegistry<PostFileWriteHook>();
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// --- Public API -------------------------------------------------------------
 
 /** Register a hook that runs before a tool call. */
 export function onPreToolCall(handler: PreToolCallHook, priority?: number): string {
@@ -133,7 +133,7 @@ export function clearAllHooks(): void {
   postFileWriteHooks.clear();
 }
 
-// ─── Hook Executors ─────────────────────────────────────────────────────────
+// --- Hook Executors ---------------------------------------------------------
 
 /**
  * Execute all preToolCall hooks. Returns the aggregated result.
@@ -233,7 +233,7 @@ export async function executePostFileWriteHooks(
   }
 }
 
-// ─── Built-in Hooks ─────────────────────────────────────────────────────────
+// --- Built-in Hooks ---------------------------------------------------------
 
 /**
  * Built-in hook: logs all tool calls to stderr when DEBUG is enabled.
@@ -242,7 +242,7 @@ export function registerDebugHook(): string {
   return onPostToolCall(async (ctx, result) => {
     if (process.env.DEBUG === "true") {
       const truncated = result.length > 200 ? result.slice(0, 200) + "..." : result;
-      process.stderr.write(`[HOOK:DEBUG] ${ctx.toolName} → ${truncated}\n`);
+      process.stderr.write(`[HOOK:DEBUG] ${ctx.toolName} -> ${truncated}\n`);
     }
     return {};
   }, 1000);

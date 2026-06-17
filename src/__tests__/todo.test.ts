@@ -102,9 +102,9 @@ describe("renderTodoBar", () => {
 
     const bar = renderTodoBar();
     expect(bar).toContain("3 tasks");
-    expect(bar).toContain("✓");
-    expect(bar).toContain("●");
-    expect(bar).toContain("○");
+    expect(bar).toContain("OK");
+    expect(bar).toContain("[");
+    expect(bar).toContain("[ ]");
     expect(bar).toContain("Working...");
     expect(bar).toContain("Done");
   });

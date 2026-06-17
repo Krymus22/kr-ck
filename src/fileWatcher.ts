@@ -1,5 +1,5 @@
 /**
- * fileWatcher.ts — File watcher that reacts to file changes.
+ * fileWatcher.ts - File watcher that reacts to file changes.
  */
 
 import * as fs from "node:fs";

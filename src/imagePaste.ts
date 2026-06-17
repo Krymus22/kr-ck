@@ -1,5 +1,5 @@
 /**
- * imagePaste.ts — Image paste support: paste images from clipboard or files.
+ * imagePaste.ts - Image paste support: paste images from clipboard or files.
  */
 
 import * as fs from "node:fs";
@@ -40,7 +40,7 @@ export function pasteImageFromClipboard(): PastedImage | null {
       // macOS: Use osascript to get clipboard image
       const tmpFile = path.join("/tmp", `paste_${Date.now()}.png`);
       try {
-        execSync(`osascript -e 'set pngData to the clipboard as «class PNGf»' -e 'set fp to open for access (POSIX file "${tmpFile}") with write permission' -e 'write pngData to fp' -e 'close access fp'`, {
+        execSync(`osascript -e 'set pngData to the clipboard as <<class PNGf>>' -e 'set fp to open for access (POSIX file "${tmpFile}") with write permission' -e 'write pngData to fp' -e 'close access fp'`, {
           timeout: 5000,
         });
         const data = fs.readFileSync(tmpFile);

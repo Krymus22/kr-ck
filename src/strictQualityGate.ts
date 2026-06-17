@@ -1,5 +1,5 @@
 /**
- * strictQualityGate.ts — Deterministic post-write quality gate.
+ * strictQualityGate.ts - Deterministic post-write quality gate.
  *
  * When STRICT_MODE is enabled (default: true), every time the agent
  * is about to finish a turn (finish_reason === "stop"), the gate
@@ -15,8 +15,8 @@
  *
  * Config (env vars):
  *   STRICT_MODE=true|false         (default: true)
- *   STRICT_GATE_TSC=true|false     (default: true — run tsc --noEmit)
- *   STRICT_GATE_LINT=true|false    (default: true — run npm run lint)
+ *   STRICT_GATE_TSC=true|false     (default: true - run tsc --noEmit)
+ *   STRICT_GATE_LINT=true|false    (default: true - run npm run lint)
  *   STRICT_GATE_MAX_BLOCKS=N       (default: 8)
  *   STRICT_GATE_SKIP_PATTERNS=     (comma-separated path globs to skip)
  */
@@ -26,7 +26,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// --- Config ------------------------------------------------------------------
 
 function envBool(key: string, fallback: boolean): boolean {
   const raw = process.env[key]?.toLowerCase();
@@ -61,7 +61,7 @@ export function getQualityGateConfig(): QualityGateConfig {
   };
 }
 
-// ─── State ───────────────────────────────────────────────────────────────────
+// --- State -------------------------------------------------------------------
 
 let consecutiveBlocks = 0;
 let totalBlocks = 0;
@@ -77,7 +77,7 @@ export function getGateState(): { consecutiveBlocks: number; totalBlocks: number
   return { consecutiveBlocks, totalBlocks, lastErrorLog };
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 /**
  * Find the project root by walking up from cwd looking for package.json.
@@ -157,7 +157,7 @@ function shouldSkip(filePath: string, patterns: string[]): boolean {
   return false;
 }
 
-// ─── Public Gate API ─────────────────────────────────────────────────────────
+// --- Public Gate API ---------------------------------------------------------
 
 export interface GateResult {
   /** true = task may finish; false = must inject errors and continue */
@@ -199,10 +199,10 @@ function shouldSkipGate(cfg: QualityGateConfig, filesTouched: string[]): GateRes
     return { allowed: true, reason: "all touched files match skip patterns", consecutiveBlocks };
   }
   if (consecutiveBlocks >= cfg.maxBlocks) {
-    log.warn(`[STRICT_GATE] Max consecutive blocks (${cfg.maxBlocks}) reached — giving up.`);
+    log.warn(`[STRICT_GATE] Max consecutive blocks (${cfg.maxBlocks}) reached - giving up.`);
     return {
       allowed: true,
-      reason: `max consecutive blocks (${cfg.maxBlocks}) reached — letting turn finish`,
+      reason: `max consecutive blocks (${cfg.maxBlocks}) reached - letting turn finish`,
       consecutiveBlocks,
     };
   }
@@ -236,14 +236,14 @@ async function runLintCheck(cfg: QualityGateConfig, projectRoot: string): Promis
     if (!lintResult.ok) return [`=== Lint errors (npm run lint) ===\n${lintResult.output}`];
     return [];
   } catch (err) {
-    log.debug(`[STRICT_GATE] Skipping lint — package.json unreadable: ${(err as Error).message}`);
+    log.debug(`[STRICT_GATE] Skipping lint - package.json unreadable: ${(err as Error).message}`);
     return [];
   }
 }
 
 function passGate(): GateResult {
   if (consecutiveBlocks > 0) {
-    log.success(`[STRICT_GATE] All checks passed — counter reset (was ${consecutiveBlocks}).`);
+    log.success(`[STRICT_GATE] All checks passed - counter reset (was ${consecutiveBlocks}).`);
   }
   consecutiveBlocks = 0;
   return { allowed: true, reason: "all checks passed", consecutiveBlocks };
@@ -266,7 +266,7 @@ function blockGate(cfg: QualityGateConfig, errors: string[]): GateResult {
     `3. Rode executar_comando("npx tsc --noEmit") para confirmar.\n` +
     `4. Se um erro for falso positivo (ex.: dependência faltando), explique brevemente no final da resposta.`;
 
-  log.warn(`[STRICT_GATE] Blocked turn ${consecutiveBlocks}/${cfg.maxBlocks} — ${errors.length} validator(s) failed`);
+  log.warn(`[STRICT_GATE] Blocked turn ${consecutiveBlocks}/${cfg.maxBlocks} - ${errors.length} validator(s) failed`);
   return {
     allowed: false,
     errorLog: msg,

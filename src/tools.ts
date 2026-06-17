@@ -1,7 +1,7 @@
 /**
- * tools.ts — Implementation of the two filesystem tools:
- *   - ler_arquivo(caminho)             → read a local file
- *   - escrever_arquivo(caminho, conteudo) → write a local file (with guardrail)
+ * tools.ts - Implementation of the two filesystem tools:
+ *   - ler_arquivo(caminho)             -> read a local file
+ *   - escrever_arquivo(caminho, conteudo) -> write a local file (with guardrail)
  *
  * Both return a string result that goes back to the model as a "tool" message.
  * The guardrail intercept in escrever_arquivo may return an error string
@@ -17,7 +17,7 @@ import { executePreFileWriteHooks, executePostFileWriteHooks } from "./hooks.js"
 import { saveBackup, restoreBackup, listBackups } from "./rollbackStore.js";
 import * as log from "./logger.js";
 
-// ─── ler_arquivo ─────────────────────────────────────────────────────────────
+// --- ler_arquivo -------------------------------------------------------------
 
 export interface LerArquivoArgs {
   caminho: string;
@@ -60,7 +60,7 @@ export async function lerArquivo(args: LerArquivoArgs): Promise<string> {
   }
 }
 
-// ─── escrever_arquivo ─────────────────────────────────────────────────────────
+// --- escrever_arquivo ---------------------------------------------------------
 
 export interface AplicarDiffArgs {
   caminho: string;
@@ -199,8 +199,8 @@ export function applyDiffs(original: string, blocks: DiffBlock[]): { success: bo
  *  3. If SEARCH block not found, return descriptive error (nothing written).
  *  4. Write the patched content DIRECTLY to the real file on disk.
  *  5. Run post-write validation (e.g. npx tsc --noEmit for TS files).
- *  5a. PASS → return success message.
- *  5b. FAIL → do NOT revert the file; return an advisory warning with the full
+ *  5a. PASS -> return success message.
+ *  5b. FAIL -> do NOT revert the file; return an advisory warning with the full
  *      compiler/linter log so the agent can analyse the real error in context
  *      and decide autonomously whether to apply a fix diff or ignore it.
  */
@@ -210,7 +210,7 @@ export async function aplicarDiff(
   const resolved = path.resolve(args.caminho);
   log.toolCall("aplicar_diff", { caminho: resolved, diffLength: args.bloco_diff.length });
 
-  // ── Step 1: Read current file content ────────────────────────────────────
+  // -- Step 1: Read current file content ------------------------------------
   let originalContent = "";
   if (fs.existsSync(resolved)) {
     try {
@@ -222,7 +222,7 @@ export async function aplicarDiff(
     }
   }
 
-  // ── Step 2: Parse diff blocks ─────────────────────────────────────────────
+  // -- Step 2: Parse diff blocks ---------------------------------------------
   const blocks = parseDiffBlocks(args.bloco_diff);
   if (blocks.length === 0) {
     const msg = `Erro: Nenhum bloco SEARCH/REPLACE válido encontrado no bloco_diff. Certifique-se de usar a estrutura:\n<<<<<<< SEARCH\n[código antigo]\n=======\n[código novo]\n>>>>>>> REPLACE`;
@@ -230,7 +230,7 @@ export async function aplicarDiff(
     return { written: false, toolMessage: msg };
   }
 
-  // ── Step 3: Apply diffs in memory ─────────────────────────────────────────
+  // -- Step 3: Apply diffs in memory -----------------------------------------
   const patchResult = applyDiffs(originalContent, blocks);
   if (!patchResult.success) {
     const searchPart = patchResult.errorBlock ?? "";
@@ -241,15 +241,15 @@ export async function aplicarDiff(
 
   const newContent = patchResult.content;
 
-  // ── Step 4: Diff preview + approval ────────────────────────────────────────
+  // -- Step 4: Diff preview + approval ----------------------------------------
   const approved = await previewAndApprove(resolved, originalContent, newContent);
   if (!approved) {
-    const msg = `[REJEITADO] Diff não aplicado — usuário rejeitou a alteração no preview.`;
+    const msg = `[REJEITADO] Diff não aplicado - usuário rejeitou a alteração no preview.`;
     log.toolResult("aplicar_diff", false, "diff rejeitado pelo usuário");
     return { written: false, toolMessage: msg };
   }
 
-  // ── Step 5: Pre-file-write hooks ─────────────────────────────────────────
+  // -- Step 5: Pre-file-write hooks -----------------------------------------
   const preWriteResult = await executePreFileWriteHooks(resolved, newContent);
   if (preWriteResult.block) {
     const msg = `[BLOQUEADO] Escrita impedida por hook: ${preWriteResult.reason ?? "sem motivo"}`;
@@ -258,7 +258,7 @@ export async function aplicarDiff(
   }
   const contentToWrite = preWriteResult.modifiedContent ?? newContent;
 
-  // ── Step 6: Write to disk ───────────────────────────────────────────────
+  // -- Step 6: Write to disk -----------------------------------------------
   // Save rollback backup BEFORE writing (only if file already exists)
   let backupId: string | null = null;
   if (originalContent.length > 0) {
@@ -277,10 +277,10 @@ export async function aplicarDiff(
     return { written: false, toolMessage: msg };
   }
 
-  // ── Step 7: Post-file-write hooks ───────────────────────────────────────
+  // -- Step 7: Post-file-write hooks ---------------------------------------
   await executePostFileWriteHooks(resolved, contentToWrite);
 
-  // ── Step 8: Post-write validation (advisory) ────────────────────────────
+  // -- Step 8: Post-write validation (advisory) ----------------------------
   const validation = await validateSyntax(resolved, contentToWrite);
 
   if (!validation.valid) {
@@ -300,14 +300,14 @@ export async function aplicarDiff(
     return { written: true, toolMessage: warnMsg };
   }
 
-  // ── All good ──────────────────────────────────────────────────────────────
+  // -- All good --------------------------------------------------------------
   const backupInfo = backupId ? ` Backup salvo: ${backupId}.` : "";
   const msg = `[SUCESSO] Diff aplicado e arquivo salvo: ${resolved} (${newContent.length} bytes). Validação pós-escrita: OK.${backupInfo}`;
   log.toolResult("aplicar_diff", true, `${newContent.length} bytes`);
   return { written: true, toolMessage: msg };
 }
 
-// ─── desfazer_edicao ──────────────────────────────────────────────────────────
+// --- desfazer_edicao ----------------------------------------------------------
 
 export interface DesfazerEdicaoArgs {
   /** Absolute or relative path of the file to restore. */
@@ -339,7 +339,7 @@ export function desfazerEdicao(args: DesfazerEdicaoArgs): string {
     `Existem ${backups.length} backup(s) registrado(s) mas a restauração falhou (arquivo de backup pode estar corrompido ou ausente).`;
 }
 
-// ─── listar_backups ───────────────────────────────────────────────────────────
+// --- listar_backups -----------------------------------------------------------
 
 export interface ListarBackupsArgs {
   /** Optional: filter by file path. If omitted, lists all backups. */
@@ -361,12 +361,12 @@ export function listarBackups(args: ListarBackupsArgs): string {
 
   const lines = backups.map((b, i) => {
     const time = b.timestamp;
-    return `  ${i + 1}. [${b.id}] ${b.originalPath} — ${b.size} bytes — ${b.toolName} — ${time}`;
+    return `  ${i + 1}. [${b.id}] ${b.originalPath} - ${b.size} bytes - ${b.toolName} - ${time}`;
   });
   return `[INFO] ${backups.length} backup(s) disponível(eis):\n${lines.join("\n")}`;
 }
 
-// ─── executar_comando ────────────────────────────────────────────────────────
+// --- executar_comando --------------------------------------------------------
 
 export interface ExecutarComandoArgs {
   comando: string;
@@ -384,7 +384,7 @@ export interface ExecutarComandoArgs {
  * MAX_OUTPUT_BYTES of combined output and returns it when the command
  * completes.
  *
- * Replaces the previous execSync-based implementation — does NOT block
+ * Replaces the previous execSync-based implementation - does NOT block
  * the event loop.
  */
 export async function executarComando(

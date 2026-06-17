@@ -1,5 +1,5 @@
 /**
- * TodoPanel.tsx — Visual todo list with status icons.
+ * TodoPanel.tsx - Visual todo list with status icons.
  */
 
 import React from "react";
@@ -23,7 +23,7 @@ export function TodoPanel({ todos }: Readonly<TodoPanelProps>) {
 
   return (
     <Box flexDirection="column">
-      <Text color={colors.muted}>{"─".repeat(innerWidth + 2)}</Text>
+      <Text color={colors.muted}>{"-".repeat(innerWidth + 2)}</Text>
       <Box>
         <Text color={colors.primary} bold> [{todos.length} tasks]</Text>
       </Box>
@@ -48,7 +48,7 @@ export function TodoPanel({ todos }: Readonly<TodoPanelProps>) {
           </Box>
         );
       })}
-      <Text color={colors.muted}>{"─".repeat(innerWidth + 2)}</Text>
+      <Text color={colors.muted}>{"-".repeat(innerWidth + 2)}</Text>
     </Box>
   );
 }

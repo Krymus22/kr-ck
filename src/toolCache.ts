@@ -1,5 +1,5 @@
 /**
- * toolCache.ts — Tool result caching to avoid redundant calls.
+ * toolCache.ts - Tool result caching to avoid redundant calls.
  */
 
 import * as log from "./logger.js";

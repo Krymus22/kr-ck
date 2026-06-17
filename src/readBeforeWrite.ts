@@ -1,5 +1,5 @@
 /**
- * readBeforeWrite.ts — Enforces read-before-write discipline.
+ * readBeforeWrite.ts - Enforces read-before-write discipline.
  *
  * Inspired by Anthropic's poka-yoke approach: prevent the model from editing
  * files it hasn't read first. This eliminates the #1 source of hallucinations:

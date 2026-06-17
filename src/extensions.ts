@@ -1,5 +1,5 @@
 /**
- * extensions.ts — Skills & MCP (Model Context Protocol) plugin system.
+ * extensions.ts - Skills & MCP (Model Context Protocol) plugin system.
  *
  * MCP Implementation:
  *   Uses JSON-RPC 2.0 over stdio (Content-Length framing) per the MCP spec.
@@ -18,7 +18,7 @@ import { spawn, ChildProcess } from "node:child_process";
 
 import os from "node:os";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// --- Types ------------------------------------------------------------------
 
 export interface Skill {
   name: string;
@@ -76,17 +76,17 @@ export interface ActiveMCPServer {
   initialized: boolean;
 }
 
-// ─── Directory Paths ────────────────────────────────────────────────────────
+// --- Directory Paths --------------------------------------------------------
 
 const GLOBAL_DIR = path.join(os.homedir(), ".claude-killer");
 const LOCAL_DIR = path.join(process.cwd(), ".claude-killer");
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// --- State ------------------------------------------------------------------
 
 let activeSkills: Skill[] = [];
 let activeMCPServers: Map<string, ActiveMCPServer> = new Map();
 
-// ─── Skills (unchanged) ────────────────────────────────────────────────────
+// --- Skills (unchanged) ----------------------------------------------------
 
 export function initExtensionDirs() {
   const dirs = [
@@ -202,7 +202,7 @@ function loadPluginsFromDir(dirPath: string): { skills: Skill[]; mcps: Record<st
   return result;
 }
 
-// ─── MCP Protocol (JSON-RPC 2.0 over stdio) ────────────────────────────────
+// --- MCP Protocol (JSON-RPC 2.0 over stdio) --------------------------------
 
 /**
  * Send a JSON-RPC request to an MCP server via its stdin.
@@ -382,7 +382,7 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
   }
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// --- Public API -------------------------------------------------------------
 
 /**
  * Scans, loads, and initializes all plugins, skills, and MCP servers.

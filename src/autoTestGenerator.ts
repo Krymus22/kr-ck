@@ -1,22 +1,22 @@
 /**
- * autoTestGenerator.ts — Suggests test generation after each diff.
+ * autoTestGenerator.ts - Suggests test generation after each diff.
  *
  * IDEIA 7: After a successful aplicar_diff / editar_arquivo, inject a
  * system message nudging the model to write a test for the change.
  *
  * Language detection: only suggest tests for languages where we have a
  * reasonable chance of generating something useful:
- *   - .ts / .tsx        → vitest / jest
- *   - .js / .jsx / .mjs → jest / node:test
- *   - .py               → pytest
- *   - .rs                → cargo test
- *   - .go                → go test
- *   - .java              → JUnit
+ *   - .ts / .tsx        -> vitest / jest
+ *   - .js / .jsx / .mjs -> jest / node:test
+ *   - .py               -> pytest
+ *   - .rs                -> cargo test
+ *   - .go                -> go test
+ *   - .java              -> JUnit
  *
- * SKIP (no test suggestion — avoid noise):
- *   - .luau / .rbxl / .rbxmx  → Roblox Luau (no standard test runner, model would hallucinate)
- *   - .cs / .cpp / .c         → too project-specific, would generate broken code
- *   - .md / .json / .yml      → not code
+ * SKIP (no test suggestion - avoid noise):
+ *   - .luau / .rbxl / .rbxmx  -> Roblox Luau (no standard test runner, model would hallucinate)
+ *   - .cs / .cpp / .c         -> too project-specific, would generate broken code
+ *   - .md / .json / .yml      -> not code
  *   - config files, etc.
  *
  * Throttle: at most 1 suggestion per file per turn.
@@ -40,7 +40,7 @@ const testedExtensions = new Map<string, { framework: string; template: string }
 
 // Extensions we explicitly skip (no point in suggesting tests)
 const skippedExtensions = new Set([
-  ".luau", ".rbxl", ".rbxmx", ".rbxlx", // Roblox Luau — no standard test runner
+  ".luau", ".rbxl", ".rbxmx", ".rbxlx", // Roblox Luau - no standard test runner
   ".cs", ".cpp", ".c", ".h", ".hpp",     // too project-specific
   ".md", ".json", ".yml", ".yaml",       // not code
   ".txt", ".csv", ".xml", ".html", ".css", ".scss",
@@ -73,7 +73,7 @@ export function generateTestSuggestionForFile(filePath: string): string {
   // Look up the test framework for this extension
   const testInfo = testedExtensions.get(ext);
   if (!testInfo) {
-    // Unknown extension — skip silently
+    // Unknown extension - skip silently
     return "";
   }
 
@@ -131,7 +131,7 @@ function suggestTestFileName(filePath: string, ext: string): string {
 }
 
 /**
- * Reset throttle — call at the start of a new user turn.
+ * Reset throttle - call at the start of a new user turn.
  */
 export function resetAutoTestSuggestions(): void {
   recentSuggestions.clear();

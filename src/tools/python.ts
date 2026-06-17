@@ -1,5 +1,5 @@
 /**
- * python.ts — Python development tools
+ * python.ts - Python development tools
  * 
  * Tools for pytest, ruff, mypy, pip, uv
  */
@@ -7,7 +7,7 @@
 import { Tool } from "../externalTools.js";
 
 export const PYTHON_TOOLS: Tool[] = [
-  // ─── Pytest ────────────────────────────────────────────────────────────
+  // --- Pytest ------------------------------------------------------------
   {
     name: "pytest_run",
     description: "Run Python tests with pytest",
@@ -57,7 +57,7 @@ export const PYTHON_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Ruff (Linter) ────────────────────────────────────────────────────
+  // --- Ruff (Linter) ----------------------------------------------------
   {
     name: "ruff_lint",
     description: "Lint Python code with Ruff",
@@ -132,7 +132,7 @@ export const PYTHON_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Mypy (Type Checker) ──────────────────────────────────────────────
+  // --- Mypy (Type Checker) ----------------------------------------------
   {
     name: "mypy_check",
     description: "Type-check Python code with mypy",
@@ -169,7 +169,7 @@ export const PYTHON_TOOLS: Tool[] = [
     }
   },
   
-  // ─── Pip ───────────────────────────────────────────────────────────────
+  // --- Pip ---------------------------------------------------------------
   {
     name: "pip_install",
     description: "Install Python packages with pip",
@@ -196,7 +196,7 @@ export const PYTHON_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Uv (Fast Pip) ────────────────────────────────────────────────────
+  // --- Uv (Fast Pip) ----------------------------------------------------
   {
     name: "uv_install",
     description: "Install Python packages with uv (fast pip)",
@@ -243,7 +243,7 @@ export const PYTHON_TOOLS: Tool[] = [
     outputParser: "raw"
   },
   
-  // ─── Python Venv ──────────────────────────────────────────────────────
+  // --- Python Venv ------------------------------------------------------
   {
     name: "python_venv",
     description: "Create Python virtual environment",

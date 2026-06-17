@@ -1,5 +1,5 @@
 /**
- * fileRead.ts — Advanced file reading with offset, limit, line numbers, and pattern search.
+ * fileRead.ts - Advanced file reading with offset, limit, line numbers, and pattern search.
  */
 
 import * as fs from "node:fs";

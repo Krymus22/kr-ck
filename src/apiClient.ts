@@ -1,9 +1,9 @@
 /**
- * apiClient.ts — NVIDIA NIM OpenAI-compatible client with:
+ * apiClient.ts - NVIDIA NIM OpenAI-compatible client with:
  *   1. Single-concurrency Mutex (only ONE in-flight request at a time)
- *   2. Sliding-window rate limiter (≤ N requests per minute)
+ *   2. Sliding-window rate limiter (<= N requests per minute)
  *
- * Consumers call `chat()` without worrying about throttling — the module
+ * Consumers call `chat()` without worrying about throttling - the module
  * handles queuing transparently.
  */
 
@@ -13,7 +13,7 @@ import { config } from "./config.js";
 import * as log from "./logger.js";
 import { initApiKeyPool, acquireKeyForStreaming, getPoolSize } from "./apiKeyPool.js";
 
-// ─── OpenAI Client (pointed at NVIDIA NIM) ──────────────────────────────────
+// --- OpenAI Client (pointed at NVIDIA NIM) ----------------------------------
 
 // TCP keepalive agent: sends probes every 3s during idle periods.
 // This prevents intermediate load balancers/proxies from killing
@@ -34,7 +34,7 @@ const client = new OpenAI({
   httpAgent: keepAliveAgent,
 });
 
-// ─── Rate Limiter (Sliding Window Token Bucket) ─────────────────────────────
+// --- Rate Limiter (Sliding Window Token Bucket) -----------------------------
 
 /**
  * A minimal sliding-window rate limiter.
@@ -61,7 +61,7 @@ class SlidingWindowRateLimiter {
 
       if (this.timestamps.length < this.maxRequests) {
         this.timestamps.push(now);
-        return; // slot available — proceed immediately
+        return; // slot available - proceed immediately
       }
 
       // Window is full: calculate how long to sleep until the oldest
@@ -70,14 +70,14 @@ class SlidingWindowRateLimiter {
       const sleepMs = this.windowMs - (now - oldestTs) + 1;
       log.throttle(
         `Rate limit reached (${this.maxRequests} rpm). ` +
-          `Waiting ${Math.ceil(sleepMs / 1000)} s…`
+          `Waiting ${Math.ceil(sleepMs / 1000)} s...`
       );
       await sleep(sleepMs);
     }
   }
 }
 
-// ─── Mutex (Binary Semaphore) ────────────────────────────────────────────────
+// --- Mutex (Binary Semaphore) ------------------------------------------------
 
 /**
  * A promise-based mutex that guarantees at most ONE concurrent API call.
@@ -92,7 +92,7 @@ class Mutex {
       this._locked = true;
       return;
     }
-    log.throttle("Another request is in-flight. Queuing…");
+    log.throttle("Another request is in-flight. Queuing...");
     return new Promise((resolve) => this._queue.push(resolve));
   }
 
@@ -106,18 +106,18 @@ class Mutex {
   }
 }
 
-// ─── Singletons ──────────────────────────────────────────────────────────────
+// --- Singletons --------------------------------------------------------------
 
 const mutex = new Mutex();
 const rateLimiter = new SlidingWindowRateLimiter(config.rateLimitRpm);
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
+// --- Utility -----------------------------------------------------------------
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// ─── Tool Definitions for the API ────────────────────────────────────────────
+// --- Tool Definitions for the API --------------------------------------------
 
 export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -558,7 +558,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       description:
         "Desfaz a última edição aplicada via aplicar_diff / editar_arquivo no arquivo informado. " +
         "Restaura o conteúdo do backup mais recente salvo automaticamente antes da edição. " +
-        "Cada chamada remove O backup mais recente da pilha — chamadas sucessivas desfezem edições mais antigas. " +
+        "Cada chamada remove O backup mais recente da pilha - chamadas sucessivas desfezem edições mais antigas. " +
         "Backups expiram após 5 minutos. " +
         "Use quando uma edição introduzir um erro e você quiser voltar ao estado anterior.",
       parameters: {
@@ -593,7 +593,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
         "Atualiza o arquivo TASK_STATE.md com o estado estruturado da tarefa. " +
         "Use para manter registro do que já foi feito, do que falta, das decisões tomadas e dos bugs encontrados. " +
         "O arquivo é lido automaticamente após compaction para que o modelo recupere o contexto. " +
-        "Todos os campos são opcionais — apenas os fornecidos serão atualizados.",
+        "Todos os campos são opcionais - apenas os fornecidos serão atualizados.",
       parameters: {
         type: "object",
         properties: {
@@ -614,7 +614,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       name: "marcar_feito",
       description:
         "Move um item de 'todo' para 'done' no TASK_STATE.md. " +
-        "Forneça uma substring que identifique o item — o primeiro 'todo' que contiver a substring será movido.",
+        "Forneça uma substring que identifique o item - o primeiro 'todo' que contiver a substring será movido.",
       parameters: {
         type: "object",
         properties: {
@@ -666,7 +666,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
-// ─── Main Chat Function ───────────────────────────────────────────────────────
+// --- Main Chat Function -------------------------------------------------------
 
 export type Message = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 export type ChatResponse = OpenAI.Chat.Completions.ChatCompletion;
@@ -678,7 +678,7 @@ export type ChatResponse = OpenAI.Chat.Completions.ChatCompletion;
  */
 const MAX_RETRY_AFTER_S     = 90;
 const MAX_429_RETRIES       = 4;
-const MAX_NETWORK_RETRIES   = 8;   // ECONNRESET etc. — more generous, fast retry
+const MAX_NETWORK_RETRIES   = 8;   // ECONNRESET etc. - more generous, fast retry
 
 const TRANSIENT_NETWORK_CODES = new Set([
   "ECONNRESET", "ETIMEDOUT", "ENOTFOUND",
@@ -892,10 +892,10 @@ function logApiDiagnostics(err: unknown, attempt: number): void {
     `[API Error] attempt=${attempt}`,
     `  type        : ${apiErr ? "OpenAI.APIError" : (anyErr?.constructor?.name ?? typeof err)}`,
     `  message     : ${apiErr?.message ?? anyErr?.message ?? String(err)}`,
-    `  code        : ${anyErr?.code ?? anyErr?.cause?.code ?? "—"}`,
-    `  http status : ${apiErr?.status ?? anyErr?.status ?? "—"}`,
-    `  request_id  : ${apiErr?.headers?.["x-request-id"] ?? "—"}`,
-    `  nvcf-reqid  : ${apiErr?.headers?.["nvcf-reqid"] ?? "—"}`,
+    `  code        : ${anyErr?.code ?? anyErr?.cause?.code ?? "-"}`,
+    `  http status : ${apiErr?.status ?? anyErr?.status ?? "-"}`,
+    `  request_id  : ${apiErr?.headers?.["x-request-id"] ?? "-"}`,
+    `  nvcf-reqid  : ${apiErr?.headers?.["nvcf-reqid"] ?? "-"}`,
   ];
 
   if (apiErr?.headers) {
@@ -922,15 +922,15 @@ function buildQuotaExhaustedMessage(retryAfterS: number, errBody: string): strin
   const isQuotaExhausted = Number.isNaN(retryAfterS) || retryAfterS > MAX_RETRY_AFTER_S;
   const retryAfterLabel = Number.isNaN(retryAfterS) ? "N/A" : retryAfterS + "s";
   const hint = isQuotaExhausted
-    ? `Retry-After ausente ou muito longo (${retryAfterLabel}) — provável quota diária/mensal esgotada.`
+    ? `Retry-After ausente ou muito longo (${retryAfterLabel}) - provável quota diária/mensal esgotada.`
     : `Limite de ${MAX_429_RETRIES} retentativas atingido.`;
 
   return (
-    `\n✖  Erro 429 da NVIDIA NIM API — ${hint}\n\n` +
+    `\nx  Erro 429 da NVIDIA NIM API - ${hint}\n\n` +
     `   Possíveis causas:\n` +
-    `     • Quota diária/mensal da sua API key esgotada\n` +
-    `     • Plano gratuito sem acesso ao modelo minimaxai/minimax-m3\n` +
-    `     • Verifique em: https://build.nvidia.com/ → Usage & Billing\n\n` +
+    `     * Quota diária/mensal da sua API key esgotada\n` +
+    `     * Plano gratuito sem acesso ao modelo minimaxai/minimax-m3\n` +
+    `     * Verifique em: https://build.nvidia.com/ -> Usage & Billing\n\n` +
     `   Detalhes do erro: ${errBody}`
   );
 }
@@ -986,7 +986,7 @@ async function retryWithDelay(retryAfterS: number, attempt: number): Promise<{ r
   const waitMs = retryAfterS * 1000 + 500;
   log.throttle(
     `API retornou 429. Retry-After: ${retryAfterS}s. ` +
-    `Aguardando ${retryAfterS}s (tentativa ${newAttempt}/${MAX_429_RETRIES})…`
+    `Aguardando ${retryAfterS}s (tentativa ${newAttempt}/${MAX_429_RETRIES})...`
   );
   await sleep(waitMs);
   return { retried: true, newAttempt };
@@ -1004,7 +1004,7 @@ async function handleTransientNetworkError(
   const waitMs = Math.min(newAttempt * 500, 3000);
   log.warn(
     `Erro de rede (${getErrCode(err)}). ` +
-    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES})…`
+    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES})...`
   );
   await sleep(waitMs);
   return { retried: true, newAttempt };
@@ -1015,8 +1015,8 @@ async function handleTransientNetworkError(
  *
  * Enforces:
  *  - Single-flight concurrency (Mutex)
- *  - Sliding-window rate limiting (≤ rateLimitRpm rpm)
- *  - Smart 429 retry: only retries short-lived rate limits (Retry-After ≤ 90 s).
+ *  - Sliding-window rate limiting (<= rateLimitRpm rpm)
+ *  - Smart 429 retry: only retries short-lived rate limits (Retry-After <= 90 s).
  *    Quota-exhausted 429s (no Retry-After, or Retry-After > 90 s) are thrown
  *    immediately with a clear diagnostic.
  *
@@ -1030,7 +1030,7 @@ export async function chat(
   onThinking?: () => void,
   tools?: OpenAI.Chat.Completions.ChatCompletionTool[]
 ): Promise<ChatResponse> {
-  // IDEIA: Multi-key pool — if NVIDIA_API_KEYS is configured, use the pool
+  // IDEIA: Multi-key pool - if NVIDIA_API_KEYS is configured, use the pool
   // instead of the single-key mutex+rateLimiter. Each call picks a free key,
   // allowing sub-agents to run truly in parallel without contending.
   const poolActive = getPoolSize() > 0 || initApiKeyPool();
@@ -1039,7 +1039,7 @@ export async function chat(
     try {
       return await chatWithPool(messages, tools, onStreamStart, onToken, onThinking);
     } catch (err) {
-      // Pool acquisition failed entirely — fall back to single-key mode
+      // Pool acquisition failed entirely - fall back to single-key mode
       log.warn(`[POOL] Falling back to single-key mode: ${(err as Error).message}`);
     }
   }
@@ -1093,7 +1093,7 @@ async function chatWithPool(
   }
 }
 
-/** Single-key chat path — uses global mutex + rateLimiter (backwards compat). */
+/** Single-key chat path - uses global mutex + rateLimiter (backwards compat). */
 async function chatSingleKey(
   messages: Message[],
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
