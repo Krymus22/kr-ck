@@ -1,0 +1,266 @@
+/**
+ * checkpointWriter.ts - Proactive structured state extraction.
+ *
+ * Instead of reactive compaction (wait until 75% full, then summarize
+ * everything in one shot), this module proactively extracts structured
+ * state at 3 checkpoints: 20%, 45%, 70% of context window.
+ *
+ * Each checkpoint is INCREMENTAL (only updates what changed since last
+ * checkpoint) and extracts 11 fields:
+ *   1. Current intention (what the user asked)
+ *   2. Next action (what to do next)
+ *   3. Constraints (things to respect)
+ *   4. Task tree (subtasks remaining)
+ *   5. Current work (what was just done)
+ *   6. Files involved (paths + what was changed)
+ *   7. Cross-task discoveries (things learned that affect other tasks)
+ *   8. Errors and corrections (what failed and how it was fixed)
+ *   9. Runtime state (tests passing, build status)
+ *  10. Design decisions (choices made + rationale)
+ *  11. Miscellaneous notes
+ *
+ * Evidence: MiMo Code proved that extracting at 20% (light context)
+ * produces better summaries than at 95% (heavy context). "Lost in the
+ * middle" - at 95% the model can't summarize well.
+ */
+
+import { chat } from "./apiClient.js";
+import * as history from "./history.js";
+import * as log from "./logger.js";
+
+// --- Types ------------------------------------------------------------------
+
+export interface CheckpointState {
+  intention: string;
+  nextAction: string;
+  constraints: string[];
+  taskTree: string[];
+  currentWork: string;
+  filesInvolved: Array<{ path: string; change: string }>;
+  crossTaskDiscoveries: string[];
+  errorsAndCorrections: Array<{ error: string; fix: string }>;
+  runtimeState: string;
+  designDecisions: Array<{ decision: string; rationale: string }>;
+  miscNotes: string;
+}
+
+export interface CheckpointResult {
+  state: CheckpointState;
+  checkpointNumber: number;  // 1, 2, or 3
+  contextPercent: number;
+  durationMs: number;
+}
+
+// --- Config -----------------------------------------------------------------
+
+const CHECKPOINT_THRESHOLDS = [0.20, 0.45, 0.70];  // 20%, 45%, 70%
+const MAX_CONTEXT_TOKENS = 128_000;  // Kimi K2.6 context window
+
+// --- State ------------------------------------------------------------------
+
+let lastCheckpoint = 0;  // 0 = no checkpoint yet, 1/2/3 = checkpoint number
+let lastCheckpointState: CheckpointState | null = null;
+
+// --- Public API -------------------------------------------------------------
+
+/**
+ * Check if it's time for a checkpoint based on current context size.
+ * Returns the checkpoint number (1, 2, 3) or 0 if not needed.
+ */
+export function shouldCheckpoint(historyLength: number): number {
+  const contextPercent = historyLength / MAX_CONTEXT_TOKENS;
+
+  for (let i = 0; i < CHECKPOINT_THRESHOLDS.length; i++) {
+    const checkpointNum = i + 1;
+    const threshold = CHECKPOINT_THRESHOLDS[i]!;
+    if (contextPercent >= threshold && lastCheckpoint < checkpointNum) {
+      return checkpointNum;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Extract structured state at a checkpoint.
+ *
+ * Calls the LLM with a focused prompt to extract the 11 fields.
+ * The LLM receives the current conversation history (or a summary of it)
+ * and returns structured JSON.
+ *
+ * @param checkpointNum - 1, 2, or 3
+ * @returns CheckpointResult with extracted state
+ */
+export async function writeCheckpoint(checkpointNum: number): Promise<CheckpointResult> {
+  const start = Date.now();
+  const history_msgs = history.getHistory();
+  const contextPercent = Math.round((history_msgs.length / MAX_CONTEXT_TOKENS) * 100);
+
+  log.info(`[CHECKPOINT] Writing checkpoint ${checkpointNum} at ~${contextPercent}% context`);
+
+  // Build a focused extraction prompt
+  const recentMessages = history_msgs.slice(-20);  // Last 20 messages (most relevant)
+  const conversationSummary = recentMessages
+    .map((m) => `[${m.role}] ${typeof m.content === "string" ? m.content.slice(0, 500) : "[complex]"}`)
+    .join("\n\n");
+
+  // Include previous checkpoint state if available (incremental)
+  const previousStateStr = lastCheckpointState
+    ? `\n\nPrevious checkpoint state (update what changed):\n${JSON.stringify(lastCheckpointState, null, 2)}`
+    : "";
+
+  const messages = [
+    {
+      role: "system" as const,
+      content: `You are a state extraction agent. Extract the current task state from the conversation.
+Return ONLY valid JSON with these 11 fields:
+{
+  "intention": "what the user originally asked for",
+  "nextAction": "what should be done next",
+  "constraints": ["list of constraints to respect"],
+  "taskTree": ["remaining subtasks"],
+  "currentWork": "what was just completed",
+  "filesInvolved": [{"path": "file path", "change": "what was changed"}],
+  "crossTaskDiscoveries": ["things learned that affect other tasks"],
+  "errorsAndCorrections": [{"error": "what failed", "fix": "how it was fixed"}],
+  "runtimeState": "tests passing, build status, etc",
+  "designDecisions": [{"decision": "choice made", "rationale": "why"}],
+  "miscNotes": "anything else important"
+}
+
+Be CONCISE. Each field should be 1-3 lines max. Only include what's relevant.`,
+    },
+    {
+      role: "user" as const,
+      content: `Conversation (last 20 messages):\n${conversationSummary}${previousStateStr}\n\nExtract the current state as JSON.`,
+    },
+  ];
+
+  try {
+    const response = await chat(messages);
+    const content = response.choices?.[0]?.message?.content ?? "";
+
+    // Parse JSON from response
+    const jsonStart = content.indexOf("{");
+    const jsonEnd = content.lastIndexOf("}");
+    if (jsonStart >= 0 && jsonEnd > jsonStart) {
+      const jsonStr = content.slice(jsonStart, jsonEnd + 1);
+      const state = JSON.parse(jsonStr) as CheckpointState;
+
+      lastCheckpoint = checkpointNum;
+      lastCheckpointState = state;
+
+      const result: CheckpointResult = {
+        state,
+        checkpointNumber: checkpointNum,
+        contextPercent,
+        durationMs: Date.now() - start,
+      };
+
+      log.info(`[CHECKPOINT] Checkpoint ${checkpointNum} written in ${result.durationMs}ms`);
+      return result;
+    }
+
+    log.warn(`[CHECKPOINT] Failed to parse LLM response as JSON`);
+    return {
+      state: emptyState(),
+      checkpointNumber: checkpointNum,
+      contextPercent,
+      durationMs: Date.now() - start,
+    };
+  } catch (err) {
+    log.warn(`[CHECKPOINT] LLM call failed: ${(err as Error).message}`);
+    return {
+      state: emptyState(),
+      checkpointNumber: checkpointNum,
+      contextPercent,
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
+/**
+ * Format checkpoint state as a string for context injection.
+ * This is what gets injected into the conversation to preserve memory.
+ */
+export function formatCheckpoint(state: CheckpointState): string {
+  const lines: string[] = [`[CHECKPOINT STATE]`];
+  lines.push(`Intention: ${state.intention}`);
+  lines.push(`Next action: ${state.nextAction}`);
+
+  if (state.constraints.length > 0) {
+    lines.push(`Constraints:`);
+    state.constraints.forEach((c) => lines.push(`  - ${c}`));
+  }
+
+  if (state.taskTree.length > 0) {
+    lines.push(`Remaining tasks:`);
+    state.taskTree.forEach((t) => lines.push(`  - ${t}`));
+  }
+
+  lines.push(`Current work: ${state.currentWork}`);
+
+  if (state.filesInvolved.length > 0) {
+    lines.push(`Files involved:`);
+    state.filesInvolved.forEach((f) => lines.push(`  - ${f.path}: ${f.change}`));
+  }
+
+  if (state.errorsAndCorrections.length > 0) {
+    lines.push(`Errors & corrections:`);
+    state.errorsAndCorrections.forEach((e) => lines.push(`  - ${e.error} → ${e.fix}`));
+  }
+
+  if (state.designDecisions.length > 0) {
+    lines.push(`Design decisions:`);
+    state.designDecisions.forEach((d) => lines.push(`  - ${d.decision} (${d.rationale})`));
+  }
+
+  if (state.runtimeState) {
+    lines.push(`Runtime: ${state.runtimeState}`);
+  }
+
+  if (state.miscNotes) {
+    lines.push(`Notes: ${state.miscNotes}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Get the last checkpoint state (or null if none).
+ */
+export function getLastCheckpointState(): CheckpointState | null {
+  return lastCheckpointState;
+}
+
+/**
+ * Get the last checkpoint number (0 = none, 1/2/3 = checkpoint).
+ */
+export function getLastCheckpointNumber(): number {
+  return lastCheckpoint;
+}
+
+/**
+ * Reset checkpoint state (for new task or /reset).
+ */
+export function resetCheckpoints(): void {
+  lastCheckpoint = 0;
+  lastCheckpointState = null;
+}
+
+/** Create an empty state (for error fallback). */
+function emptyState(): CheckpointState {
+  return {
+    intention: "",
+    nextAction: "",
+    constraints: [],
+    taskTree: [],
+    currentWork: "",
+    filesInvolved: [],
+    crossTaskDiscoveries: [],
+    errorsAndCorrections: [],
+    runtimeState: "",
+    designDecisions: [],
+    miscNotes: "",
+  };
+}
