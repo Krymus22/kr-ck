@@ -91,6 +91,10 @@ export interface HeuristicResult {
 /**
  * Quick regex scan for dangerous patterns in proposed code.
  * Returns list of matched patterns and whether any are high-severity.
+ *
+ * NOTE: This uses ONLY the built-in DANGEROUS_PATTERNS. For mode-aware
+ * scanning (which merges built-in + custom mode patterns), use
+ * scanDangerousPatternsAsync() instead.
  */
 export function scanDangerousPatterns(code: string): HeuristicResult {
   const matched: DangerPattern[] = [];
@@ -99,6 +103,37 @@ export function scanDangerousPatterns(code: string): HeuristicResult {
     pattern.regex.lastIndex = 0;
     if (pattern.regex.test(code)) {
       matched.push(pattern);
+    }
+  }
+  return {
+    matched,
+    hasHighSeverity: matched.some((p) => p.severity === "high"),
+  };
+}
+
+/**
+ * Async version that merges built-in patterns with any custom patterns
+ * defined in the active mode's `safetyPatterns` field.
+ *
+ * This is the version used by reviewCodeSafety() (the main entry point).
+ * Mode authors can add language-specific dangerous patterns without
+ * modifying source code.
+ */
+export async function scanDangerousPatternsAsync(code: string): Promise<HeuristicResult> {
+  // Get merged patterns (built-in + mode-specific)
+  const { getActiveSafetyPatterns } = await import("./modeExtensions.js");
+  const allPatterns = await getActiveSafetyPatterns();
+
+  const matched: DangerPattern[] = [];
+  for (const pattern of allPatterns) {
+    // Reset regex state (since we use /g flag)
+    pattern.regex.lastIndex = 0;
+    if (pattern.regex.test(code)) {
+      matched.push({
+        regex: pattern.regex,
+        description: pattern.description,
+        severity: pattern.severity,
+      });
     }
   }
   return {
@@ -249,8 +284,8 @@ export async function reviewCodeSafety(
 ): Promise<SafetyReviewResult> {
   const start = Date.now();
 
-  // 1. Heuristic scan
-  const heuristic = scanDangerousPatterns(code);
+  // 1. Heuristic scan (async - merges built-in + mode-specific patterns)
+  const heuristic = await scanDangerousPatternsAsync(code);
 
   // 2. If no dangerous patterns, skip LLM (saves time + tokens)
   if (heuristic.matched.length === 0) {

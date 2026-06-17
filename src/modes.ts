@@ -42,6 +42,44 @@ export interface ModeValidationRule {
   filePattern: string;
   /** Whether validation blocks file write (true) or just warns (false) */
   blocking: boolean;
+  /**
+   * Custom command to run (NEW - if set, runs this command instead of the
+   * built-in tool dispatcher). Use {file} as placeholder for the file path.
+   * Examples:
+   *   "selene --no-global-check {file}"
+   *   "terraform fmt -check {file}"
+   *   "yamllint {file}"
+   *   "mypy --strict {file}"
+   * If not set, falls back to built-in selene/stylua/luau-lsp behavior.
+   */
+  command?: string;
+}
+
+export interface ModeSafetyPattern {
+  /** Regex pattern to search for in proposed code (string form, will be compiled) */
+  regex: string;
+  /** Human-readable description shown to AI when pattern matches */
+  description: string;
+  /** Severity: "low" | "medium" | "high" - high blocks writes */
+  severity: "low" | "medium" | "high";
+}
+
+export interface ModeSymbolPattern {
+  /** Language name (used as key in symbolPatterns map) */
+  language: string;
+  /** File extensions for this language (e.g. [".luau", ".lua"]) */
+  extensions: string[];
+  /** Regex patterns to extract symbols (with capture group 1 or 2 = symbol name) */
+  patterns: string[];
+}
+
+export interface ModeHook {
+  /** Glob pattern for which files this hook runs (e.g. "*.tf", "*.py") */
+  filePattern: string;
+  /** Command to run. {file} is replaced with the file path. */
+  command: string;
+  /** Whether hook failure blocks the operation (true) or just warns (false) */
+  blocking?: boolean;
 }
 
 export interface ModeDefinition {
@@ -72,17 +110,57 @@ export interface ModeDefinition {
   /** Whether to enable advanced thinking prompts */
   advancedThinking?: boolean;
 
-  /** Luau validation rules (when editing .luau/.lua files) */
+  /** Luau validation rules (LEGACY - kept for backwards compat with roblox.json).
+   *  New modes should use 'validation' instead. If both are set, they're merged. */
   luauValidation?: ModeValidationRule[];
+
+  /**
+   * Generic validation rules (NEW - works for ANY language, not just Luau).
+   * Each rule has: tool name, file pattern, blocking flag, and optional command.
+   * If command is set, runs that command. Otherwise falls back to built-in
+   * selene/stylua/luau-lsp behavior (for backwards compat with Luau tools).
+   */
+  validation?: ModeValidationRule[];
 
   /** Whether to enable auto-API-research (sub-agent that searches the web
    * for current API docs before writing code, and on selene false positives). */
   autoResearch?: boolean;
 
-  /** Whether to enable LLM-based safety review before writing .luau/.lua files.
+  /** Whether to enable LLM-based safety review before writing files.
    * When true, a second LLM call reviews code for data-destructive operations
    * (DataStore:RemoveAsync, profile.Data =, etc). High-risk writes are BLOCKED. */
   safetyReview?: boolean;
+
+  /**
+   * Custom safety patterns (NEW). When set, MERGED with built-in DANGEROUS_PATTERNS.
+   * Lets mode authors add language-specific dangerous patterns
+   * (e.g. "terraform destroy" for DevOps mode) without modifying source code.
+   */
+  safetyPatterns?: ModeSafetyPattern[];
+
+  /**
+   * Custom trusted research sources (NEW). When set, MERGED with built-in
+   * TRUSTED_SOURCES. Lets mode authors add their preferred docs sites.
+   * Example: { "terraform": ["terraform.io/docs", "registry.terraform.io"] }
+   */
+  researchSources?: Record<string, string[]>;
+
+  /**
+   * Custom symbol patterns for impact analysis (NEW). When set, MERGED with
+   * built-in EXTENSIONS_BY_LANG and symbol extraction patterns. Lets mode
+   * authors add support for new languages (HCL, Elixir, Kotlin, etc).
+   */
+  symbolPatterns?: ModeSymbolPattern[];
+
+  /**
+   * Custom hooks (NEW). Run external commands at specific lifecycle points.
+   * - postEdit: runs after editar_arquivo writes a file (e.g. auto-format)
+   * - preCommit: runs before git commit (e.g. lint, test)
+   */
+  hooks?: {
+    postEdit?: ModeHook[];
+    preCommit?: ModeHook[];
+  };
 
   /** For user modes: the original prompt the user gave when creating */
   userPrompt?: string;

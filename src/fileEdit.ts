@@ -210,10 +210,23 @@ export async function editFile(
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
 
-  // Build success message - append impact hint if any
+  // Run post-edit hooks (NEW - externalized via mode.hooks.postEdit)
+  // Typical use: auto-format the file that was just written (terraform fmt, black, etc)
+  let hookResults = "";
+  try {
+    const { runPostEditHooks } = await import("./modeExtensions.js");
+    hookResults = await runPostEditHooks(resolved);
+  } catch (err) {
+    log.debug(`fileEdit: post-edit hooks skipped: ${(err as Error).message}`);
+  }
+
+  // Build success message - append impact hint + hook results
   let msg = `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
   if (impactHint) {
     msg += `\n\n${impactHint}`;
+  }
+  if (hookResults) {
+    msg += `\n\n${hookResults}`;
   }
   return msg;
   } finally {

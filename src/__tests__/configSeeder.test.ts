@@ -34,8 +34,8 @@ describe("configSeeder", () => {
     // We're running in the project root which DOES have defaults/, so this test
     // verifies the positive path: when defaults exist, files are copied.
     const copied = seedUserConfig();
-    // 8 tool JSON + 16 skill MD + 1 mode JSON = 25 (or 0 if already seeded)
-    expect(copied === 0 || copied === 25).toBe(true);
+    // 8 tool JSON + 16 skill MD + 2 mode JSON = 26 (or 0 if already seeded)
+    expect(copied === 0 || copied === 26).toBe(true);
     // After seeding, marker should exist
     expect(isSeeded()).toBe(true);
   });

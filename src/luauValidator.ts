@@ -38,6 +38,12 @@ export interface ValidationRule {
   tool: string;
   filePattern: string;
   blocking: boolean;
+  /**
+   * Custom command to run (NEW). If set, runs this command instead of the
+   * built-in selene/stylua/luau-lsp dispatcher. {file} is replaced with
+   * the file path. Lets mode authors validate ANY file type (.tf, .py, etc).
+   */
+  command?: string;
 }
 
 export interface ValidationResult {
@@ -179,6 +185,35 @@ export async function validateLuauBeforeWrite(
 
       let cmdResult: { ok: boolean; stdout: string; stderr: string; timedOut: boolean };
 
+      // NEW: If rule has a custom command, run that command instead of built-in tools.
+      // This allows mode authors to define validators for ANY language (.tf, .py, .rs, etc)
+      // without modifying source code. Example:
+      //   { tool: "terraform_validate", filePattern: "*.tf", blocking: true, command: "terraform validate {file}" }
+      if (rule.command) {
+        // Replace {file} placeholder with the temp file path
+        const cmdWithFile = rule.command.replace(/\{file\}/g, tmpFile);
+        const parts = cmdWithFile.split(/\s+/).filter(Boolean);
+        if (parts.length > 0) {
+          const program = parts[0]!;
+          const args = parts.slice(1);
+          cmdResult = await runCommand(program, args, projectRoot);
+          if (!cmdResult.ok && (cmdResult.stdout.trim() || cmdResult.stderr.trim())) {
+            const output = cmdResult.stdout.trim() || cmdResult.stderr.trim();
+            const errMsg = `${rule.tool} failed for ${path.basename(filePath)}:\n${output}`;
+            if (rule.blocking) {
+              result.ok = false;
+              result.blockingError = errMsg;
+              return result;
+            } else {
+              result.warnings.push(errMsg);
+            }
+          }
+        }
+        continue;  // Skip the built-in tool switch below
+      }
+
+      // Built-in tool dispatch (for backwards compat with selene/stylua/luau-lsp
+      // rules that don't have a `command` field)
       switch (rule.tool) {
         case "selene_lint":
         case "selene": {
@@ -264,17 +299,18 @@ export async function validateLuauBeforeWrite(
 
 /**
  * Get the validation rules for the currently active mode.
- * Returns empty array if no mode active, or mode has no luauValidation rules.
+ * Returns empty array if no mode active, or mode has no validation rules.
+ *
+ * Merges legacy `luauValidation` field with the new generic `validation` field.
+ * Both are arrays of ModeValidationRule. If both are set, they're concatenated.
  *
  * This is the main entry point used by fileEdit.ts.
  */
 export async function getActiveValidationRules(): Promise<ValidationRule[]> {
   try {
-    // Lazy import to avoid circular dep
-    const { getActiveMode } = await import("./modes.js");
-    const mode = getActiveMode();
-    if (!mode || !mode.luauValidation) return [];
-    return mode.luauValidation;
+    // Use modeExtensions which handles the merge logic
+    const { getActiveValidationRules: getMergedRules } = await import("./modeExtensions.js");
+    return await getMergedRules();
   } catch {
     return [];
   }
@@ -282,11 +318,15 @@ export async function getActiveValidationRules(): Promise<ValidationRule[]> {
 
 /**
  * Convenience wrapper: should this file path be validated?
- * Returns true if the path ends in .luau or .lua AND there are active rules.
+ *
+ * GENERIC (post-externalization): returns true if ANY active validation rule's
+ * file pattern matches this file. No longer restricted to .luau/.lua only -
+ * works for any language (.tf, .py, .rs, .go, etc) as long as the mode defines
+ * a validation rule with a matching filePattern.
+ *
+ * For backwards compat, .luau and .lua files with `luauValidation` rules still work.
  */
 export async function shouldValidateFile(filePath: string): Promise<boolean> {
-  const ext = path.extname(filePath).toLowerCase();
-  if (ext !== ".luau" && ext !== ".lua") return false;
   const rules = await getActiveValidationRules();
   return rules.some((r) => matchesPattern(filePath, r.filePattern));
 }

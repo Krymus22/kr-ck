@@ -21,7 +21,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import * as log from "./logger.js";
 
-const SEED_VERSION = "v4";
+const SEED_VERSION = "v5";
 const SEED_MARKER = `.seeded-${SEED_VERSION}`;
 
 /** Resolve the bundled defaults directory. Works both in dev (src/) and prod (dist/). */
