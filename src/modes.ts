@@ -75,6 +75,10 @@ export interface ModeDefinition {
   /** Luau validation rules (when editing .luau/.lua files) */
   luauValidation?: ModeValidationRule[];
 
+  /** Whether to enable auto-API-research (sub-agent that searches the web
+   * for current API docs before writing code, and on selene false positives). */
+  autoResearch?: boolean;
+
   /** For user modes: the original prompt the user gave when creating */
   userPrompt?: string;
   /** When this mode was created (ISO date) */

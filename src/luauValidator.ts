@@ -148,6 +148,18 @@ export async function validateLuauBeforeWrite(
     return result; // no rules apply to this file type
   }
 
+  // Check if auto-research is enabled (mode has autoResearch flag).
+  // When true, selene false positives (unknown globals) include a hint
+  // telling the AI to call pesquisar_api_atualizada before "fixing".
+  let autoResearchEnabled = false;
+  try {
+    const { getActiveMode } = await import("./modes.js");
+    const mode = getActiveMode();
+    autoResearchEnabled = !!mode?.autoResearch;
+  } catch {
+    // ignore - if modes module fails, default to false
+  }
+
   // Write proposed content to a temp file for validation
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-killer-luau-"));
   const ext = path.extname(filePath) || ".luau";
@@ -173,7 +185,19 @@ export async function validateLuauBeforeWrite(
           // Selene returns non-zero on lint errors
           cmdResult = await runCommand("selene", ["--no-global-check", "--quiet", tmpFile], projectRoot);
           if (!cmdResult.ok && cmdResult.stdout.trim()) {
-            const errMsg = `Selene lint failed for ${path.basename(filePath)}:\n${cmdResult.stdout.trim()}`;
+            // Check if this might be a false positive from a new Roblox API
+            // that selene doesn't know about yet (selene's std lib lags behind Roblox updates)
+            const seleneOutput = cmdResult.stdout.trim();
+            const mightBeNewApi = /undefined (global|variable)|unknown global/i.test(seleneOutput);
+
+            let errMsg = `Selene lint failed for ${path.basename(filePath)}:\n${seleneOutput}`;
+
+            // If auto-research is enabled and this looks like an unknown global,
+            // add a hint to the AI to research the API before assuming it's an error
+            if (mightBeNewApi && autoResearchEnabled) {
+              errMsg += `\n\n[HINT] Este erro pode ser um FALSO POSITIVO - selene pode não conhecer uma API nova do Roblox. Considere chamar pesquisar_api_atualizada({ nome: "<api_name>", linguagem: "roblox" }) para verificar se a API existe antes de "corrigir" o código.`;
+            }
+
             if (rule.blocking) {
               result.ok = false;
               result.blockingError = errMsg;

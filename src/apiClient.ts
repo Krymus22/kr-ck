@@ -627,6 +627,43 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "pesquisar_api_atualizada",
+      description:
+        "Pesquisa na web a documentação atual de uma API específica (última versão). " +
+        "USE quando: (1) for escrever código usando uma API que pode ter mudado recentemente, " +
+        "(2) selene/luau-lsp/linter reclamar de 'undefined global' que você acha que é uma API nova, " +
+        "(3) o usuário pedir 'versão atual' ou 'latest API', " +
+        "(4) em modo Roblox, antes de usar qualquer API de serviço (TweenService, Players, ReplicatedStorage, etc). " +
+        "A pesquisa inclui a data atual do sistema para priorizar fontes recentes. " +
+        "Resultados ficam em cache por 7 dias. Sempre chame ANTES de escrever código com APIs que " +
+        "você não tem certeza absoluta que estão atualizadas - especialmente em Roblox onde APIs mudam toda semana.",
+      parameters: {
+        type: "object",
+        properties: {
+          nome: {
+            type: "string",
+            description: "Nome da API a pesquisar. Exemplos: 'TweenService:Create', 'FindFirstChild', 'Players:GetPlayerByUserId', 'React.useState', 'fetch', 'axios.get'.",
+          },
+          linguagem: {
+            type: "string",
+            description: "Linguagem ou plataforma da API. Exemplos: 'roblox', 'typescript', 'python', 'rust', 'lua', 'javascript'.",
+          },
+          contexto: {
+            type: "string",
+            description: "Contexto opcional do que você está tentando fazer. Ajuda a refinar a busca. Exemplo: 'quero criar um tween que move uma parte suavemente'.",
+          },
+          forcar_refresh: {
+            type: "boolean",
+            description: "Se true, ignora o cache e faz uma pesquisa fresca. Default: false.",
+          },
+        },
+        required: ["nome", "linguagem"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "ler_estado",
       description:
         "Lê o conteúdo atual do TASK_STATE.md e retorna como string formatada. " +
