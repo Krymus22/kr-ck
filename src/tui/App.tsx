@@ -21,6 +21,8 @@ import * as todo from "../todo.js";
 import { config } from "../config.js";
 import { shutdownMCPServers, getActiveSkills, getActiveMCPServers } from "../extensions.js";
 import { discoverExtensions } from "../extensionCenter.js";
+import { setEffortLevel, getEffortLabel } from "../effortLevels.js";
+import { getPoolSize } from "../apiKeyPool.js";
 import { colors } from "./theme.js";
 import { ChatDisplay, ChatMessage } from "./ChatDisplay.js";
 import { StatusBar } from "./StatusBar.js";
@@ -43,6 +45,8 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/plugins", desc: "List MCP servers" },
   { cmd: "/tools", desc: "List external tools" },
   { cmd: "/toolinfo", desc: "Show tool details" },
+  { cmd: "/effort", desc: "Set effort level (low/medium/high/max)" },
+  { cmd: "/pool", desc: "Show API key pool status" },
   { cmd: "/caveman", desc: "Toggle caveman mode" },
   { cmd: "/memory", desc: "Show project memory" },
   { cmd: "/todos", desc: "Show todo list" },
@@ -270,6 +274,8 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/plugins": () => handlePluginsCommand(),
   "/tools": (arg) => handleToolsCommand(arg),
   "/toolinfo": (arg) => handleToolInfoCommand(arg),
+  "/effort": (arg) => handleEffortCommand(arg),
+  "/pool": () => handlePoolCommand(),
   "/caveman": (arg) => handleCavemanCommand(arg),
   "/memory": () => handleMemoryCommand(),
   "/todos": () => handleTodosCommand(),
@@ -278,6 +284,27 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/dream": () => handleDreamCommand(),
   "/distill": () => handleDistillCommand(),
 };
+
+function handleEffortCommand(arg: string | null): CommandResult {
+  if (!arg) {
+    return { handled: true, message: `Effort atual: ${getEffortLabel()}\nUse: /effort low|medium|high|max` };
+  }
+  const valid = ["low", "medium", "high", "max"];
+  if (!valid.includes(arg)) {
+    return { handled: true, message: `Nível inválido: ${arg}\nOpções: low, medium, high, max` };
+  }
+  setEffortLevel(arg as any);
+  return { handled: true, message: `Effort alterado para: ${getEffortLabel()}` };
+}
+
+function handlePoolCommand(): CommandResult {
+  const size = getPoolSize();
+  if (size === 0) {
+    return { handled: true, message: "Pool: modo single-key (configure NVIDIA_API_KEYS para multi-key)" };
+  }
+  const { formatPoolStats } = require("../apiKeyPool.js");
+  return { handled: true, message: formatPoolStats() };
+}
 
 function handleSlashCommand(input: string): CommandResult {
   const parts = input.trim().split(/\s+/);
@@ -369,6 +396,8 @@ export function App() {
     completion_tokens: number;
     total_tokens: number;
   } | null>(null);
+  const [tokensPerSecond, setTokensPerSecond] = useState(0);
+  const [effortLabel, setEffortLabel] = useState(getEffortLabel());
   const [systemMessages, setSystemMessages] = useState<string[]>([]);
   const [acIndex, setAcIndex] = useState(0);
   const [showHub, setShowHub] = useState(false);
@@ -398,11 +427,14 @@ export function App() {
   const runStreaming = useCallback(async (fullInput: string) => {
     let streamContent = "";
     let streamStarted = false;
+    let streamStartTime = 0;
+    let tokenCount = 0;
 
     const response = await runAgentLoop(
       fullInput,
       () => {
         streamStarted = true;
+        streamStartTime = Date.now();
         setStatus("streaming");
         setMessages((prev) => {
           const updated = [...prev];
@@ -415,6 +447,12 @@ export function App() {
       },
       (token: string) => {
         streamContent += token;
+        tokenCount++;
+        // Update tok/s every 10 tokens
+        if (tokenCount % 10 === 0 && streamStartTime > 0) {
+          const elapsed = (Date.now() - streamStartTime) / 1000;
+          if (elapsed > 0) setTokensPerSecond(Math.round(tokenCount / elapsed * 10) / 10);
+        }
         setMessages((prev) => {
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
@@ -431,6 +469,13 @@ export function App() {
       },
       (usage) => {
         setLastUsage(usage);
+        // Final tok/s calculation
+        if (streamStartTime > 0 && usage.completion_tokens > 0) {
+          const elapsed = (Date.now() - streamStartTime) / 1000;
+          if (elapsed > 0) setTokensPerSecond(Math.round(usage.completion_tokens / elapsed * 10) / 10);
+        }
+        // Refresh effort label (might have changed via /effort)
+        setEffortLabel(getEffortLabel());
       }
     );
 
@@ -540,8 +585,9 @@ export function App() {
 
   // ── Keyboard navigation for autocomplete + global shortcuts ───────────
   useInput((inputChar, key) => {
-    // Ctrl+E opens Extension Hub
+    // Ctrl+E opens Extension Hub — must clear input to prevent 'e' leak
     if (key.ctrl && inputChar === "e") {
+      setInput("");
       setShowHub((prev) => !prev);
       return;
     }
@@ -607,15 +653,21 @@ export function App() {
 
       {/* Bottom bar: Input (left) + Status (right) */}
       <Box flexDirection="row" marginTop={1}>
-        {/* Input section */}
+        {/* Input section — hidden when Hub is open to prevent key leaks */}
         <Box flexGrow={1}>
-          <Text color={colors.primary} bold>❯ </Text>
-          <TextInput
-            value={input}
-            onChange={handleChange}
-            onSubmit={handleSubmit}
-            placeholder={status === "idle" ? "Digite sua mensagem..." : ""}
-          />
+          {showHub ? (
+            <Text color={colors.muted}>〔 Hub aberto — pressione Esc para fechar 〕</Text>
+          ) : (
+            <>
+              <Text color={colors.primary} bold>❯ </Text>
+              <TextInput
+                value={input}
+                onChange={handleChange}
+                onSubmit={handleSubmit}
+                placeholder={status === "idle" ? "Digite sua mensagem..." : ""}
+              />
+            </>
+          )}
         </Box>
 
         {/* Status bar section (right side) */}
@@ -633,6 +685,8 @@ export function App() {
               planMode={history.isPlanMode()}
               mcpCount={getActiveMCPServers().length}
               skillsCount={getActiveSkills().length}
+              effortLabel={effortLabel}
+              tokensPerSecond={tokensPerSecond}
             />
           </Box>
         )}

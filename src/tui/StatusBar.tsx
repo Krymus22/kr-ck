@@ -1,5 +1,5 @@
 /**
- * StatusBar.tsx — Context window usage bar + session cost.
+ * StatusBar.tsx — Context window usage bar + session cost + effort level + tok/s.
  * Compact single-line format for inline display next to input.
  */
 
@@ -19,6 +19,8 @@ interface StatusBarProps {
   planMode: boolean;
   mcpCount: number;
   skillsCount: number;
+  effortLabel?: string;
+  tokensPerSecond?: number;
 }
 
 function formatTok(n: number): string {
@@ -37,6 +39,8 @@ export function StatusBar({
   planMode,
   mcpCount,
   skillsCount,
+  effortLabel,
+  tokensPerSecond,
 }: Readonly<StatusBarProps>) {
   const pct = contextWindow > 0 ? totalTokens / contextWindow : 0;
   const fillCount = Math.round(pct * 15);
@@ -60,6 +64,10 @@ export function StatusBar({
   }
 
   const modeTag = planMode ? " [PLAN]" : "";
+  const effortTag = effortLabel ? ` ${effortLabel}` : "";
+  const tpsTag = tokensPerSecond && tokensPerSecond > 0
+    ? ` ${tokensPerSecond.toFixed(1)} tok/s`
+    : "";
 
   return (
     <Box flexDirection="row">
@@ -68,6 +76,8 @@ export function StatusBar({
       </Text>
       <Text color={barColor}> {fill}{empty} </Text>
       <Text color={barColor}>{Math.round(pct * 100)}%</Text>
+      {tpsTag && <Text color={colors.muted}>{tpsTag}</Text>}
+      {effortTag && <Text color={colors.primary} bold>{effortTag}</Text>}
       <Text color={colors.warning}>{costStr}</Text>
       {modeTag && <Text color={colors.warning} bold>{modeTag}</Text>}
     </Box>
