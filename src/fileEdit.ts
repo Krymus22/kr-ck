@@ -94,7 +94,24 @@ export async function editFile(
     return `[ERRO] Edição falhou: ${result.error}`;
   }
 
-  // --- Luau pre-write validation (NEW) ---
+  // --- Impact analysis (NEW) ---
+  // Before writing, find all OTHER files in the project that reference
+  // symbols defined in this file. Inject as a hint to the AI.
+  // Non-blocking - never aborts the write, just adds context.
+  let impactHint = "";
+  try {
+    const { analyzeImpact, formatImpactHint } = await import("./impactAnalyzer.js");
+    const report = await analyzeImpact(resolved);
+    impactHint = formatImpactHint(report);
+    if (impactHint) {
+      log.info(`[IMPACT] ${impactHint}`);
+    }
+  } catch (err) {
+    // Don't block writes if impact analyzer crashes
+    log.debug(`fileEdit: impact analysis skipped: ${(err as Error).message}`);
+  }
+
+  // --- Luau pre-write validation ---
   // If the file is .luau/.lua and the active mode has validation rules,
   // run them on the proposed new content BEFORE writing.
   const ext = path.extname(resolved).toLowerCase();
@@ -140,7 +157,13 @@ export async function editFile(
   fs.writeFileSync(resolved, result.content, "utf8");
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
-  return `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
+
+  // Build success message - append impact hint if any
+  let msg = `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
+  if (impactHint) {
+    msg += `\n\n${impactHint}`;
+  }
+  return msg;
 }
 
 function countOccurrences(text: string, search: string): number {
