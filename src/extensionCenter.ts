@@ -482,11 +482,11 @@ export function getTriggerModes(): readonly TriggerMode[] {
 
 export function getCategoryIcon(category: ExtensionCategory): string {
   switch (category) {
-    case "skill": return "[S]";
-    case "tool": return "[T]";
-    case "mcp": return "[M]";
-    case "plugin": return "[P]";
-    case "feature": return "[F]";
+    case "skill": return "SK";    // Skill
+    case "tool": return "TL";     // Tool
+    case "mcp": return "MC";      // MCP
+    case "plugin": return "PL";   // Plugin
+    case "feature": return "FT";  // Feature
   }
 }
 

@@ -2,6 +2,7 @@
  * index.ts - CLI entry point for Claude-Killer (Ink TUI edition).
  *
  * Responsibilities:
+ *  - Set UTF-8 encoding on Windows (chcp 65001)
  *  - Load extensions (skills + MCP servers)
  *  - Render the Ink TUI application
  *  - Handle graceful shutdown
@@ -14,6 +15,18 @@ import React from "react";
 import { render } from "ink";
 import { App } from "./tui/App.js";
 import { loadAllExtensions, shutdownMCPServers } from "./extensions.js";
+import { execSync } from "node:child_process";
+
+// --- Force UTF-8 on Windows ----------------------------------------------
+// Windows cmd.exe defaults to cp1252 which breaks Unicode characters.
+// Setting chcp 65001 enables UTF-8 so icons and symbols render correctly.
+if (process.platform === "win32") {
+  try {
+    execSync("chcp 65001", { stdio: "ignore" });
+  } catch {
+    // If chcp fails (e.g. not in cmd.exe), continue anyway.
+  }
+}
 
 // --- Entry Point ---------------------------------------------------------
 

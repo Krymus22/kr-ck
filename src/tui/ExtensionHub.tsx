@@ -215,6 +215,15 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         </Box>
       )}
 
+      {/* Description of selected item (terminal equivalent of hover tooltip) */}
+      {visibleItems[cursorIndex] && (
+        <Box marginTop={1} paddingLeft={1} paddingRight={1} borderStyle="round" borderColor={colors.muted}>
+          <Text color={colors.white} wrap="truncate">
+            {visibleItems[cursorIndex].description || "No description available."}
+          </Text>
+        </Box>
+      )}
+
       {/* Bottom bar */}
       <Box justifyContent="space-between" marginTop={1} borderTop borderTopColor={colors.muted}>
         <Text color={colors.muted} dimColor>

@@ -14,11 +14,12 @@ export const colors = {
 } as const;
 
 export const icons = {
-  check: "OK",
-  dot: "[x]",
-  circle: "[ ]",
+  check: "v",
+  dot: "*",
+  circle: "o",
   arrow: "->",
   warn: "!",
   error: "x",
   thinking: "*",
+  cross: "x",
 } as const;

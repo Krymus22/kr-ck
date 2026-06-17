@@ -24,6 +24,7 @@ import { discoverExtensions } from "../extensionCenter.js";
 import { setEffortLevel, getEffortLabel } from "../effortLevels.js";
 import { getPoolSize } from "../apiKeyPool.js";
 import { colors } from "./theme.js";
+import { icons } from "./icons.js";
 import { ChatDisplay, ChatMessage } from "./ChatDisplay.js";
 import { StatusBar } from "./StatusBar.js";
 import { TodoPanel, TodoItem } from "./TodoPanel.js";
