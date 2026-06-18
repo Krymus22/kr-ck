@@ -25,8 +25,8 @@ import * as log from "./logger.js";
 
 // --- Config (env vars) -----------------------------------------------------
 
-/** Heartbeat interval in milliseconds. Default: 5 minutes. */
-const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS ?? "300000", 10);
+/** Heartbeat interval in milliseconds. Default: 1 minute (60000ms). */
+const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS ?? "60000", 10);
 
 /** Whether heartbeat is enabled. Default: true. Set HEARTBEAT_ENABLED=0 to disable. */
 const HEARTBEAT_ENABLED = process.env.HEARTBEAT_ENABLED !== "0";
