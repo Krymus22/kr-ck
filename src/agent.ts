@@ -112,6 +112,49 @@ const MAX_STOPS_PER_TURN = 12;
 let currentOnToolCall: ((toolName: string, args: Record<string, unknown>) => void) | undefined;
 let currentOnToolResult: ((toolName: string, ok: boolean, resultStr: string) => void) | undefined;
 
+/**
+ * Sub-agent concurrency limiter (semaphore).
+ *
+ * With 4 API keys:
+ *   - 1 key for main agent
+ *   - 2 keys for sub-agents (MAX_CONCURRENT_SUB_AGENTS=2)
+ *   - 1 key always free for delayed hedging backup
+ *
+ * This prevents the model from spawning 5 sub-agents that would exhaust
+ * all keys, leaving no room for hedging.
+ *
+ * Configurable via MAX_CONCURRENT_SUB_AGENTS env var (default 2).
+ */
+const MAX_CONCURRENT_SUB_AGENTS = parseInt(process.env.MAX_CONCURRENT_SUB_AGENTS ?? "2", 10);
+let activeSubAgents = 0;
+const subAgentWaitQueue: Array<() => void> = [];
+
+async function acquireSubAgentSlot(): Promise<void> {
+  if (activeSubAgents < MAX_CONCURRENT_SUB_AGENTS) {
+    activeSubAgents++;
+    log.debug(`[SUB_AGENT_LIMIT] Acquired slot (${activeSubAgents}/${MAX_CONCURRENT_SUB_AGENTS})`);
+    return;
+  }
+  // Wait for a slot
+  await new Promise<void>((resolve) => {
+    subAgentWaitQueue.push(() => {
+      activeSubAgents++;
+      log.debug(`[SUB_AGENT_LIMIT] Acquired slot after wait (${activeSubAgents}/${MAX_CONCURRENT_SUB_AGENTS})`);
+      resolve();
+    });
+  });
+}
+
+function releaseSubAgentSlot(): void {
+  activeSubAgents--;
+  const next = subAgentWaitQueue.shift();
+  if (next) {
+    next();
+  } else {
+    log.debug(`[SUB_AGENT_LIMIT] Released slot (${activeSubAgents}/${MAX_CONCURRENT_SUB_AGENTS})`);
+  }
+}
+
 // --- Helpers ------------------------------------------------------------------
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -845,7 +888,14 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
     const cwd = args.cwd ? asString(args.cwd) : undefined;
     const maxCalls = args.max_tool_calls as number | undefined;
-    const result = await runSubAgent({ question, cwd, maxToolCalls: maxCalls });
+
+    // Limit concurrent sub-agents to MAX_CONCURRENT_SUB_AGENTS (default 2).
+    // With 4 API keys: 1 main agent + 2 sub-agents = 3 keys used, 1 free for hedging.
+    // This semaphore prevents the model from spawning 5 sub-agents that would
+    // exhaust all keys and leave no room for hedging.
+    await acquireSubAgentSlot();
+    try {
+      const result = await runSubAgent({ question, cwd, maxToolCalls: maxCalls });
     if (result === null) {
       return {
         resultStr: "[INFO] Sub-agente não executou (effort level muito baixo ou falhou). Use effort=high ou max para habilitar.",
@@ -853,6 +903,9 @@ const toolHandlers: Record<string, ToolHandler> = {
       };
     }
     return { resultStr: result, usedHeal: false };
+    } finally {
+      releaseSubAgentSlot();
+    }
   },
 
   // --- Multi-key pool status (IDEIA Fase 1) ------------------------------

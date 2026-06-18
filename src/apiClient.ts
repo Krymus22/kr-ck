@@ -1293,9 +1293,13 @@ async function chatWithPool(
       // in use by the main agent or a sub-agent. If only 1 key is free,
       // hedging is skipped (no backup).
       const HEDGE_TIMEOUT_MS = 5000;
-      const canHedge = getAvailableKeyCount() >= 2 && getTotalKeyCount() >= 2;
-      // Note: getAvailableKeyCount counts keys NOT locked. We already hold
-      // 1 (poolHandle), so if available >= 2, there's at least 1 more free.
+      // Hedging activates if there's at least 1 FREE key available for backup.
+      // We already hold 1 key (poolHandle), so getAvailableKeyCount() counts
+      // keys that are NOT us and NOT busy.
+      // With 4 keys: 1 main + 2 subs = 3 busy, 1 free → canHedge = true
+      // With 4 keys: 1 main + 0 subs = 1 busy, 3 free → canHedge = true
+      // With 3 keys: 1 main + 2 subs = 3 busy, 0 free → canHedge = false
+      const canHedge = getAvailableKeyCount() >= 1 && getTotalKeyCount() >= 2;
 
       let hedgeHandle: { client: OpenAI; entry: any; release: (success: boolean, httpStatus: number | null, latencyMs: number) => void } | null = null;
       let hedgeWinner: "primary" | "hedge" | null = null;
