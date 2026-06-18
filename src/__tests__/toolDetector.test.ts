@@ -100,6 +100,25 @@ describe("toolDetector", () => {
       expect(rojoPaths.some((p) => p.includes("rojo"))).toBe(true);
       expect(selenePaths.some((p) => p.includes("selene"))).toBe(true);
     });
+
+    // Regression test for issue #24: on Windows, package-manager bin paths
+    // (~/.rokit/bin/, ~/.aftman/bin/, ~/.cargo/bin/, etc.) MUST include the
+    // .exe extension. Without it, fs.statSync() never finds the file because
+    // the actual file is "rojo.exe", not "rojo".
+    it("includes .exe extension on Windows for package-manager paths", () => {
+      if (process.platform !== "win32") return; // Windows-only regression test
+      const paths = getSearchPathsForTool("rojo");
+      // Check rokit, aftman, cargo, go paths — all must end with rojo.exe
+      const rokitPath = paths.find((p) => p.includes(".rokit"));
+      const aftmanPath = paths.find((p) => p.includes(".aftman"));
+      const cargoPath = paths.find((p) => p.includes(".cargo"));
+      expect(rokitPath).toBeDefined();
+      expect(aftmanPath).toBeDefined();
+      expect(cargoPath).toBeDefined();
+      expect(rokitPath).toMatch(/rojo\.exe$/);
+      expect(aftmanPath).toMatch(/rojo\.exe$/);
+      expect(cargoPath).toMatch(/rojo\.exe$/);
+    });
   });
 
   describe("detectTool", () => {

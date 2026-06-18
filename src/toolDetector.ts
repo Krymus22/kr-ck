@@ -65,33 +65,40 @@ function getSearchPaths(toolName: string): string[] {
   const home = os.homedir();
   const platform = process.platform;
 
+  // On Windows, binaries have .exe extension. On Unix, no extension.
+  // BUG FIX (issue #24): previously we used the bare toolName on Windows,
+  // so paths like ~/.rokit/bin/rojo (without .exe) would never match the
+  // actual file ~/.rokit/bin/rojo.exe. This is why the user's rojo install
+  // was never detected despite being in the most common location.
+  const binName = platform === "win32" ? `${toolName}.exe` : toolName;
+
   const paths: string[] = [];
 
   // 1. ~/.claude-killer/bin/ (our own managed directory)
-  paths.push(path.join(home, ".claude-killer", "bin", toolName));
+  paths.push(path.join(home, ".claude-killer", "bin", binName));
 
   // 2. Rokit (most common for Roblox tools)
-  paths.push(path.join(home, ".rokit", "bin", toolName));
+  paths.push(path.join(home, ".rokit", "bin", binName));
   // Project-local rokit
-  paths.push(path.join(process.cwd(), ".rokit", "bin", toolName));
+  paths.push(path.join(process.cwd(), ".rokit", "bin", binName));
 
   // 3. Aftman (legacy toolchain manager)
-  paths.push(path.join(home, ".aftman", "bin", toolName));
+  paths.push(path.join(home, ".aftman", "bin", binName));
 
   // 4. Cargo (Rust tools: selene, stylua)
-  paths.push(path.join(home, ".cargo", "bin", toolName));
+  paths.push(path.join(home, ".cargo", "bin", binName));
 
   // 5. Go bin (selene can be installed via `go install`)
-  paths.push(path.join(home, "go", "bin", toolName));
+  paths.push(path.join(home, "go", "bin", binName));
 
   // 6. npm local bin (stylua has npm wrapper)
-  paths.push(path.join(process.cwd(), "node_modules", ".bin", toolName));
+  paths.push(path.join(process.cwd(), "node_modules", ".bin", binName));
 
   // 7. System paths (platform-specific)
   if (platform === "win32") {
-    paths.push(path.join("C:\\Program Files", toolName, `${toolName}.exe`));
-    paths.push(path.join(home, "scoop", "shims", `${toolName}.exe`));
-    paths.push(path.join(home, "AppData", "Local", "Programs", toolName, `${toolName}.exe`));
+    paths.push(path.join("C:\\Program Files", toolName, binName));
+    paths.push(path.join(home, "scoop", "shims", binName));
+    paths.push(path.join(home, "AppData", "Local", "Programs", toolName, binName));
   } else {
     paths.push(`/usr/local/bin/${toolName}`);
     paths.push(`/usr/bin/${toolName}`);
