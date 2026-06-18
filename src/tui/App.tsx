@@ -785,6 +785,9 @@ export function App() {
       // If autocomplete is showing and user hits Enter, use selected match.
       // - For commands (/effort): complete the command + add space for subcommand typing
       // - For subcommands (low/medium/high/max): complete the full input and submit
+      // - BUG FIX: if the user typed the full command already (e.g., "/hub" matches
+      //   selected.label "/hub"), submit immediately instead of adding a space and
+      //   forcing the user to press Enter twice.
       if (showAutocomplete && acMatches.length > 0) {
         const selected = acMatches[acIndex];
     if (selected?.label) {
@@ -794,6 +797,11 @@ export function App() {
             const cmdPart = trimmedValue.slice(0, spaceIdx);
             trimmedValue = `${cmdPart} ${selected.label}`;
             setInput(trimmedValue);
+            setAcIndex(0);
+            // Fall through to actual command execution below
+          } else if (selected.label === trimmedValue) {
+            // User typed the full command (e.g., "/hub" === "/hub") — submit immediately.
+            // Don't add a space, don't force a second Enter press.
             setAcIndex(0);
             // Fall through to actual command execution below
           } else {
