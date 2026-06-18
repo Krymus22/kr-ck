@@ -373,6 +373,60 @@ export async function acquireKeyForStreaming(): Promise<{
   };
 }
 
+/**
+ * Try to acquire a key WITHOUT blocking. Returns null immediately if no key is free.
+ * Used by delayed hedging to grab a 2nd key for backup without waiting.
+ *
+ * This is the key insight: if the main agent is using key A, and a sub-agent
+ * is using key B, only key C is free. Hedging will try to acquire C as backup.
+ * If C is also busy, hedging is skipped (1-key mode).
+ */
+export function tryAcquireKeyImmediate(): {
+  client: OpenAI;
+  entry: PoolEntry;
+  release: (success: boolean, httpStatus: number | null, latencyMs: number) => void;
+} | null {
+  if (pool.length === 0) return null;
+  const entry = pickNextKey();
+  if (!entry) return null;
+  // acquireMutex is synchronous — if locked, pickNextKey already skipped it
+  // But we need to double-check since pickNextKey checks mutex.locked
+  // and acquireMutex sets it. Since JS is single-threaded, no race.
+  acquireMutex(entry);
+  entry.callCount++;
+  entry.stats.inFlight++;
+  return {
+    client: entry.client,
+    entry,
+    release: (success, httpStatus, latencyMs) => releaseKey(entry, success, httpStatus, latencyMs),
+  };
+}
+
+/**
+ * Count how many keys in the pool are currently free (not in use, not cooling down).
+ * Used to decide whether hedging is possible.
+ */
+export function getAvailableKeyCount(): number {
+  if (pool.length === 0) return 0;
+  const now = Date.now();
+  let count = 0;
+  for (const entry of pool) {
+    if (entry.stats.cooldownUntil > now) continue;
+    if (entry.mutex.locked) continue;
+    const rl = checkRateLimit(entry);
+    if (!rl.allowed) continue;
+    count++;
+  }
+  return count;
+}
+
+/**
+ * Get total pool size (all keys, including busy ones).
+ */
+export function getTotalKeyCount(): number {
+  return pool.length;
+}
+
 // --- Metrics -----------------------------------------------------------------
 
 export function getPoolStats(): ApiKeyStats[] {

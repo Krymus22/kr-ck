@@ -12,7 +12,7 @@ import https from "node:https";
 import { config } from "./config.js";
 import { getModelMaxOutputTokens } from "./modelRegistry.js";
 import * as log from "./logger.js";
-import { initApiKeyPool, acquireKeyForStreaming, getPoolSize } from "./apiKeyPool.js";
+import { initApiKeyPool, acquireKeyForStreaming, tryAcquireKeyImmediate, getPoolSize, getAvailableKeyCount, getTotalKeyCount } from "./apiKeyPool.js";
 
 // --- OpenAI Client (pointed at NVIDIA NIM) ----------------------------------
 
@@ -1273,28 +1273,117 @@ async function chatWithPool(
     const poolHandle = await acquireKeyForStreaming();
     const start = Date.now();
     let httpStatus: number | null = null;
-    // Definite assignment: assigned in BOTH try (true) and catch (false) paths
-    // before the finally block reads it.
     let releaseSuccess!: boolean;
     try {
       log.debug(`Sending ${messages.length} messages to ${config.model} (pool mode)` +
         (attempt > 0 ? ` (retry ${attempt}/${MAX_429_RETRIES})` : ""));
-      const rawStream = await createStreamRequest(messages, tools, poolHandle.client);
-      const state = createStreamState();
-      await consumeStream(rawStream, state, onStreamStart, onToken, onThinking);
-      const response = buildChatResponse(state);
-      releaseSuccess = true;
-      log.debug(
-        `Response: stop_reason=${response.choices[0]?.finish_reason}, ` +
-          `tokens=${response.usage?.total_tokens ?? "?"}`
-      );
-      return response;
+
+      // ─── Delayed Hedging ────────────────────────────────────────────
+      // If there are 2+ free keys in the pool, send a backup request on
+      // a 2nd key after HEDGE_TIMEOUT_MS (5s). The first stream to
+      // produce output wins; the other is cancelled.
+      //
+      // This is "delayed" hedging — we don't fire 2 requests at once.
+      // We fire 1, wait 5s, and only fire the 2nd if the 1st hasn't
+      // produced output yet. This way:
+      //   - Fast requests (<5s): 1 key used, 0 waste
+      //   - Slow requests (>5s): 2 keys used, 1 waste, but faster response
+      //
+      // The pool's mutex guarantees we never steal a key that's already
+      // in use by the main agent or a sub-agent. If only 1 key is free,
+      // hedging is skipped (no backup).
+      const HEDGE_TIMEOUT_MS = 5000;
+      const canHedge = getAvailableKeyCount() >= 2 && getTotalKeyCount() >= 2;
+      // Note: getAvailableKeyCount counts keys NOT locked. We already hold
+      // 1 (poolHandle), so if available >= 2, there's at least 1 more free.
+
+      let hedgeHandle: { client: OpenAI; entry: any; release: (success: boolean, httpStatus: number | null, latencyMs: number) => void } | null = null;
+      let hedgeWinner: "primary" | "hedge" | null = null;
+      let primaryStreamStarted = false;
+
+      // Start primary stream
+      const primaryStreamPromise = createStreamRequest(messages, tools, poolHandle.client);
+
+      // If hedging is possible, set a timer to fire the backup
+      let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+      if (canHedge) {
+        hedgeTimer = setTimeout(() => {
+          // Only fire hedge if primary hasn't started streaming yet
+          if (primaryStreamStarted) return;
+          hedgeHandle = tryAcquireKeyImmediate() as any;
+          if (hedgeHandle) {
+            log.debug(`[HEDGE] Primary slow after ${HEDGE_TIMEOUT_MS}ms — firing backup on key #${(hedgeHandle.entry as any).index}`);
+          }
+        }, HEDGE_TIMEOUT_MS);
+      }
+
+      try {
+        // Wait for primary stream to be created (the initial HTTP request)
+        const rawStream = await primaryStreamPromise;
+        primaryStreamStarted = true;
+
+        // Check if hedge was already fired (meaning primary took >5s to even
+        // get the initial response). If so, race both streams.
+        if (hedgeHandle) {
+          // Primary was slow to start — race both streams
+          log.debug(`[HEDGE] Primary eventually started, but hedge was already fired — racing`);
+
+          const primaryState = createStreamState();
+          const hedgeState = createStreamState();
+
+          // Race: first stream to produce content wins
+          const primaryPromise = consumeStream(rawStream, primaryState, undefined, undefined, undefined).then(() => "primary");
+          const hedgeStreamPromise = createStreamRequest(messages, tools, (hedgeHandle as any)!.client)
+            .then(hs => consumeStream(hs, hedgeState, undefined, undefined, undefined).then(() => "hedge"));
+
+          const winner = await Promise.race([primaryPromise, hedgeStreamPromise]);
+          hedgeWinner = winner as "primary" | "hedge";
+
+          // Consume the loser stream (to avoid unhandled rejection)
+          if (hedgeWinner === "primary") {
+            // Hedge lost — consume it silently
+            hedgeStreamPromise.catch(() => {});
+            const response = buildChatResponse(primaryState);
+            // But we need to call onStreamStart/onToken with the winner's content
+            if (onStreamStart) onStreamStart();
+            if (onToken && response.choices[0]?.message?.content) {
+              onToken(response.choices[0].message.content);
+            }
+            releaseSuccess = true;
+            return response;
+          } else {
+            // Primary lost — consume it silently
+            primaryPromise.catch(() => {});
+            const response = buildChatResponse(hedgeState);
+            if (onStreamStart) onStreamStart();
+            if (onToken && response.choices[0]?.message?.content) {
+              onToken(response.choices[0].message.content);
+            }
+            releaseSuccess = true;
+            return response;
+          }
+        }
+
+        // Normal path: no hedge fired, consume primary stream
+        const state = createStreamState();
+        await consumeStream(rawStream, state, onStreamStart, onToken, onThinking);
+        const response = buildChatResponse(state);
+        releaseSuccess = true;
+        log.debug(
+          `Response: stop_reason=${response.choices[0]?.finish_reason}, ` +
+            `tokens=${response.usage?.total_tokens ?? "?"}`
+        );
+        return response;
+      } finally {
+        if (hedgeTimer) clearTimeout(hedgeTimer);
+        if (hedgeHandle) {
+          (hedgeHandle as any).release(hedgeWinner === "hedge", null, Date.now() - start);
+        }
+      }
     } catch (err: unknown) {
       releaseSuccess = false;
       httpStatus = (err as any)?.status ?? null;
       logApiDiagnostics(err, attempt);
-      // handleStreamError already sleeps internally (handle429Error / handleTransientNetworkError)
-      // so we just continue without an additional sleep.
       const retryResult = await handleStreamError(err, attempt);
       if (retryResult?.retried && attempt < MAX_429_RETRIES + MAX_NETWORK_RETRIES) {
         attempt = retryResult.newAttempt;
