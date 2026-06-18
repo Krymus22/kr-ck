@@ -5,6 +5,7 @@
  */
 
 import "dotenv/config";
+import { getModelContextWindow, getModelMaxOutputTokens, getModelCost } from "./modelRegistry.js";
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -111,7 +112,13 @@ export const config = {
   debug: optionalBool("DEBUG", false),
 
   /** Model's context window size in tokens (used for status bar). */
-  contextWindowTokens: optionalInt("CONTEXT_WINDOW_TOKENS", 128000),
+  // BUG FIX: previously hardcoded to 128000. Now we look up the actual
+  // context window for the active model from MODEL_REGISTRY. The user can
+  // still override via CONTEXT_WINDOW_TOKENS env var.
+  contextWindowTokens: optionalInt(
+    "CONTEXT_WINDOW_TOKENS",
+    getModelContextWindow(process.env.MODEL ?? "moonshotai/kimi-k2.6"),
+  ),
 
   /** Threshold (0.0-1.0) of context window that triggers auto-compact. */
   contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.75),
@@ -120,10 +127,18 @@ export const config = {
   contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.6),
 
   /** Approximate USD cost per 1k prompt tokens (estimate only). */
-  costPerKPrompt: optionalFloat("COST_PER_K_PROMPT", 0),
+  // BUG FIX: previously defaulted to 0. Now we look up the actual cost
+  // for the active model from MODEL_REGISTRY. The user can still override.
+  costPerKPrompt: optionalFloat(
+    "COST_PER_K_PROMPT",
+    getModelCost(process.env.MODEL ?? "moonshotai/kimi-k2.6").prompt / 1000,
+  ),
 
     /** Approximate USD cost per 1k completion tokens. */
-  costPerKCompletion: optionalFloat("COST_PER_K_COMPLETION", 0),
+  costPerKCompletion: optionalFloat(
+    "COST_PER_K_COMPLETION",
+    getModelCost(process.env.MODEL ?? "moonshotai/kimi-k2.6").completion / 1000,
+  ),
 
   /** When true, shows a diff preview and asks for user confirmation before applying file changes. */
   diffPreview: optionalBool("DIFF_PREVIEW", true),

@@ -24,9 +24,19 @@ interface StatusBarProps {
 }
 
 function formatTok(n: number): string {
+  // Millions: 1M, 1.5M, 2M (not 1000k, 1500k)
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
+  }
+  // Thousands: 1k, 1.5k, 10k, 100k, 999k (not 1.0k, 153.6k)
   if (n >= 1000) {
     const k = n / 1000;
-    // Show "1k" instead of "1.0k" for round numbers; "1.5k" for fractions.
+    if (k >= 100) {
+      // For 100k+, round to integer (100k, 154k, 999k)
+      return `${Math.round(k)}k`;
+    }
+    // For 1k-99k, show one decimal only if not round (1k, 1.5k, 10k, 50.5k)
     return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
   }
   return `${n}`;
