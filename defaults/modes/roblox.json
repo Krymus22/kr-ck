@@ -17,8 +17,7 @@
     "tool:rokit_install",
     "tool:rokit_add",
     "tool:wally_package_types",
-    "tool:stylua_format",
-    "tool:darklua_process"
+    "tool:stylua_format"
   ],
 
   "enableSkills": [
