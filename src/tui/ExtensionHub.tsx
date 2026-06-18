@@ -14,8 +14,11 @@
  *   Enter   Toggle enabled/disabled (extensions) | Activate mode (Modes tab)
  *   T       Cycle trigger mode
  *   1-4     Quick-set trigger mode (1=OFF, 2=FILE, 3=TASK, 4=EVERY)
+ *   S       Smart search (PATH + common locations + rokit.toml + registry PATH + scoop/cargo/winget + AI)
+ *   A       AI-only search (just asks the LLM for suggestions — fast, 3-10s)
+ *   X       eXtreme search (full filesystem scan on ALL drives, with progress + Esc to cancel)
  *   Tab     Switch category tab
- *   Esc     Close panel
+ *   Esc     Close panel (or cancel extreme search if running)
  */
 
 import React, { useState, useCallback } from "react";
@@ -93,6 +96,31 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
     results: Array<{ toolName: string; status: string; binaryPath: string | null; version: string | null }>;
   } | null>(null);
 
+  // Extreme search state (separate from regular search)
+  // 'X' key triggers a full-filesystem scan on ALL drives, with progress and Esc-to-cancel.
+  // We keep a ref to an abort signal object so the useInput handler can flip .aborted=true.
+  const [extremeSearching, setExtremeSearching] = useState(false);
+  const [extremeProgress, setExtremeProgress] = useState<{
+    currentTool: string;
+    currentPath: string;
+    toolsDone: number;
+    toolsTotal: number;
+    results: Array<{ toolName: string; status: string; binaryPath: string | null; version: string | null }>;
+  } | null>(null);
+  const [extremeAbortSignal, setExtremeAbortSignal] = useState<{ aborted: boolean } | null>(null);
+
+  // AI search state — 'A' key triggers a fast LLM-only lookup (3-10s).
+  // Asks the model to suggest unlikely-but-plausible paths based on OS + cwd,
+  // then verifies each suggestion with fs.existsSync.
+  const [aiSearching, setAiSearching] = useState(false);
+  const [aiProgress, setAiProgress] = useState<{
+    currentTool: string;
+    currentPath: string;
+    toolsDone: number;
+    toolsTotal: number;
+    results: Array<{ toolName: string; status: string; binaryPath: string | null; version: string | null }>;
+  } | null>(null);
+
   const currentTab = CATEGORIES[tabIndex] ?? CATEGORIES[0];
   const isModesTab = currentTab.key === "modes";
 
@@ -135,7 +163,18 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
 
   // -- Keyboard handling -----------------------------------------------
   useInput((inputChar, key) => {
-    if (key.escape) { onClose(); return; }
+    // Esc has dual behavior: cancel extreme search if running, otherwise close panel
+    if (key.escape) {
+      if (extremeSearching && extremeAbortSignal) {
+        extremeAbortSignal.aborted = true;
+        setExtremeSearching(false);
+        setExtremeProgress((prev) => prev ? { ...prev, currentPath: "(cancelado pelo usuario)" } : prev);
+        setRenderKey((n) => n + 1);
+        return;
+      }
+      onClose();
+      return;
+    }
     if (key.tab) {
       setTabIndex((prev) => (prev + 1) % CATEGORIES.length);
       setCursorIndex(0);
@@ -153,10 +192,27 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       return;
     }
 
-    // 'S' triggers manual tool search (deep scan of filesystem)
+    // 'S' triggers manual tool search (smart + AI + common locations + deep fallback)
     if (inputChar === "s" || inputChar === "S") {
-      if (!isModesTab && !searching) {
+      if (!isModesTab && !searching && !extremeSearching && !aiSearching) {
         triggerToolSearch();
+      }
+      return;
+    }
+    // 'A' triggers AI-ONLY search — fast LLM lookup (3-10s total).
+    // Good as a quick first pass before falling back to S or X.
+    if (inputChar === "a" || inputChar === "A") {
+      if (!isModesTab && !searching && !extremeSearching && !aiSearching) {
+        triggerAiSearch();
+      }
+      return;
+    }
+    // 'X' triggers EXTREME search — full filesystem scan on ALL drives
+    // with progress and Esc-to-cancel. Use this when 'S' doesn't find a tool
+    // that you KNOW is installed somewhere unusual.
+    if (inputChar === "x" || inputChar === "X") {
+      if (!isModesTab && !searching && !extremeSearching && !aiSearching) {
+        triggerExtremeSearch();
       }
       return;
     }
@@ -206,6 +262,119 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       });
     }).catch(() => {
       setSearching(false);
+      setRenderKey((n) => n + 1);
+    });
+  }
+
+  // -- Extreme tool search (triggered by 'X' key) --------------------------
+  // Full filesystem scan on ALL drives. Slow (1-10 min) but finds binaries
+  // ANYWHERE on the system. Esc cancels mid-scan.
+  function triggerExtremeSearch() {
+    setExtremeSearching(true);
+    setExtremeProgress({
+      currentTool: "(iniciando)",
+      currentPath: "(preparando para escanear todas as unidades...)",
+      toolsDone: 0,
+      toolsTotal: 0,
+      results: [],
+    });
+    setRenderKey((n) => n + 1);
+
+    // Create an abort signal object that the Esc handler can flip
+    const abortSignal = { aborted: false };
+    setExtremeAbortSignal(abortSignal);
+
+    // Determine which tools to search for (same logic as triggerToolSearch)
+    const mode = getActiveMode();
+    let toolIds: string[];
+    if (mode && mode.enableTools.length > 0) {
+      toolIds = mode.enableTools;
+    } else {
+      toolIds = getAllExtensions().filter((e) => e.category === "tool").map((e) => e.id);
+    }
+
+    import("../toolDetector.js").then(({ extremeSearchAllTools, getModeToolNames }) => {
+      const toolNames = getModeToolNames(toolIds);
+
+      extremeSearchAllTools(toolNames, (progress) => {
+        setExtremeProgress({
+          currentTool: progress.currentTool,
+          currentPath: progress.currentPath,
+          toolsDone: progress.toolsDone,
+          toolsTotal: progress.toolsTotal,
+          results: progress.results.map((r) => ({
+            toolName: r.toolName,
+            status: r.status,
+            binaryPath: r.binaryPath,
+            version: r.version,
+          })),
+        });
+        setRenderKey((n) => n + 1);
+      }, abortSignal).then(() => {
+        setExtremeSearching(false);
+        setExtremeAbortSignal(null);
+        setRenderKey((n) => n + 1);
+      }).catch(() => {
+        setExtremeSearching(false);
+        setExtremeAbortSignal(null);
+        setRenderKey((n) => n + 1);
+      });
+    }).catch(() => {
+      setExtremeSearching(false);
+      setExtremeAbortSignal(null);
+      setRenderKey((n) => n + 1);
+    });
+  }
+
+  // -- AI-only search (triggered by 'A' key) -------------------------------
+  // Fast: just asks the LLM "where might this binary be?" and verifies with
+  // fs.existsSync. 3-10s total. Good first pass before falling back to S or X.
+  function triggerAiSearch() {
+    setAiSearching(true);
+    setAiProgress({
+      currentTool: "(iniciando)",
+      currentPath: "(conectando ao LLM...)",
+      toolsDone: 0,
+      toolsTotal: 0,
+      results: [],
+    });
+    setRenderKey((n) => n + 1);
+
+    // Determine which tools to search for (same logic as triggerToolSearch)
+    const mode = getActiveMode();
+    let toolIds: string[];
+    if (mode && mode.enableTools.length > 0) {
+      toolIds = mode.enableTools;
+    } else {
+      toolIds = getAllExtensions().filter((e) => e.category === "tool").map((e) => e.id);
+    }
+
+    import("../toolDetector.js").then(({ aiOnlySearchAllTools, getModeToolNames }) => {
+      const toolNames = getModeToolNames(toolIds);
+
+      aiOnlySearchAllTools(toolNames, (progress) => {
+        setAiProgress({
+          currentTool: progress.currentTool,
+          currentPath: progress.currentPath,
+          toolsDone: progress.toolsDone,
+          toolsTotal: progress.toolsTotal,
+          results: progress.results.map((r) => ({
+            toolName: r.toolName,
+            status: r.status,
+            binaryPath: r.binaryPath,
+            version: r.version,
+          })),
+        });
+        setRenderKey((n) => n + 1);
+      }).then(() => {
+        setAiSearching(false);
+        setRenderKey((n) => n + 1);
+      }).catch(() => {
+        setAiSearching(false);
+        setRenderKey((n) => n + 1);
+      });
+    }).catch(() => {
+      setAiSearching(false);
       setRenderKey((n) => n + 1);
     });
   }
@@ -429,6 +598,57 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         </Box>
       )}
 
+      {/* Extreme search panel (shown when extreme search is running, was cancelled,
+          or has results). Stays visible after cancellation so the user sees feedback. */}
+      {(extremeSearching || extremeProgress) && (
+        <Box flexDirection="column" marginTop={1} borderStyle="bold" borderColor={extremeSearching ? colors.error : (extremeProgress?.currentPath?.includes("cancelado") ? colors.warning : colors.success)} paddingLeft={1} paddingRight={1}>
+          <Text color={extremeSearching ? colors.error : (extremeProgress?.currentPath?.includes("cancelado") ? colors.warning : colors.success)} bold>
+            {extremeSearching
+              ? `BUSCA EXTREMA... (${extremeProgress?.toolsDone ?? 0}/${extremeProgress?.toolsTotal ?? 0}) — Esc cancela`
+              : extremeProgress?.currentPath?.includes("cancelado")
+              ? `BUSCA EXTREMA CANCELADA — Esc fecha o hub`
+              : `Busca extrema completa (${extremeProgress?.results.length ?? 0} tools)`}
+          </Text>
+          {extremeSearching && extremeProgress && (
+            <Box flexDirection="column">
+              <Text color={colors.warning}> Tool: {extremeProgress.currentTool}</Text>
+              <Text color={colors.muted}> Path: {extremeProgress.currentPath}</Text>
+            </Box>
+          )}
+          {extremeProgress?.results.map((r, i) => (
+            <Text key={`xsearch-${i}`} color={r.status === "missing" ? colors.error : colors.success}>
+              {" "}{r.status === "missing" ? "X" : "v"} {r.toolName}
+              {r.version ? ` v${r.version}` : ""}
+              {r.binaryPath ? ` @ ${r.binaryPath.length > 50 ? "..." + r.binaryPath.slice(-47) : r.binaryPath}` : " (nao encontrado)"}
+            </Text>
+          ))}
+        </Box>
+      )}
+
+      {/* AI search panel (shown when AI search is running or has results) */}
+      {(aiSearching || (aiProgress && aiProgress.results.length > 0)) && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={aiSearching ? colors.primary : colors.muted} paddingLeft={1} paddingRight={1}>
+          <Text color={aiSearching ? colors.primary : colors.success} bold>
+            {aiSearching
+              ? `BUSCA IA... (${aiProgress?.toolsDone ?? 0}/${aiProgress?.toolsTotal ?? 0})`
+              : `Busca IA completa (${aiProgress?.results.length ?? 0} tools)`}
+          </Text>
+          {aiSearching && aiProgress && (
+            <Box flexDirection="column">
+              <Text color={colors.warning}> Tool: {aiProgress.currentTool}</Text>
+              <Text color={colors.muted}> {aiProgress.currentPath}</Text>
+            </Box>
+          )}
+          {aiProgress?.results.map((r, i) => (
+            <Text key={`aisearch-${i}`} color={r.status === "missing" ? colors.error : colors.success}>
+              {" "}{r.status === "missing" ? "X" : "v"} {r.toolName}
+              {r.version ? ` v${r.version}` : ""}
+              {r.binaryPath ? ` @ ${r.binaryPath.length > 50 ? "..." + r.binaryPath.slice(-47) : r.binaryPath}` : " (IA nao achou)"}
+            </Text>
+          ))}
+        </Box>
+      )}
+
       {/* Description of selected item (terminal equivalent of hover tooltip) */}
       {isModesTab && visibleModes[cursorIndex] && (
         <ModeDescription mode={visibleModes[cursorIndex]} isActive={visibleModes[cursorIndex].name === activeModeName} />
@@ -446,7 +666,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         <Text color={colors.muted} dimColor>
           {isModesTab
             ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
-            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  M filter  S search  Tab switch  Esc close"}
+            : "  <- sel  ^v scr  <- tog T 1-4 I M A=ai S=smart X=eXtreme Tab Esc"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab

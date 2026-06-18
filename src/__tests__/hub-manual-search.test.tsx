@@ -4,7 +4,7 @@
  * Tests:
  *   - 'S' key triggers search
  *   - Search panel appears with "Buscando tools..."
- *   - Shortcuts bar includes 'S search'
+ *   - Shortcuts bar includes 'S=smart'
  *   - Search results show X for missing, v for found
  *   - 'S' does nothing while already searching
  *   - 'S' does nothing on Modes tab
@@ -38,6 +38,30 @@ const mockDetectTool = vi.hoisted(() => vi.fn(() => ({
   status: "missing", binaryPath: null, version: null, error: "not found", searchedPaths: [],
 })));
 
+const mockExtremeSearchAllTools = vi.hoisted(() => vi.fn(async (toolNames: string[], onProgress?: (p: any) => void, _abortSignal?: { aborted: boolean }) => {
+  const results: any[] = [];
+  for (let i = 0; i < toolNames.length; i++) {
+    const name = toolNames[i];
+    onProgress?.({ currentTool: name, currentPath: "(extreme scan...)", toolsDone: i, toolsTotal: toolNames.length, results: [...results] });
+    const result = { toolName: name, status: "missing", binaryPath: null, version: null, searchedPaths: [] };
+    results.push(result);
+    onProgress?.({ currentTool: name, currentPath: "(not found)", toolsDone: i + 1, toolsTotal: toolNames.length, results: [...results] });
+  }
+  return results;
+}));
+
+const mockAiOnlySearchAllTools = vi.hoisted(() => vi.fn(async (toolNames: string[], onProgress?: (p: any) => void) => {
+  const results: any[] = [];
+  for (let i = 0; i < toolNames.length; i++) {
+    const name = toolNames[i];
+    onProgress?.({ currentTool: name, currentPath: "(IA...)", toolsDone: i, toolsTotal: toolNames.length, results: [...results] });
+    const result = { toolName: name, status: "missing", binaryPath: null, version: null, searchedPaths: [] };
+    results.push(result);
+    onProgress?.({ currentTool: name, currentPath: "(IA nao achou)", toolsDone: i + 1, toolsTotal: toolNames.length, results: [...results] });
+  }
+  return results;
+}));
+
 vi.mock("../toolDetector.js", () => ({
   detectTool: mockDetectTool,
   detectAndVerify: vi.fn(async () => ({ status: "missing", binaryPath: null, version: null, error: "", searchedPaths: [], verified: false })),
@@ -55,6 +79,8 @@ vi.mock("../toolDetector.js", () => ({
     }
     return results;
   }),
+  extremeSearchAllTools: mockExtremeSearchAllTools,
+  aiOnlySearchAllTools: mockAiOnlySearchAllTools,
   extractToolBinaryName: vi.fn((id: string) => id.replace(/^tool:/, "").replace(/_(build|serve|sourcemap|install|search|publish|lint|format|run|process|add)$/, "")),
   getModeToolNames: vi.fn((ids: string[]) => [...new Set(ids.map((id: string) => id.replace(/^tool:/, "").replace(/_(build|serve|sourcemap|install|search|publish|lint|format|run|process|add)$/, "")))]),
 }));
@@ -134,10 +160,16 @@ describe("Hub manual search (S key)", () => {
     mockDetectTool.mockReturnValue({ status: "missing", binaryPath: null, version: null, error: "not found", searchedPaths: [] });
   });
 
-  it("shortcuts bar includes 'S search'", () => {
+  it("shortcuts bar includes 'S=smart'", () => {
     const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain("S search");
+    expect(out).toContain("S=smart");
+  });
+
+  it("shortcuts bar includes 'X=eXtreme'", () => {
+    const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("X=eXtreme");
   });
 
   it("pressing 'S' shows search panel", async () => {
@@ -199,6 +231,137 @@ describe("Hub manual search (S key)", () => {
     await delay(100);
     // searchAllTools should only be called once
     expect(searchAllTools).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── X key (extreme search) ──────────────────────────────────────────────
+
+describe("Hub extreme search (X key)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDetectTool.mockReturnValue({ status: "missing", binaryPath: null, version: null, error: "not found", searchedPaths: [] });
+    mockExtremeSearchAllTools.mockClear();
+  });
+
+  it("pressing 'X' shows extreme search panel", async () => {
+    const { stdin, lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("x");
+    await delay(200);
+    const out = stripAnsi(lastFrame() ?? "");
+    // Should show the extreme search panel header
+    expect(out).toMatch(/BUSCA EXTREMA|Busca extrema/);
+  });
+
+  it("pressing 'X' calls extremeSearchAllTools", async () => {
+    const { stdin } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("x");
+    await delay(200);
+    expect(mockExtremeSearchAllTools).toHaveBeenCalled();
+  });
+
+  it("'X' does nothing while regular search is running", async () => {
+    // Make searchAllTools slow so the regular search is still running
+    vi.mocked(searchAllTools).mockImplementationOnce(async () => {
+      await new Promise(r => setTimeout(r, 1000));
+      return [];
+    });
+
+    const { stdin } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("s"); // start regular search
+    await delay(100);
+    stdin.write("x"); // try to start extreme search
+    await delay(100);
+    // extremeSearchAllTools should NOT be called because regular is running
+    expect(mockExtremeSearchAllTools).not.toHaveBeenCalled();
+  });
+
+  it("'X' does nothing on Modes tab", async () => {
+    const { stdin, lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    // Tab to Modes (6 times)
+    for (let i = 0; i < 6; i++) { stdin.write("\t"); await delay(30); }
+    stdin.write("x");
+    await delay(200);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).not.toContain("BUSCA EXTREMA");
+    expect(out).not.toContain("Busca extrema");
+  });
+
+  it("Esc cancels extreme search instead of closing hub", async () => {
+    // Make extremeSearchAllTools slow so it's still running when we press Esc
+    mockExtremeSearchAllTools.mockImplementationOnce(async (_toolNames: string[], _onProgress?: any, abortSignal?: { aborted: boolean }) => {
+      // Wait until aborted or 2s timeout
+      const start = Date.now();
+      while (Date.now() - start < 2000) {
+        if (abortSignal?.aborted) return [];
+        await new Promise(r => setTimeout(r, 50));
+      }
+      return [];
+    });
+
+    const { stdin, lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("x");
+    await delay(150);
+    stdin.write("\u001B"); // Esc
+    await delay(150);
+    const out = stripAnsi(lastFrame() ?? "");
+    // Hub should still be open (Esc cancelled the search, didn't close the hub)
+    expect(out).toContain("EXTENSION HUB");
+    // Should show cancellation feedback (case-insensitive, matches "cancelado" or "CANCELADA")
+    expect(out).toMatch(/cancelad[ao]/i);
+  });
+});
+
+// ─── A key (AI-only search) ──────────────────────────────────────────────
+
+describe("Hub AI search (A key)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDetectTool.mockReturnValue({ status: "missing", binaryPath: null, version: null, error: "not found", searchedPaths: [] });
+    mockAiOnlySearchAllTools.mockClear();
+  });
+
+  it("pressing 'A' shows AI search panel", async () => {
+    const { stdin, lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("a");
+    await delay(200);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toMatch(/BUSCA IA|Busca IA/);
+  });
+
+  it("pressing 'A' calls aiOnlySearchAllTools", async () => {
+    const { stdin } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("a");
+    await delay(200);
+    expect(mockAiOnlySearchAllTools).toHaveBeenCalled();
+  });
+
+  it("'A' does nothing while regular search is running", async () => {
+    vi.mocked(searchAllTools).mockImplementationOnce(async () => {
+      await new Promise(r => setTimeout(r, 1000));
+      return [];
+    });
+
+    const { stdin } = render(<ExtensionHub onClose={() => {}} />);
+    stdin.write("s");
+    await delay(100);
+    stdin.write("a");
+    await delay(100);
+    expect(mockAiOnlySearchAllTools).not.toHaveBeenCalled();
+  });
+
+  it("'A' does nothing on Modes tab", async () => {
+    const { stdin, lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    for (let i = 0; i < 6; i++) { stdin.write("\t"); await delay(30); }
+    stdin.write("a");
+    await delay(200);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).not.toContain("BUSCA IA");
+  });
+
+  it("shortcuts bar includes 'A=ai'", () => {
+    const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("A=ai");
   });
 });
 

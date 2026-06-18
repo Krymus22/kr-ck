@@ -151,6 +151,35 @@ export const config = {
 
   /** When true, shows a diff preview and asks for user confirmation before applying file changes. */
   diffPreview: optionalBool("DIFF_PREVIEW", true),
+
+  // --- AI-Assisted Tool Search (optional) ------------------------------------
+  // Separate API config for the "AI search" feature (press 'A' in the Hub).
+  // Defaults to the main provider's key/model/baseURL if not set, so users
+  // don't need to configure anything extra unless they want to use a
+  // different model (e.g., a faster/cheaper one for this lookup task).
+  //
+  // Works with both NVIDIA NIM and ZenMux (and any OpenAI-compatible endpoint).
+  // Examples:
+  //   AI_SEARCH_API_KEY=nvapi-xxx           (NVIDIA NIM)
+  //   AI_SEARCH_API_KEY=sk-ai-v1-xxx        (ZenMux)
+  //   AI_SEARCH_BASE_URL=https://integrate.api.nvidia.com/v1
+  //   AI_SEARCH_MODEL=moonshotai/kimi-k2.6
+  //
+  //   AI_SEARCH_API_KEY=your-zhipu-key      (Zhipu/ZenMux)
+  //   AI_SEARCH_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+  //   AI_SEARCH_MODEL=glm-4-flash
+
+  /** API key for AI-assisted tool search. Falls back to main provider key. */
+  aiSearchApiKey: process.env.AI_SEARCH_API_KEY?.trim() ?? _providerConfig.apiKey,
+
+  /** Base URL for AI-assisted tool search. Falls back to main provider URL. */
+  aiSearchBaseUrl: process.env.AI_SEARCH_BASE_URL?.trim() ?? _providerConfig.baseUrl,
+
+  /** Model for AI-assisted tool search. Defaults to a fast/cheap model. */
+  aiSearchModel: process.env.AI_SEARCH_MODEL?.trim() ?? "moonshotai/kimi-k2.6",
+
+  /** Whether AI-assisted tool search is enabled (requires API key). */
+  aiSearchEnabled: optionalBool("AI_SEARCH_ENABLED", true),
 } as const;
 
 export type Config = typeof config;

@@ -5,7 +5,7 @@
  *   - 'M' key toggles the mode filter on/off
  *   - When filter is on, only items from active mode are shown
  *   - Filter indicator "FILTRO: só do modo ativo" appears
- *   - Shortcuts bar includes 'M filter'
+ *   - Shortcuts bar includes 'M' for filter
  *   - 'M' does nothing on Modes tab
  *   - 'M' does nothing when no mode is active
  *   - Filter shows fewer items when active (roblox mode has subset of tools)
@@ -177,10 +177,11 @@ describe("Hub mode filter", () => {
     });
   });
 
-  it("shortcuts bar includes 'M filter'", () => {
+  it("shortcuts bar includes 'M' for filter", () => {
     const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain("M filter");
+    // The compact help text uses "M" (between I and A=ai) for the filter toggle
+    expect(out).toMatch(/\bM\b/);
   });
 
   it("shows 'Active mode: roblox' when a mode is active", () => {

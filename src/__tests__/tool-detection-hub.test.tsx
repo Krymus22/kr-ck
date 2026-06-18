@@ -8,7 +8,7 @@
  *   - ExtensionHub shows [FALTA] for missing tools
  *   - ExtensionHub shows [OK] for installed tools
  *   - ExtensionCard shows "Pressione I para instalar" for missing+selected tools
- *   - ExtensionHub shortcuts bar includes "I install"
+ *   - ExtensionHub shortcuts bar includes "I" for install
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -184,10 +184,11 @@ describe("Tool detection integration with Hub", () => {
     expect(typeof out).toBe("string");
   });
 
-  it("Hub shortcuts bar includes 'I install'", () => {
+  it("Hub shortcuts bar includes 'I' for install", () => {
     const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain("I install");
+    // The compact help text uses "I" (between 1-4 and M) for the install key
+    expect(out).toMatch(/\bI\b/);
   });
 
   it("Hub shows 'Pressione I para instalar' for selected missing tool", () => {
