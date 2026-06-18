@@ -165,7 +165,6 @@ const TOOL_REPOS: Record<string, string> = {
   rokit: "rojo-rbx/rokit",
   stylua: "JohnnyMorganz/StyLua",
   "wally-package-types": "JohnnyMorganz/wally-package-types",
-  darklua: "seaofvoices/darklua",
   "luau-lsp": "JohnnyMorganz/luau-lsp",
 };
 

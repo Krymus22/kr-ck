@@ -59,14 +59,14 @@ describe("modes", () => {
     it("roblox mode should activate all Roblox CLI tools", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
       const roblox = getBuiltInModes().find((m) => m.name === "roblox")!;
-      // Should include rojo, wally, lune, selene, rokit, wally-package-types, stylua, darklua
+      // Should include rojo, wally, lune, selene, rokit, wally-package-types, stylua
       expect(roblox.enableTools).toContain("tool:rojo_build");
       expect(roblox.enableTools).toContain("tool:wally_install");
       expect(roblox.enableTools).toContain("tool:lune_run");
       expect(roblox.enableTools).toContain("tool:selene_lint");
       expect(roblox.enableTools).toContain("tool:rokit_install");
       expect(roblox.enableTools).toContain("tool:stylua_format");
-      expect(roblox.enableTools).toContain("tool:darklua_process");
+      expect(roblox.enableTools).not.toContain("tool:darklua_process");
     });
 
     it("roblox mode should enable strict mode + advanced thinking + high effort", async () => {
@@ -170,7 +170,7 @@ describe("modes", () => {
       const { suggestMode } = await import("./../modes.js");
       const suggestion = suggestMode({
         prompt: "I want to build a Roblox game with Luau",
-        availableTools: ["tool:rojo_build", "tool:selene_lint", "tool:stylua_format", "tool:darklua_process"],
+        availableTools: ["tool:rojo_build", "tool:selene_lint", "tool:stylua_format"],
         availableSkills: [],
         availableFeatures: ["feature:strict_gate", "feature:read_before_write"],
       });

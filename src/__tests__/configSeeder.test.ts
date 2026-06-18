@@ -34,8 +34,9 @@ describe("configSeeder", () => {
     // We're running in the project root which DOES have defaults/, so this test
     // verifies the positive path: when defaults exist, files are copied.
     const copied = seedUserConfig();
-    // 8 tool JSON + 16 skill MD + 2 mode JSON = 26 (or 0 if already seeded)
-    expect(copied === 0 || copied === 26).toBe(true);
+    // 7 tool JSON + 16 skill MD + 2 mode JSON = 25 (or 0 if already seeded)
+    // (was 26 before darklua removal)
+    expect(copied === 0 || copied === 25).toBe(true);
     // After seeding, marker should exist
     expect(isSeeded()).toBe(true);
   });
@@ -112,7 +113,7 @@ describe("configSeeder", () => {
     const toolsDir = path.join(process.cwd(), "defaults", "tools");
     const files = fs.readdirSync(toolsDir).filter((f) => f.endsWith(".json"));
 
-    expect(files.length).toBe(8);  // 6 original + stylua + darklua
+    expect(files.length).toBe(7);  // 6 original + stylua (darklua removed)
 
     for (const file of files) {
       const filePath = path.join(toolsDir, file);
@@ -195,8 +196,8 @@ describe("configSeeder", () => {
       const data = JSON.parse(fs.readFileSync(path.join(toolsDir, file), "utf8"));
       totalTools += Array.isArray(data) ? data.length : 1;
     }
-    // 3 (rojo) + 3 (wally) + 1 (lune) + 1 (selene) + 2 (rokit) + 1 (wally-package-types) + 1 (stylua) + 1 (darklua) = 13
-    expect(totalTools).toBe(13);
+    // 3 (rojo) + 3 (wally) + 1 (lune) + 1 (selene) + 2 (rokit) + 1 (wally-package-types) + 1 (stylua) = 12
+    expect(totalTools).toBe(12);
   });
 });
 

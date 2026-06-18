@@ -110,7 +110,7 @@ describe("toolUpdater", () => {
 
       // For each known tool, checkToolUpdate should at least attempt (will fail since not installed)
       const tools = ["rojo", "wally", "lune", "selene", "rokit", "stylua",
-                     "wally-package-types", "darklua", "luau-lsp"];
+                     "wally-package-types", "luau-lsp"];
 
       for (const tool of tools) {
         const result = await checkToolUpdate(tool);

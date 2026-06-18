@@ -556,7 +556,7 @@ export function suggestMode(req: ModeSuggestionRequest): ModeSuggestion {
               "tool:wally_install", "tool:wally_search", "tool:wally_publish",
               "tool:lune_run", "tool:selene_lint", "tool:rokit_install",
               "tool:rokit_add", "tool:wally_package_types",
-              "tool:stylua_format", "tool:darklua_process"],
+              "tool:stylua_format"],
       skills: [],
       label: "Roblox (External)",
       name: "roblox-custom",
