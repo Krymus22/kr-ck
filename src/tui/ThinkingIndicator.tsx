@@ -43,16 +43,26 @@ function formatElapsed(ms: number): string {
  *   - Windows cmd.exe with default fonts (Consolas doesn't have Braille)
  *   - Old terminal emulators without Unicode font fallback
  *   - SSH sessions with mismatched locale
+ *
+ * BUG FIX (audit issue #6): previously the modulo was hardcoded to %10 even
+ * in ASCII mode (which has only 4 frames), causing the spinner to skip
+ * frames 4-9 and produce jittery animation. Now the modulo is dynamic
+ * based on the actual frames array length.
  */
-function spinnerChar(idx: number): string {
+const SPINNER_FRAMES_ASCII = ["|", "/", "-", "\\"];
+const SPINNER_FRAMES_BRAILLE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function getSpinnerFrames(): string[] {
   // Detect: env var forces ASCII, otherwise use Braille (modern terminals
   // including Windows Terminal, VS Code terminal, and most Linux terminals
   // support Braille patterns).
   const useAscii = process.env.USE_ASCII_SPINNER === "1" ||
     (process.platform === "win32" && !process.env.WT_SESSION && !process.env.TERM_PROGRAM);
-  const frames = useAscii
-    ? ["|", "/", "-", "\\"]
-    : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  return useAscii ? SPINNER_FRAMES_ASCII : SPINNER_FRAMES_BRAILLE;
+}
+
+function spinnerChar(idx: number): string {
+  const frames = getSpinnerFrames();
   return frames[idx % frames.length] ?? "•";
 }
 
@@ -71,8 +81,12 @@ export function ThinkingIndicator({ active }: Readonly<ThinkingIndicatorProps>) 
   // Spinner + elapsed time + dot animation tick (every 200ms).
   useEffect(() => {
     if (!active) return;
+    const frames = getSpinnerFrames();
     const interval = setInterval(() => {
-      spinnerIdx.current = (spinnerIdx.current + 1) % 10;
+      // BUG FIX (audit issue #6): use frames.length for modulo, not hardcoded 10.
+      // ASCII spinner has 4 frames; Braille has 10. Hardcoding 10 caused ASCII
+      // mode to skip frames and jitter.
+      spinnerIdx.current = (spinnerIdx.current + 1) % frames.length;
       setDots((prev) => (prev.length >= 3 ? "" : prev + "."));
       // Force re-render to update elapsed time even when stack is unchanged
       setSnapshot(getActivitySnapshot());

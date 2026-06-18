@@ -39,6 +39,7 @@ import { StatusBar } from "./StatusBar.js";
 import { TodoPanel, TodoItem } from "./TodoPanel.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { ExtensionHub } from "./ExtensionHub.js";
+import { useTerminalWidth } from "./useTerminal.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -620,6 +621,14 @@ export function App() {
     total_tokens: number;
   } | null>(null);
   const [tokensPerSecond, setTokensPerSecond] = useState(0);
+
+  // Cumulative session totals — track across ALL turns, not just the last one.
+  // BUG FIX (audit issue #4): StatusBar was showing last-turn cost/tokens but
+  // the docstring claimed "session cost". Users saw $0.001 after 50 turns.
+  // Now we accumulate prompt + completion tokens AND cost across the session.
+  const [sessionPromptTokens, setSessionPromptTokens] = useState(0);
+  const [sessionCompletionTokens, setSessionCompletionTokens] = useState(0);
+  const [sessionCost, setSessionCost] = useState(0);
   const [effortLabel, setEffortLabel] = useState(getEffortLabel());
   const [systemMessages, setSystemMessages] = useState<string[]>([]);
   const [acIndex, setAcIndex] = useState(0);
@@ -749,6 +758,15 @@ export function App() {
       },
       (usage) => {
         setLastUsage(usage);
+        // Accumulate session totals so StatusBar shows cumulative cost/tokens
+        // instead of just the last-turn values.
+        setSessionPromptTokens((prev) => prev + usage.prompt_tokens);
+        setSessionCompletionTokens((prev) => prev + usage.completion_tokens);
+        setSessionCost((prev) =>
+          prev
+          + (usage.prompt_tokens / 1000) * config.costPerKPrompt
+          + (usage.completion_tokens / 1000) * config.costPerKCompletion
+        );
         // Final tok/s calculation — uses THIS stream's elapsed time
         // (streamStartTime was reset on the last onStreamStart).
         if (streamStartTime > 0 && usage.completion_tokens > 0) {
@@ -940,15 +958,17 @@ export function App() {
   });
 
   // -- Render -------------------------------------------------------------
+  const termWidth = useTerminalWidth();
+  const bannerWidth = Math.max(40, Math.min(termWidth - 2, 80));
   return (
     <Box flexDirection="column" padding={1}>
       {/* Banner */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={colors.primary} bold>{"=".repeat(50)}</Text>
+        <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
         <Text color={colors.primary} bold> Claude-Killer . Ink TUI</Text>
         <Text color={colors.muted}> Model: {config.model}</Text>
-        <Text color={colors.muted}> Type /help for commands . Ctrl+E for Hub . ^v to navigate</Text>
-        <Text color={colors.primary} bold>{"=".repeat(50)}</Text>
+        <Text color={colors.muted}> Type /help for commands . Ctrl+E for Hub . setas p/ navegar</Text>
+        <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
       </Box>
 
       {/* Extension Hub overlay */}
@@ -959,8 +979,12 @@ export function App() {
       )}
 
       {/* System messages */}
+      {/* BUG FIX (audit issue #6): use index + first 10 chars of message as key
+          instead of just the message content. The old key={`sys-${msg}`}
+          collided when the same system message was shown twice (e.g., user
+          ran /reset twice), causing React key warnings and stale re-renders. */}
       {systemMessages.map((msg, i) => (
-        <Box key={`sys-${msg}`} flexDirection="column" marginBottom={1}>
+        <Box key={`sys-${i}-${msg.slice(0, 10)}`} flexDirection="column" marginBottom={1}>
           <Text color={colors.success}>{msg}</Text>
         </Box>
       ))}
@@ -1019,6 +1043,11 @@ export function App() {
               skillsCount={getActiveSkills().length}
               effortLabel={effortLabel}
               tokensPerSecond={tokensPerSecond}
+              // Cumulative session totals — passed separately from lastUsage
+              // so the StatusBar can show both last-turn and session-wide values.
+              sessionPromptTokens={sessionPromptTokens}
+              sessionCompletionTokens={sessionCompletionTokens}
+              sessionCost={sessionCost}
             />
           </Box>
         )}

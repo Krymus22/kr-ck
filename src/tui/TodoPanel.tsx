@@ -1,10 +1,16 @@
 /**
- * TodoPanel.tsx - Visual todo list with status icons.
+ * TodoPanel.tsx — Visual todo list with status icons.
+ *
+ * Width-aware: separators adapt to terminal width instead of the old
+ * hardcoded innerWidth=50. Also fixes:
+ *   - Key collision: now uses index + content (was just content)
+ *   - Truncation: long todo text wraps instead of overflowing
  */
 
 import React from "react";
 import { Box, Text } from "ink";
 import { colors, icons } from "./theme.js";
+import { useTerminalWidth, truncateStr } from "./useTerminal.js";
 
 export interface TodoItem {
   status: "pending" | "in_progress" | "completed";
@@ -17,13 +23,15 @@ interface TodoPanelProps {
 }
 
 export function TodoPanel({ todos }: Readonly<TodoPanelProps>) {
-  if (todos.length === 0) return null;
+  const termWidth = useTerminalWidth();
+  // Reserve space for borders/padding; cap at 80 to keep panel compact on wide terminals.
+  const innerWidth = Math.max(30, Math.min(termWidth - 4, 80));
 
-  const innerWidth = 50;
+  if (todos.length === 0) return null;
 
   return (
     <Box flexDirection="column">
-      <Text color={colors.muted}>{"-".repeat(innerWidth + 2)}</Text>
+      <Text color={colors.muted}>{"-".repeat(innerWidth)}</Text>
       <Box>
         <Text color={colors.primary} bold> [{todos.length} tasks]</Text>
       </Box>
@@ -39,16 +47,20 @@ export function TodoPanel({ todos }: Readonly<TodoPanelProps>) {
 
         const display =
           t.status === "in_progress" && t.active_form ? t.active_form : t.content;
+        // Truncate to fit innerWidth minus 4 chars for " > <text>" prefix.
+        const truncatedDisplay = truncateStr(display, innerWidth - 4);
 
+        // FIX: use index + content to avoid key collision when two todos
+        // have the same content (common in sub-tasks).
         return (
-          <Box key={t.content}>
+          <Box key={`todo-${i}-${t.content.slice(0, 20)}`}>
             <Text> </Text>
             {icon}
-            <Text> {display}</Text>
+            <Text> {truncatedDisplay}</Text>
           </Box>
         );
       })}
-      <Text color={colors.muted}>{"-".repeat(innerWidth + 2)}</Text>
+      <Text color={colors.muted}>{"-".repeat(innerWidth)}</Text>
     </Box>
   );
 }

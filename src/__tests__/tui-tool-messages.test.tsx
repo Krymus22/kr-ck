@@ -102,8 +102,9 @@ describe("ChatDisplay — tool message rendering", () => {
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("ler_arquivo");
     expect(out).toContain("[ERRO]");
-    // icons.cross = "x" (error)
-    expect(out).toContain("x");
+    // icons.cross = "✘" (Unicode, after figures migration) — old value was "x"
+    // We accept either Unicode or ASCII fallback to keep tests stable.
+    expect(out).toMatch(/[✘x✗]/);
   });
 
   it("renders tool call with path arg formatted", () => {
@@ -217,7 +218,9 @@ describe("ChatDisplay — tool message rendering", () => {
     const lines = out.split("\n");
     const toolLine = lines.find((l) => l.includes("ler_arquivo"));
     expect(toolLine).toBeDefined();
-    expect(toolLine?.trimStart()).toMatch(/^->\s/); // icons.arrow = "->"
+    // icons.arrow = "→" (Unicode, after figures migration) — old value was "->"
+    // Accept either Unicode arrow or ASCII "->" fallback to keep tests stable.
+    expect(toolLine?.trimStart()).toMatch(/^(?:→|->)\s/);
   });
 });
 

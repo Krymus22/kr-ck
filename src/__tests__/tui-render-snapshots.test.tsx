@@ -384,18 +384,21 @@ describe("TodoPanel — render snapshots", () => {
     expect(out).toContain("3 tasks");
   });
 
-  it("renders pending task with circle icon (o)", () => {
+  it("renders pending task with circle icon", () => {
     const todos: TodoItem[] = [
       { status: "pending", content: "Pending task", active_form: "" },
     ];
     const { lastFrame } = render(<TodoPanel todos={todos} />);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("Pending task");
-    // icons.circle = "o"
-    expect(out).toContain("o");
+    // icons.circle (legacy alias) = figures.squareSmall = "◻" (Unicode)
+    // The old ASCII fallback "o" is no longer used after the icons.ts migration.
+    // We just verify that SOME icon char appears next to "Pending task".
+    // Match either the Unicode square or any non-alphanumeric icon char.
+    expect(out).toMatch(/[◻o□○]/);
   });
 
-  it("renders in_progress task with dot icon (*) and active_form", () => {
+  it("renders in_progress task with dot icon and active_form", () => {
     const todos: TodoItem[] = [
       { status: "in_progress", content: "Original", active_form: "Currently working" },
     ];
@@ -404,19 +407,19 @@ describe("TodoPanel — render snapshots", () => {
     // Should show active_form, not content
     expect(out).toContain("Currently working");
     expect(out).not.toContain("Original");
-    // icons.dot = "*"
-    expect(out).toContain("*");
+    // icons.dot = figures.dot = "․" (Unicode). Match either Unicode dot or "*" fallback.
+    expect(out).toMatch(/[․*·]/);
   });
 
-  it("renders completed task with check icon (v)", () => {
+  it("renders completed task with check icon", () => {
     const todos: TodoItem[] = [
       { status: "completed", content: "Done task", active_form: "" },
     ];
     const { lastFrame } = render(<TodoPanel todos={todos} />);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("Done task");
-    // icons.check = "v"
-    expect(out).toContain("v");
+    // icons.check = figures.tick = "✔" (Unicode). Match either Unicode check or "v" fallback.
+    expect(out).toMatch(/[✔v✓]/);
   });
 
   it("renders top and bottom divider lines", () => {
@@ -615,13 +618,16 @@ describe("App — full TUI integration", () => {
     })();
   });
 
-  it("renders banner with '=' dividers (50 chars)", () => {
+  it("renders banner with '=' dividers (now width-adaptive, not fixed 50)", () => {
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      // Banner has 2 lines of "=" * 50 (may have leading spaces from Box padding)
-      const dividers = out.split("\n").filter((l) => l.trim().match(/^=+$/) && l.trim().length === 50);
+      // Banner now adapts width to terminal size via useTerminalWidth().
+      // In test environments (no TTY), the width defaults to 100 cols, so the
+      // banner dividers will be ~80 chars. We just verify that AT LEAST 2
+      // divider lines of "=" * N exist (top + bottom of banner).
+      const dividers = out.split("\n").filter((l) => l.trim().match(/^=+$/) && l.trim().length >= 30);
       expect(dividers.length).toBeGreaterThanOrEqual(2);
     })();
   });

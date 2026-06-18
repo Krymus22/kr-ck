@@ -24,6 +24,7 @@
 import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors } from "./theme.js";
+import { useTerminalWidth, calculateCardWidth } from "./useTerminal.js";
 import {
   getAllExtensions,
   getExtensionsByCategory,
@@ -481,6 +482,12 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
   const summary = getHubSummary();
   const activeModeLabel = getActiveModeName();
 
+  // Width-aware card sizing: cards adapt to terminal width instead of the
+  // old hardcoded width={cardWidth}. On a 100-col terminal we get 31-col cards,
+  // on a 60-col terminal we get 18-col cards (still usable).
+  const termWidth = useTerminalWidth();
+  const cardWidth = calculateCardWidth(termWidth, GRID_COLS, 1, 2);
+
   return (
     <Box key={`hub-${renderKey}`} flexDirection="column" borderStyle="double" borderColor={colors.primary} paddingX={1}>
       {/* Header */}
@@ -538,7 +545,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
               if (isModesTab) {
                 const mode = visibleModes[idx];
                 if (!mode) {
-                  return <Box key={`empty-${col}`} width={22} />;
+                  return <Box key={`empty-${col}`} width={cardWidth} />;
                 }
                 const isSelected = idx === cursorIndex;
                 return (
@@ -547,12 +554,13 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
                     mode={mode}
                     selected={isSelected}
                     isActive={mode.name === activeModeName}
+                    cardWidth={cardWidth}
                   />
                 );
               }
               const item = visibleItems[idx];
               if (!item) {
-                return <Box key={`empty-${col}`} width={22} />;
+                return <Box key={`empty-${col}`} width={cardWidth} />;
               }
               const isSelected = idx === cursorIndex;
               return (
@@ -560,6 +568,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
                   key={item.id}
                   item={item}
                   selected={isSelected}
+                  cardWidth={cardWidth}
                 />
               );
             })}
@@ -682,7 +691,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
 
 // --- Mode Card ---------------------------------------------------------------
 
-function ModeCard({ mode, selected, isActive }: Readonly<{ mode: ModeDefinition; selected: boolean; isActive: boolean }>) {
+function ModeCard({ mode, selected, isActive, cardWidth }: Readonly<{ mode: ModeDefinition; selected: boolean; isActive: boolean; cardWidth: number }>) {
   const borderColor = selected ? colors.primary : (isActive ? colors.success : colors.muted);
   const icon = mode.icon ?? "M";
   const kind = mode.builtIn ? "BUILT-IN" : "USER";
@@ -691,7 +700,7 @@ function ModeCard({ mode, selected, isActive }: Readonly<{ mode: ModeDefinition;
 
   return (
     <Box
-      width={22}
+      width={cardWidth}
       flexDirection="column"
       borderStyle={selected || isActive ? "bold" : "round"}
       borderColor={borderColor}
@@ -754,8 +763,8 @@ function ModeDescription({ mode, isActive }: Readonly<{ mode: ModeDefinition; is
 
 // --- Extension Card ---------------------------------------------------------
 
-function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; selected: boolean }>) {
-  if (!item) return <Box width={22} />;
+function ExtensionCard({ item, selected, cardWidth }: Readonly<{ item?: ExtensionEntry; selected: boolean; cardWidth: number }>) {
+  if (!item) return <Box width={cardWidth} />;
   const borderColor = selected ? colors.primary : colors.muted;
   const icon = getCategoryIcon(item.category);
   const triggerLabel = getTriggerLabel(item.triggerMode);
@@ -783,7 +792,7 @@ function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; sel
 
   return (
     <Box
-      width={22}
+      width={cardWidth}
       flexDirection="column"
       borderStyle={selected ? "bold" : "round"}
       borderColor={borderColor}
