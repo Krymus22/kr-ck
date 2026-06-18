@@ -109,19 +109,41 @@ function getSearchPaths(toolName: string): string[] {
 // --- Detection ---------------------------------------------------------------
 
 /**
- * Find a binary by searching PATH (via `which` on Unix, `where` on Windows).
- * Returns the full path or null.
+ * Find a binary by searching PATH.
+ *
+ * On Windows: uses PowerShell (same shell as executar_comando) because
+ * PowerShell inherits the FULL PATH including paths added by user profile,
+ * rokit shims, cargo installer, etc. Using `cmd.exe` (Node's default
+ * for execSync) misses these paths — that's why the IA could find tools
+ * but the detector couldn't.
+ *
+ * On Unix: uses `which` (reliable, inherits shell PATH).
  */
 function findInPath(toolName: string): string | null {
   try {
-    const cmd = process.platform === "win32" ? "where" : "which";
-    const result = execSync(`${cmd} ${toolName}`, {
-      encoding: "utf8",
-      timeout: 3000,
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-    const found = result.trim().split("\n")[0]?.trim();
-    return found || null;
+    if (process.platform === "win32") {
+      // Use PowerShell — same as executar_comando does.
+      // This ensures we get the same PATH the IA sees.
+      const result = execSync(
+        `powershell -NoProfile -Command "(Get-Command ${toolName} -ErrorAction SilentlyContinue).Source"`,
+        {
+          encoding: "utf8",
+          timeout: 5000,
+          stdio: ["pipe", "pipe", "ignore"],
+          shell: "powershell.exe",
+        }
+      );
+      const found = result.trim();
+      return found || null;
+    } else {
+      const result = execSync(`which ${toolName}`, {
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      const found = result.trim().split("\n")[0]?.trim();
+      return found || null;
+    }
   } catch {
     return null;
   }
@@ -145,6 +167,7 @@ function isExecutable(filePath: string): boolean {
 /**
  * Run `<binary> --version` and return the version string.
  * Returns null if the binary doesn't respond or fails.
+ * Uses PowerShell on Windows for consistent PATH resolution.
  */
 function getVersion(binaryPath: string): string | null {
   try {
@@ -152,6 +175,7 @@ function getVersion(binaryPath: string): string | null {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["pipe", "pipe", "ignore"],
+      shell: process.platform === "win32" ? "powershell.exe" : undefined,
     });
     // Extract version number from output (e.g., "rojo 7.6.1" → "7.6.1")
     const match = result.match(/(\d+\.\d+\.\d+)/);
