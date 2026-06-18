@@ -24,7 +24,12 @@ interface StatusBarProps {
 }
 
 function formatTok(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+  if (n >= 1000) {
+    const k = n / 1000;
+    // Show "1k" instead of "1.0k" for round numbers; "1.5k" for fractions.
+    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  return `${n}`;
 }
 
 export function StatusBar({
@@ -43,8 +48,12 @@ export function StatusBar({
   tokensPerSecond,
 }: Readonly<StatusBarProps>) {
   const pct = contextWindow > 0 ? totalTokens / contextWindow : 0;
-  const fillCount = Math.round(pct * 15);
-  const emptyCount = 15 - fillCount;
+  // Clamp fillCount to [0, 15] so emptyCount never goes negative.
+  // Without this, when totalTokens > contextWindow (e.g., user has more
+  // tokens than the context window), emptyCount becomes negative and
+  // "-".repeat(-8) throws RangeError, breaking the entire StatusBar.
+  const fillCount = Math.max(0, Math.min(15, Math.round(pct * 15)));
+  const emptyCount = Math.max(0, 15 - fillCount);
 
   let barColor: string = colors.success;
   if (pct >= compactThreshold) barColor = colors.error;
