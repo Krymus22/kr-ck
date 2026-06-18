@@ -103,7 +103,7 @@ describe("luauValidator", () => {
       );
       expect(result.ok).toBe(true);
       expect(result.rulesSkipped.length).toBeGreaterThan(0);
-      expect(result.rulesSkipped[0]).toContain("not installed");
+      expect(result.rulesSkipped[0]).toContain("não instalado");
     });
   });
 
