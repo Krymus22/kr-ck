@@ -1398,12 +1398,10 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   // call a tool or explain why it can't. Bounded to MAX_FALSE_PROMISE_RETRIES
   // per turn to prevent infinite loops.
   //
-  // We count "tools called this turn" via turnStopHits and turnTouchedFiles:
-  //   - turnStopHits is incremented above (we just hit a stop)
-  //   - turnTouchedFiles contains files edited via aplicar_diff/editar_arquivo
-  // If turnStopHits === 1 (first stop this turn) AND no files were touched,
-  // the agent emitted a stop without doing anything — that's the suspicious case.
-  if (turnStopHits === 1 && turnTouchedFiles.size === 0) {
+  // We check this whenever the agent stopped WITHOUT touching any files in
+  // this turn — that's the suspicious case. We don't restrict to turnStopHits===1
+  // because the agent might promise-and-stop multiple times in a row.
+  if (turnTouchedFiles.size === 0) {
     const fpResult = shouldBlockForFalsePromise(message.content ?? "", 0, 0);
     if (fpResult.block && fpResult.rejectionMessage) {
       log.warn(`[FALSE_PROMISE] ${fpResult.reason}`);
