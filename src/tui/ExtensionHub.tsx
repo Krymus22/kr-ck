@@ -38,6 +38,7 @@ import {
 import {
   getAllModes,
   getActiveModeName,
+  getActiveMode,
   applyMode,
   deactivateMode,
   type ModeDefinition,
@@ -81,19 +82,33 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   const [cursorIndex, setCursorIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [renderKey, setRenderKey] = useState(0);
+  const [modeFilter, setModeFilter] = useState(false);
 
   const currentTab = CATEGORIES[tabIndex] ?? CATEGORIES[0];
   const isModesTab = currentTab.key === "modes";
 
   // For modes tab, use modes list; otherwise extensions
   const allModes = isModesTab ? getAllModes() : [];
-  const activeModeName = isModesTab ? getActiveModeName() : null;
+  const activeModeName = getActiveModeName();
+  const activeMode = getActiveMode();
 
-  const allItems: readonly ExtensionEntry[] = isModesTab
+  // Get raw items based on current tab
+  const rawItems: readonly ExtensionEntry[] = isModesTab
     ? []
     : currentTab.key === "all"
     ? getAllExtensions()
     : getExtensionsByCategory(currentTab.key as ExtensionCategory);
+
+  // Apply mode filter: when active, only show items that belong to the active mode
+  const allItems: readonly ExtensionEntry[] = (() => {
+    if (!modeFilter || !activeMode || isModesTab) return rawItems;
+    const modeItemIds = new Set([
+      ...activeMode.enableTools,
+      ...activeMode.enableSkills,
+      ...activeMode.enableFeatures,
+    ]);
+    return rawItems.filter((item) => modeItemIds.has(item.id));
+  })();
 
   // Total items in current tab (extensions or modes)
   const totalItems = isModesTab ? allModes.length : allItems.length;
@@ -116,6 +131,16 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       setTabIndex((prev) => (prev + 1) % CATEGORIES.length);
       setCursorIndex(0);
       setScrollTop(0);
+      return;
+    }
+    // 'M' toggles mode filter (only show items from active mode)
+    if (inputChar === "m" || inputChar === "M") {
+      if (!isModesTab && getActiveModeName()) {
+        setModeFilter((prev) => !prev);
+        setCursorIndex(0);
+        setScrollTop(0);
+        setRenderKey((n) => n + 1);
+      }
       return;
     }
     handleNavigation(key, inputChar);
@@ -222,7 +247,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
 
   // -- Render ----------------------------------------------------------
   const summary = getHubSummary();
-  const activeMode = getActiveModeName();
+  const activeModeLabel = getActiveModeName();
 
   return (
     <Box key={`hub-${renderKey}`} flexDirection="column" borderStyle="double" borderColor={colors.primary} paddingX={1}>
@@ -233,12 +258,15 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         </Text>
       </Box>
 
-      {/* Active mode indicator (if any) */}
-      {activeMode && (
+      {/* Active mode indicator + filter status (if any) */}
+      {activeModeLabel && (
         <Box justifyContent="center">
           <Text color={colors.success} bold>
-            Active mode: {activeMode}
+            Active mode: {activeModeLabel}
           </Text>
+          {modeFilter && (
+            <Text color={colors.warning} bold> | FILTRO: só do modo ativo</Text>
+          )}
         </Box>
       )}
 
@@ -336,11 +364,13 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         <Text color={colors.muted} dimColor>
           {isModesTab
             ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
-            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  Tab switch  Esc close"}
+            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  M filter  Tab switch  Esc close"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab
             ? `${allModes.length} modes${activeModeName ? ` | active: ${activeModeName}` : ""}`
+            : modeFilter
+            ? `${allItems.filter(i => i.enabled).length}/${allItems.length} active (filtered)`
             : `${summary.enabled}/${summary.total} active`}
         </Text>
       </Box>
