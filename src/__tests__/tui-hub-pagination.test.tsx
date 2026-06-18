@@ -239,11 +239,11 @@ describe("ExtensionHub — pagination with 30 extensions", () => {
     expect(out).toContain("[EVERY]");
   });
 
-  it("renders warning (!) for not-installed extensions", () => {
+  it("renders [FALTA] for not-installed tools", () => {
     const { lastFrame } = render(<ExtensionHub onClose={() => {}} />);
     const out = stripAnsi(lastFrame() ?? "");
     // 10 of 30 are not installed (i % 3 === 0)
-    expect(out).toContain("!");
+    expect(out).toContain("[FALTA]");
   });
 });
 

@@ -179,6 +179,28 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
 
     if (isModesTab) return; // other shortcuts don't apply to modes
 
+    // 'I' installs the selected tool if it's missing
+    if (inputChar === "i" || inputChar === "I") {
+      const item = visibleItems[cursorIndex];
+      if (item && item.category === "tool" && !item.installed) {
+        // Extract tool name from the extension id (e.g., "tool:rojo_build" → "rojo")
+        const toolName = item.id.replace("tool:", "").replace(/_\w+$/, "");
+        import("../toolInstaller.js").then(({ installTool }) => {
+          installTool(toolName).then((result) => {
+            if (result.success) {
+              setRenderKey((n) => n + 1);
+            }
+          }).catch(() => {
+            // ignore — logged by installer
+          });
+        }).catch(() => {
+          // toolInstaller not available
+        });
+        setRenderKey((n) => n + 1);
+      }
+      return;
+    }
+
     if (inputChar === "t" || inputChar === "T") {
       const item = visibleItems[cursorIndex];
       if (item) {
@@ -314,7 +336,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         <Text color={colors.muted} dimColor>
           {isModesTab
             ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
-            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  Tab switch  Esc close"}
+            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  Tab switch  Esc close"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab
@@ -406,8 +428,26 @@ function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; sel
   const icon = getCategoryIcon(item.category);
   const triggerLabel = getTriggerLabel(item.triggerMode);
   const triggerColor = TRIGGER_COLORS[item.triggerMode] ?? colors.muted;
-  // Show ON/OFF based on enabled + triggerMode
   const isOn = item.enabled && item.triggerMode !== "disabled";
+
+  // Tool status: missing (red), found (yellow), working (green)
+  // For non-tool categories (skills, features, modes), always show as "ok"
+  const isToolCategory = item.category === "tool";
+  const toolStatus: "missing" | "found" | "ok" = !isToolCategory
+    ? "ok"
+    : !item.installed
+    ? "missing"
+    : "found";
+
+  const statusLabel = isToolCategory
+    ? toolStatus === "missing"
+      ? "[FALTA]"
+      : toolStatus === "found"
+      ? "[OK]"
+      : "[OK]"
+    : "";
+
+  const statusColor = toolStatus === "missing" ? colors.error : toolStatus === "found" ? colors.success : colors.muted;
 
   return (
     <Box
@@ -434,10 +474,17 @@ function ExtensionCard({ item, selected }: Readonly<{ item?: ExtensionEntry; sel
         <Text color={triggerColor} bold={item.triggerMode !== "disabled"}>
           [{triggerLabel}]
         </Text>
-        {!item.installed && (
-          <Text color={colors.error}> !</Text>
+        {isToolCategory && (
+          <Text color={statusColor}> {statusLabel}</Text>
         )}
       </Box>
+
+      {/* Install hint for missing tools */}
+      {isToolCategory && toolStatus === "missing" && selected && (
+        <Box>
+          <Text color={colors.warning}> Pressione I para instalar</Text>
+        </Box>
+      )}
     </Box>
   );
 }

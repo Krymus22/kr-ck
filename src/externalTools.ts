@@ -47,6 +47,8 @@ export interface ToolDetection {
   check: string;                    // Command or file to check
   installed?: boolean;              // Cache status
   lastChecked?: number;             // Timestamp of last check
+  binaryPath?: string | null;       // Path where binary was found (from toolDetector)
+  version?: string | null;          // Version string (from toolDetector)
 }
 
 export interface ToolContext {
@@ -161,25 +163,48 @@ export class ToolRegistry {
   }
   
   /**
-   * Check if tool is installed
+   * Check if tool is installed — uses deep detector when available.
    */
   isInstalled(toolName: string): boolean {
     const tool = this.tools.get(toolName);
     if (!tool) return false;
-    
+
     if (tool.detection.installed !== undefined) {
-      // Cache for 5 minutes
-      if (tool.detection.lastChecked && 
+      if (tool.detection.lastChecked &&
           Date.now() - tool.detection.lastChecked < 5 * 60 * 1000) {
         return tool.detection.installed;
       }
     }
-    
-    // Check now
+
+    // Try deep detection first (searches multiple paths when AUTO_DETECT_TOOLS=1)
+    try {
+      const { detectTool } = require("./toolDetector.js");
+      const result = detectTool(tool.command);
+      const installed = result.status !== "missing";
+      tool.detection.installed = installed;
+      tool.detection.lastChecked = Date.now();
+      tool.detection.binaryPath = result.binaryPath;
+      tool.detection.version = result.version;
+      return installed;
+    } catch {
+      // Fall back to simple check
+    }
+
     const installed = this.checkInstallation(tool);
     tool.detection.installed = installed;
     tool.detection.lastChecked = Date.now();
     return installed;
+  }
+
+  /**
+   * Get detailed status of a tool (missing/found/working).
+   */
+  getToolStatus(toolName: string): "missing" | "found" | "working" {
+    const tool = this.tools.get(toolName);
+    if (!tool) return "missing";
+    if (!this.isInstalled(toolName)) return "missing";
+    // If we have binaryPath from detector, it's at least "found"
+    return tool.detection.binaryPath ? "found" : "found";
   }
   
   /**
