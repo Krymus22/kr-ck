@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "node --no-warnings=DEP0040 --loader ts-node/esm src/index.ts",
-    "start": "node --no-warnings=DEP0040 dist/index.js",
+    "start": "npm run build && node --no-warnings=DEP0040 dist/index.js",
     "clean": "rimraf dist",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
