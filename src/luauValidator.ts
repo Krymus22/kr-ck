@@ -176,14 +176,26 @@ export async function validateLuauBeforeWrite(
     fs.writeFileSync(tmpFile, newContent, "utf8");
 
     for (const rule of applicableRules) {
-      // Check if tool is installed
-      const installed = await isToolInstalled(rule.tool);
+      // Check if tool is installed using deep detector if available,
+      // fall back to simple check
+      let installed = false;
+      try {
+        const { detectTool } = await import("./toolDetector.js");
+        const detection = detectTool(rule.tool.replace("_lint", "").replace("_format", "").replace("_run", ""));
+        installed = detection.status !== "missing";
+      } catch {
+        // Fall back to simple check
+        installed = await isToolInstalled(rule.tool);
+      }
       if (!installed) {
-        result.rulesSkipped.push(`${rule.tool} (not installed)`);
+        result.rulesSkipped.push(`${rule.tool} (não instalado)`);
+        // Log visibly so user knows validation was skipped
+        log.warn(`[LUAU_VALIDATOR] ${rule.tool} PULADO (não instalado) — código .luau NÃO foi validado`);
         continue;
       }
 
       result.rulesApplied.push(rule.tool);
+      log.debug(`[LUAU_VALIDATOR] ${rule.tool} executando em ${path.basename(filePath)}`);
 
       let cmdResult: { ok: boolean; stdout: string; stderr: string; timedOut: boolean };
 

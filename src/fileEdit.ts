@@ -193,6 +193,22 @@ export async function editFile(
         for (const w of validation.warnings) {
           log.warn(`[luauValidator] ${w}`);
         }
+
+        // Append validation summary to the result so the AI (and user) can see
+        // what was validated and what was skipped. This makes the validation
+        // process VISIBLE instead of silent.
+        if (validation.rulesApplied.length > 0 || validation.rulesSkipped.length > 0) {
+          const applied = validation.rulesApplied.length > 0
+            ? `validado por: ${validation.rulesApplied.join(", ")}`
+            : "";
+          const skipped = validation.rulesSkipped.length > 0
+            ? `pulado: ${validation.rulesSkipped.join(", ")}`
+            : "";
+          const summary = [applied, skipped].filter(Boolean).join(" | ");
+          if (summary) {
+            result.content += `\n\n[VALIDAÇÃO LUAU] ${summary}`;
+          }
+        }
       }
     } catch (err) {
       // Don't block writes if validator crashes - just log
