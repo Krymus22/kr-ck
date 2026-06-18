@@ -405,8 +405,8 @@ function handleModeCommand(arg: string | null): CommandResult {
       message:
         `Ativando modo "${modeName}" (${mode.label})...\n\n` +
         `Escolha uma opção:\n` +
-        `  /mode ${modeName} new   → Ativa modo + inicia chat novo (contexto limpo)\n` +
-        `  /mode ${modeName} keep  → Ativa modo + mantém chat atual (mesmo contexto)\n\n` +
+        `  /mode ${modeName} new   -> Ativa modo + inicia chat novo (contexto limpo)\n` +
+        `  /mode ${modeName} keep  -> Ativa modo + mantém chat atual (mesmo contexto)\n\n` +
         `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
         `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false} | ` +
         `Validation: ${(mode.luauValidation?.length ?? 0) + (mode.validation?.length ?? 0)} regra(s)`,
@@ -432,8 +432,8 @@ function handleModeCommand(arg: string | null): CommandResult {
       handled: true,
       resetChat: true,
       message:
-        `✅ Modo "${modeName}" (${mode.label}) ativado!\n` +
-        `🧹 Chat reiniciado - contexto limpo.\n\n` +
+        `[OK] Modo "${modeName}" (${mode.label}) ativado!\n` +
+        `[*] Chat reiniciado - contexto limpo.\n\n` +
         `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
         `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false}\n\n` +
         `Pronto para começar. O que você quer fazer?`,
@@ -444,8 +444,8 @@ function handleModeCommand(arg: string | null): CommandResult {
   return {
     handled: true,
     message:
-      `✅ Modo "${modeName}" (${mode.label}) ativado!\n` +
-      `💬 Chat mantido - contexto atual preservado.\n\n` +
+      `[OK] Modo "${modeName}" (${mode.label}) ativado!\n` +
+      `[*] Chat mantido - contexto atual preservado.\n\n` +
       `Tools: ${mode.enableTools.length} | Skills: ${mode.enableSkills.length} | Features: ${mode.enableFeatures.length}\n` +
       `Effort: ${mode.effortLevel ?? "default"} | Strict: ${mode.strictMode ?? false}\n\n` +
       `As ferramentas do modo foram adicionadas. Continue conversando.`,
