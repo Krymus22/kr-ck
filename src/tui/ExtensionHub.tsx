@@ -84,6 +84,15 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   const [renderKey, setRenderKey] = useState(0);
   const [modeFilter, setModeFilter] = useState(false);
 
+  // Search state
+  const [searching, setSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState<{
+    currentTool: string;
+    toolsDone: number;
+    toolsTotal: number;
+    results: Array<{ toolName: string; status: string; binaryPath: string | null; version: string | null }>;
+  } | null>(null);
+
   const currentTab = CATEGORIES[tabIndex] ?? CATEGORIES[0];
   const isModesTab = currentTab.key === "modes";
 
@@ -143,9 +152,63 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       }
       return;
     }
+
+    // 'S' triggers manual tool search (deep scan of filesystem)
+    if (inputChar === "s" || inputChar === "S") {
+      if (!isModesTab && !searching) {
+        triggerToolSearch();
+      }
+      return;
+    }
     handleNavigation(key, inputChar);
     handleActions(key, inputChar);
   });
+
+  // -- Manual tool search (triggered by 'S' key) --------------------------
+  function triggerToolSearch() {
+    setSearching(true);
+    setSearchProgress({ currentTool: "(iniciando)", toolsDone: 0, toolsTotal: 0, results: [] });
+    setRenderKey((n) => n + 1);
+
+    // Determine which tools to search for:
+    // - If mode is active: search only tools from that mode
+    // - If no mode: search all tools in the registry
+    const mode = getActiveMode();
+    let toolIds: string[];
+    if (mode && mode.enableTools.length > 0) {
+      toolIds = mode.enableTools;
+    } else {
+      toolIds = getAllExtensions().filter((e) => e.category === "tool").map((e) => e.id);
+    }
+
+    import("../toolDetector.js").then(({ searchAllTools, getModeToolNames }) => {
+      const toolNames = getModeToolNames(toolIds);
+
+      searchAllTools(toolNames, (progress) => {
+        setSearchProgress({
+          currentTool: progress.currentTool,
+          toolsDone: progress.toolsDone,
+          toolsTotal: progress.toolsTotal,
+          results: progress.results.map((r) => ({
+            toolName: r.toolName,
+            status: r.status,
+            binaryPath: r.binaryPath,
+            version: r.version,
+          })),
+        });
+        setRenderKey((n) => n + 1);
+      }).then(() => {
+        setSearching(false);
+        setRenderKey((n) => n + 1);
+      }).catch(() => {
+        setSearching(false);
+        setRenderKey((n) => n + 1);
+      });
+    }).catch(() => {
+      setSearching(false);
+      setRenderKey((n) => n + 1);
+    });
+  }
 
   function handleNavigation(key: { leftArrow?: boolean; rightArrow?: boolean; upArrow?: boolean; downArrow?: boolean; ctrl?: boolean }, inputChar: string) {
     const maxItems = isModesTab ? visibleModes.length : visibleItems.length;
@@ -347,6 +410,25 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         </Box>
       )}
 
+      {/* Tool search panel (shown when searching or when search has results) */}
+      {(searching || (searchProgress && searchProgress.results.length > 0)) && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={searching ? colors.warning : colors.muted} paddingLeft={1} paddingRight={1}>
+          <Text color={searching ? colors.warning : colors.primary} bold>
+            {searching ? `Buscando tools... (${searchProgress?.toolsDone ?? 0}/${searchProgress?.toolsTotal ?? 0})` : `Busca completa (${searchProgress?.results.length ?? 0} tools)`}
+          </Text>
+          {searching && searchProgress && (
+            <Text color={colors.muted}> Procurando: {searchProgress.currentTool}...</Text>
+          )}
+          {searchProgress?.results.map((r, i) => (
+            <Text key={`search-${i}`} color={r.status === "missing" ? colors.error : colors.success}>
+              {" "}{r.status === "missing" ? "X" : "v"} {r.toolName}
+              {r.version ? ` v${r.version}` : ""}
+              {r.binaryPath ? ` @ ${r.binaryPath.length > 50 ? "..." + r.binaryPath.slice(-47) : r.binaryPath}` : " (nao encontrado)"}
+            </Text>
+          ))}
+        </Box>
+      )}
+
       {/* Description of selected item (terminal equivalent of hover tooltip) */}
       {isModesTab && visibleModes[cursorIndex] && (
         <ModeDescription mode={visibleModes[cursorIndex]} isActive={visibleModes[cursorIndex].name === activeModeName} />
@@ -364,7 +446,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         <Text color={colors.muted} dimColor>
           {isModesTab
             ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
-            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  M filter  Tab switch  Esc close"}
+            : "  <-> select  ^v scroll  <- toggle  T mode  1-4 quick  I install  M filter  S search  Tab switch  Esc close"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab

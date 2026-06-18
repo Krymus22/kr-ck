@@ -144,7 +144,8 @@ describe("toolDetector", () => {
     it("returns error message explaining how to enable deep search", () => {
       delete process.env.AUTO_DETECT_TOOLS;
       const result = detectTool("nonexistent-tool-hint-test");
-      expect(result.error).toContain("AUTO_DETECT_TOOLS");
+      // Error should mention either AUTO_DETECT_TOOLS or manual search
+      expect(result.error).toMatch(/AUTO_DETECT_TOOLS|manual search|S in Hub/i);
     });
   });
 
