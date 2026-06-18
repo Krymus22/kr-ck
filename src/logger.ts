@@ -2,6 +2,13 @@
  * logger.ts - Minimal, styled terminal output using chalk.
  * All user-visible output goes through here so we can easily control
  * verbosity, colour, and format from a single location.
+ *
+ * TUI MODE: when setTuiMode(true) is called, console.log output is
+ * suppressed because the Ink TUI renderer controls the entire screen.
+ * Any console.log would appear ABOVE the TUI layout, breaking it.
+ * Tool call/result notifications are routed through the onToolCall/
+ * onToolResult callbacks in agent.ts instead, which add proper "tool"
+ * messages to the chat in chronological order.
  */
 
 import chalk from "chalk";
@@ -18,6 +25,31 @@ const c = {
   muted:     chalk.hex("#6B7280"),   // grey     - internal logs
   bold:      chalk.bold,
 };
+
+// --- TUI mode flag ----------------------------------------------------------
+
+/**
+ * When true, console.log output is suppressed (TUI mode is active).
+ * Set by src/index.ts when the Ink app starts.
+ *
+ * In TUI mode, tool call/result notifications go through the agent's
+ * onToolCall/onToolResult callbacks instead of console.log.
+ */
+let tuiMode = false;
+
+/**
+ * Enable or disable TUI mode.
+ * When enabled, toolCall() and toolResult() become no-ops (the TUI
+ * renders tool messages via the agent callbacks instead).
+ */
+export function setTuiMode(enabled: boolean): void {
+  tuiMode = enabled;
+}
+
+/** Returns true if TUI mode is active (console.log output suppressed). */
+export function isTuiMode(): boolean {
+  return tuiMode;
+}
 
 // --- Public API -------------------------------------------------------------
 
@@ -282,6 +314,10 @@ export function formatMarkdown(text: string): string {
 
 /** Print the model's final reply in a distinct style. */
 export function reply(text: string): void {
+  // In TUI mode, the reply is rendered by the ChatDisplay component via
+  // the onToken/onStreamStart callbacks. console.log would appear ABOVE
+  // the Ink layout and break the TUI.
+  if (tuiMode) return;
   console.log("\n" + c.secondary.bold("Claude-Killer:") + "\n");
   console.log(formatMarkdown(text));
   console.log();
@@ -289,12 +325,18 @@ export function reply(text: string): void {
 
 /** Print a tool-call notification. */
 export function toolCall(toolName: string, args: Record<string, unknown>): void {
+  // In TUI mode, tool calls are rendered as "tool" messages in the chat
+  // via the agent's onToolCall callback. console.log would break the TUI.
+  if (tuiMode) return;
   const preview = JSON.stringify(args).slice(0, 120);
   console.log(c.muted(`  [TOOL CALL] ${toolName}(${preview}${preview.length >= 120 ? "..." : ""})`));
 }
 
 /** Print a tool-call result summary. */
 export function toolResult(toolName: string, ok: boolean, detail?: string): void {
+  // In TUI mode, tool results are rendered as "tool" messages in the chat
+  // via the agent's onToolResult callback. console.log would break the TUI.
+  if (tuiMode) return;
   const icon = ok ? c.success("  [OK]") : c.error("  [FAIL]");
   const suffix = detail ? c.muted(` - ${detail}`) : "";
   console.log(`${icon}  ${toolName}${suffix}`);

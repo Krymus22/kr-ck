@@ -16,6 +16,7 @@
 // children to UTF-8. Any console.log before this runs may misrender on
 // Windows terminals with legacy code pages.
 import { forceUtf8Environment } from "./utf8Safety.js";
+import { setTuiMode } from "./logger.js";
 
 import React from "react";
 import { render } from "ink";
@@ -75,11 +76,21 @@ async function main(): Promise<void> {
   // Load skills and start MCP servers before rendering
   await loadAllExtensions();
 
+  // Enable TUI mode: suppresses console.log output from logger.toolCall,
+  // logger.toolResult, logger.reply (which would break the Ink layout by
+  // appearing ABOVE the TUI). Tool notifications are instead routed through
+  // the agent's onToolCall/onToolResult callbacks → ChatDisplay "tool" messages.
+  setTuiMode(true);
+  // Also set env var so non-logger code (like App.tsx handleDreamCommand)
+  // can check if TUI mode is active and suppress console.log.
+  process.env.CLAUDE_KILLER_TUI_MODE = "1";
+
   // Render the Ink app
   const { unmount, waitUntilExit } = render(React.createElement(App));
 
   // Handle graceful shutdown
   const cleanup = () => {
+    setTuiMode(false);
     shutdownMCPServers();
     unmount();
     process.exit(0);
@@ -89,6 +100,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", cleanup);
 
   await waitUntilExit();
+  setTuiMode(false);
   shutdownMCPServers();
 }
 
