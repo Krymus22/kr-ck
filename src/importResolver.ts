@@ -167,7 +167,7 @@ export function checkImports(filePath: string, content: string): ImportCheckResu
           });
         }
       }
-      // Skip external modules (node_modules, etc)
+      // Skip external modules
       continue;
     }
 

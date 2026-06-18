@@ -226,11 +226,9 @@ export async function runSubAgent(args: SubAgentArgs): Promise<string | null> {
       log.debug(`[SUB_AGENT] Skipped - powerful mode requires /effort max`);
       return null;
     }
-  } else {
-    if (!shouldUseSubAgents()) {
-      log.debug(`[SUB_AGENT] Skipped - effort level too low`);
-      return null;
-    }
+  } else if (!shouldUseSubAgents()) {
+    log.debug(`[SUB_AGENT] Skipped - effort level too low`);
+    return null;
   }
 
   const cwd = args.cwd ?? process.cwd();

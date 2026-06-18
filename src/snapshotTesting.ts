@@ -16,9 +16,7 @@
  *   - Falls back to "no snapshot" if function can't be run
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import { spawn } from "node:child_process";
 import * as log from "./logger.js";
 

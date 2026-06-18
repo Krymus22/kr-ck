@@ -709,7 +709,7 @@ const toolHandlers: Record<string, ToolHandler> = {
         forceRefresh: forcarRefresh,
       });
       const formatted = formatResearchResult(result);
-      const isError = "error" in result;
+      // "error" in result check
       return {
         resultStr: formatted,
         usedHeal: false,
@@ -1296,9 +1296,9 @@ async function checkHonestyReview(message: { content?: string | null }): Promise
     const results = await Promise.all(promises);
 
     if (devilsOn) {
-      const daResult = results[0] as any;
+      const daResult = results[0];
       if (daResult?.severity === "high" && daResult.issues.length > 0) {
-        const msg = `[DEVIL'S ADVOCATE] Problemas críticos encontrados:\n${daResult.issues.map((i: string) => `  - ${i}`).join("\n")}\n\nCorrija antes de finalizar.`;
+        const msg = `[DEVIL'S ADVOCATE] Problemas críticos encontrados:\n${daResult.issues.map((i: string) => "  - " + i).join("\n")}\n\nCorrija antes de finalizar.`;
         history.addSystemMessage(msg);
         return true;
       }

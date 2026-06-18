@@ -54,16 +54,10 @@ if (process.platform === "win32") {
 // Layer 3: Set LANG/LC_ALL on ALL platforms for child processes.
 // On Linux/macOS this is the standard way to set locale.
 // On Windows it's used by ports of Unix tools (git, curl, etc.)
-if (!process.env.LANG) {
-  process.env.LANG = process.platform === "win32" ? "en_US.UTF-8" : "pt_BR.UTF-8";
-}
-if (!process.env.LC_ALL) {
-  process.env.LC_ALL = process.env.LANG;
-}
+process.env.LANG ??= process.platform === "win32" ? "en_US.UTF-8" : "pt_BR.UTF-8";
+process.env.LC_ALL ??= process.env.LANG;
 // Also force Python (if invoked as child) to use UTF-8
-if (!process.env.PYTHONIOENCODING) {
-  process.env.PYTHONIOENCODING = "utf-8";
-}
+process.env.PYTHONIOENCODING ??= "utf-8";
 
 // Layer 4: Force Node stdio to UTF-8.
 // On Node 18+ this also affects how strings are encoded when written to stdout.

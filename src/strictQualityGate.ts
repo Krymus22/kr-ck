@@ -25,6 +25,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
+import { parseErrors, formatStructuredErrors } from "./selfHealing.js";
 
 // --- Config ------------------------------------------------------------------
 
@@ -258,7 +259,7 @@ function blockGate(cfg: QualityGateConfig, errors: string[]): GateResult {
   // model to act on than raw text walls.
   let structuredErrors = "";
   try {
-    const { parseErrors, formatStructuredErrors } = require("./selfHealing.js");
+    // parseErrors and formatStructuredErrors imported at top of file
     const allParsed: any[] = [];
     for (const rawError of errors) {
       const parsed = parseErrors(rawError);

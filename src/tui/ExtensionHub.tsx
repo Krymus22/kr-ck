@@ -38,7 +38,6 @@ import {
 import {
   getAllModes,
   getActiveModeName,
-  getMode,
   applyMode,
   deactivateMode,
   type ModeDefinition,
@@ -340,7 +339,7 @@ function ModeCard({ mode, selected, isActive }: Readonly<{ mode: ModeDefinition;
     <Box
       width={22}
       flexDirection="column"
-      borderStyle={selected ? "bold" : (isActive ? "bold" : "round")}
+      borderStyle={selected || isActive ? "bold" : "round"}
       borderColor={borderColor}
       paddingLeft={1}
       paddingRight={1}
@@ -391,7 +390,7 @@ function ModeDescription({ mode, isActive }: Readonly<{ mode: ModeDefinition; is
   return (
     <Box marginTop={1} paddingLeft={1} paddingRight={1} borderStyle="round" borderColor={colors.muted} flexDirection="column">
       {lines.map((line, i) => (
-        <Text key={i} color={i === 0 ? colors.primary : colors.white} bold={i === 0} wrap="truncate">
+        <Text key={`card-${i}`} color={i === 0 ? colors.primary : colors.white} bold={i === 0} wrap="truncate">
           {line}
         </Text>
       ))}

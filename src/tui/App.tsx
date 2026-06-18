@@ -34,7 +34,6 @@ import {
 } from "../modes.js";
 import { getLocalizedSlashCommands, getCommandI18n } from "../i18n.js";
 import { colors } from "./theme.js";
-import { icons } from "./icons.js";
 import { ChatDisplay, ChatMessage } from "./ChatDisplay.js";
 import { StatusBar } from "./StatusBar.js";
 import { TodoPanel, TodoItem } from "./TodoPanel.js";
@@ -415,7 +414,7 @@ function handleModeCommand(arg: string | null): CommandResult {
   }
 
   // Activate the mode
-  const activatePromise = applyMode(modeName).then((result) => {
+  applyMode(modeName).then((result) => {
     if (result.success) {
       console.log(`[modes] Modo "${modeName}" ativado: ${result.toolsEnabled.length} tools, ${result.featuresEnabled.length} features`);
     } else {
@@ -788,7 +787,7 @@ export function App() {
       // - For subcommands (low/medium/high/max): complete the full input and submit
       if (showAutocomplete && acMatches.length > 0) {
         const selected = acMatches[acIndex];
-        if (selected) {
+    if (selected?.label) {
           if (hasSpace) {
             // Subcommand selected - build the full command + subcommand and continue to execute
             const spaceIdx = trimmedValue.indexOf(" ");

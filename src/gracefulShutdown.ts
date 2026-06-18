@@ -43,7 +43,8 @@ export async function shutdown(signal: string = "SIGINT"): Promise<void> {
   log.info(`[SHUTDOWN] Received ${signal}. Saving state...`);
 
   // Run registered handlers in reverse order
-  for (const handler of shutdownHandlers.reverse()) {
+  const reversedHandlers = [...shutdownHandlers].reverse();
+  for (const handler of reversedHandlers) {
     try {
       handler();
     } catch (err) {
@@ -55,7 +56,7 @@ export async function shutdown(signal: string = "SIGINT"): Promise<void> {
   try {
     const { getPlan, formatPlan } = await import("./planExecutor.js");
     const plan = getPlan();
-    if (plan && plan.steps.some((s) => !s.done)) {
+    if (plan?.steps.some((s: { done: boolean }) => !s.done)) {
       const planPath = path.join(
         process.env.HOME ?? process.env.USERPROFILE ?? os.homedir(),
         ".claude-killer",
@@ -68,7 +69,7 @@ export async function shutdown(signal: string = "SIGINT"): Promise<void> {
         savedAt: new Date().toISOString(),
         signal,
       }, null, 2), "utf8");
-      log.info(`[SHUTDOWN] Plan saved to ${planPath} (${plan.steps.filter((s) => !s.done).length} incomplete steps)`);
+      log.info(`[SHUTDOWN] Plan saved to ${planPath} (${plan.steps.filter((s: { done: boolean }) => !s.done).length} incomplete steps)`);
     }
   } catch {
     // planExecutor not available
