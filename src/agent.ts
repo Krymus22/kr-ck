@@ -102,6 +102,16 @@ let turnStopHits = 0;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
+/**
+ * Tool call/result callbacks set by runAgentLoop at the start of each turn.
+ * Stored at module level (instead of being passed through sendAndProcess →
+ * handleChatResponse → processToolCalls → dispatchToolCall) to avoid
+ * threading them through every recursive call. They're reset to undefined
+ * at the end of runAgentLoop so they don't leak across turns.
+ */
+let currentOnToolCall: ((toolName: string, args: Record<string, unknown>) => void) | undefined;
+let currentOnToolResult: ((toolName: string, ok: boolean, resultStr: string) => void) | undefined;
+
 // --- Helpers ------------------------------------------------------------------
 
 function parseArgs(raw: string): Record<string, unknown> {
@@ -891,7 +901,22 @@ async function dispatchToolCall(
 
   // -- Run gate chain: schema -> poka-yoke -> read-before-write ------------
   const gateBlock = runDispatchGates(name, finalArgs);
-  if (gateBlock) return { resultStr: gateBlock, usedHeal: false };
+  if (gateBlock) {
+    // Notify TUI of the tool call (even if blocked) and the block result
+    if (currentOnToolCall) {
+      try { currentOnToolCall(name, finalArgs); } catch { /* TUI errors must not break the agent */ }
+    }
+    if (currentOnToolResult) {
+      try { currentOnToolResult(name, false, gateBlock); } catch { /* ignore */ }
+    }
+    return { resultStr: gateBlock, usedHeal: false };
+  }
+
+  // Notify TUI that a tool call is starting (before execution).
+  // This lets the TUI add a "tool" message to the chat in chronological order.
+  if (currentOnToolCall) {
+    try { currentOnToolCall(name, finalArgs); } catch { /* TUI errors must not break the agent */ }
+  }
 
   // -- Track reads + touched files ---------------------------------------
   trackFileAccess(name, finalArgs);
@@ -900,6 +925,9 @@ async function dispatchToolCall(
   const cached = shouldCacheResult(name) ? readOnlyCache.get(name, finalArgs) : null;
   if (cached !== null) {
     recordToolCall(name, Date.now() - startTime, true);
+    if (currentOnToolResult) {
+      try { currentOnToolResult(name, true, cached); } catch { /* ignore */ }
+    }
     return { resultStr: cached, usedHeal: false };
   }
 
@@ -914,6 +942,14 @@ async function dispatchToolCall(
   const postResult = await executePostToolCallHooks(name, finalArgs, result.resultStr);
   if (postResult.modifiedResult) {
     result.resultStr = postResult.modifiedResult;
+  }
+
+  // Notify TUI that the tool call completed (with success or error).
+  // The TUI adds a "tool result" message to the chat.
+  if (currentOnToolResult) {
+    const resultStrSafe = result.resultStr ?? "";
+    const ok = !resultStrSafe.startsWith("[ERRO") && !resultStrSafe.startsWith("[BLOQUEADO") && !resultStrSafe.startsWith("[HOOK]");
+    try { currentOnToolResult(name, ok, resultStrSafe); } catch { /* ignore */ }
   }
 
   // -- IDEIA 1: Auto-inject TASK_STATE context before next decision ------
@@ -1532,7 +1568,18 @@ export async function runAgentLoop(
   onStreamStart?: () => void,
   onToken?: (token: string) => void,
   onThinking?: () => void,
-  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void,
+  /**
+   * Called when the agent dispatches a tool call (before execution).
+   * The TUI uses this to add a "tool" message to the chat history so the
+   * user can see what the agent is doing in chronological order.
+   */
+  onToolCall?: (toolName: string, args: Record<string, unknown>) => void,
+  /**
+   * Called when a tool call completes (after execution).
+   * The TUI uses this to add a "tool result" message with success/error status.
+   */
+  onToolResult?: (toolName: string, ok: boolean, resultStr: string) => void,
 ): Promise<string> {
   startSession();
   sessionStartTime = new Date().toISOString();
@@ -1581,7 +1628,20 @@ export async function runAgentLoop(
   recordMessage(userInput.length);
   log.debug(`History: ${history.historySummary()}`);
 
-  const result = await sendAndProcess(0, onStreamStart, onToken, onThinking, onUsage);
+  // Set module-level callbacks so processToolCalls/dispatchToolCall can
+  // notify the TUI of tool execution. These are cleared in the finally
+  // block below to prevent leaking across turns.
+  currentOnToolCall = onToolCall;
+  currentOnToolResult = onToolResult;
+
+  let result: string;
+  try {
+    result = await sendAndProcess(0, onStreamStart, onToken, onThinking, onUsage);
+  } finally {
+    // Always clear callbacks to prevent leaks across turns
+    currentOnToolCall = undefined;
+    currentOnToolResult = undefined;
+  }
 
   // Save session trace
   const trace: SessionTrace = {

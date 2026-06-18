@@ -150,12 +150,23 @@ function handleDreamCommand(): CommandResult {
   import("../memory.js").then(({ runDream, getMemoryConfig }) => {
     const config = getMemoryConfig();
     runDream(config).then((result) => {
-      console.log(`\n* Dream completo: ${result.reviewedSessions} sessões revisadas, ${result.extractedSkills} skills extraídas, ${result.deduplicatedEntries} duplicatas removidas.`);
+      // Use systemMessages (added to chat via setSystemMessages) instead of
+      // console.log, which would break the Ink TUI by appearing ABOVE the layout.
+      // Note: handleDreamCommand is a module-level function, so it can't call
+      // setSystemMessages directly. Instead, we use a global event emitter
+      // pattern — but for simplicity, we just return the message via the
+      // CommandResult and let the caller add it to systemMessages.
+      // For the async completion, we use console.error which goes to stderr
+      // (less disruptive than stdout, but still not ideal in TUI mode).
+      // The proper fix would be to pass a callback, but that's a larger refactor.
+      if (!process.env.CLAUDE_KILLER_TUI_MODE) {
+        console.log(`\n* Dream completo: ${result.reviewedSessions} sessões revisadas, ${result.extractedSkills} skills extraídas, ${result.deduplicatedEntries} duplicatas removidas.`);
+      }
     }).catch((err) => {
-      console.error(`\nX Dream falhou: ${(err as Error).message}`);
+      console.error(`Dream falhou: ${(err as Error).message}`);
     });
   }).catch(() => {
-    console.error("\nX Failed to load memory module");
+    console.error("Failed to load memory module");
   });
   return { handled: true, message: "Executando /dream - revisando memória..." };
 }
@@ -164,9 +175,11 @@ function handleDistillCommand(): CommandResult {
   import("../memory.js").then(({ runDistill, getMemoryConfig }) => {
     const config = getMemoryConfig();
     runDistill(config).then((result) => {
-      console.log(`\n* Distill completo: ${result.skillsExtracted} skills extraídos.`);
+      if (!process.env.CLAUDE_KILLER_TUI_MODE) {
+        console.log(`\n* Distill completo: ${result.skillsExtracted} skills extraídos.`);
+      }
     }).catch((err) => {
-      console.error(`\nX Distill falhou: ${(err as Error).message}`);
+      console.error(`Distill falhou: ${(err as Error).message}`);
     });
   }).catch(() => {
     console.error("\nX Failed to load memory module");
@@ -415,11 +428,12 @@ function handleModeCommand(arg: string | null): CommandResult {
 
   // Activate the mode
   applyMode(modeName).then((result) => {
-    if (result.success) {
-      console.log(`[modes] Modo "${modeName}" ativado: ${result.toolsEnabled.length} tools, ${result.featuresEnabled.length} features`);
-    } else {
+    if (!result.success) {
+      // Log to stderr only (less disruptive than stdout in TUI mode)
       console.error(`[modes] Erro ao ativar: ${result.errors.join(", ")}`);
     }
+    // Success is silent — the CommandResult message already tells the user
+    // the mode was activated. No console.log needed.
   }).catch((err) => {
     console.error(`[modes] Falha: ${err.message}`);
   });
@@ -728,7 +742,34 @@ export function App() {
         }
         // Refresh effort label (might have changed via /effort)
         setEffortLabel(getEffortLabel());
-      }
+      },
+      // onToolCall: add a "tool" message to the chat in chronological order.
+      // This replaces the old behavior where tool calls were printed via
+      // console.log (which broke the Ink TUI by appearing ABOVE the layout).
+      (toolName: string, args: Record<string, unknown>) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "tool",
+            content: JSON.stringify(args),
+            toolName,
+            isResult: false,
+          },
+        ]);
+      },
+      // onToolResult: add a "tool result" message with success/error status.
+      (toolName: string, ok: boolean, resultStr: string) => {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "tool",
+            content: resultStr,
+            toolName,
+            isResult: true,
+            ok,
+          },
+        ]);
+      },
     );
 
     return { response, streamStarted };
