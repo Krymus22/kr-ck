@@ -6,6 +6,7 @@
 
 import "dotenv/config";
 import { getModelContextWindow, getModelMaxOutputTokens, getModelCost } from "./modelRegistry.js";
+import { detectProvider, getProviderConfig } from "./apiProvider.js";
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -43,19 +44,24 @@ function optionalFloat(key: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// --- Detect API provider (NVIDIA NIM or ZenMux) -----------------------------
+
+const _provider = detectProvider();
+const _providerConfig = getProviderConfig();
+
 // --- Validate: at least one key source must be set -------------------------
 
-const hasSingleKey = process.env.NVIDIA_API_KEY?.trim();
-const hasMultiKeys = process.env.NVIDIA_API_KEYS?.trim();
-const hasKeysFile = process.env.NVIDIA_API_KEYS_FILE?.trim();
+const hasNvidiaKey = process.env.NVIDIA_API_KEY?.trim() || process.env.NVIDIA_API_KEYS?.trim() || process.env.NVIDIA_API_KEYS_FILE?.trim();
+const hasZenmuxKey = process.env.ZENMUX_API_KEY?.trim();
 
-if (!hasSingleKey && !hasMultiKeys && !hasKeysFile) {
+if (!hasNvidiaKey && !hasZenmuxKey) {
   console.error(
-    `\nX  Missing NVIDIA API key configuration.\n` +
+    `\nX  Missing API key configuration.\n` +
     `   Set ONE of:\n` +
-    `     NVIDIA_API_KEY=nvapi-xxx        (single key, 40 RPM, 1 concurrent)\n` +
-    `     NVIDIA_API_KEYS=nvapi-x1,nvapi-x2,nvapi-x3   (multi-key pool, N x 40 RPM)\n` +
-    `     NVIDIA_API_KEYS_FILE=/path/to/keys.txt       (one key per line)\n`
+    `     NVIDIA_API_KEY=nvapi-xxx        (NVIDIA NIM, single key)\n` +
+    `     NVIDIA_API_KEYS=nvapi-x1,...     (NVIDIA NIM, multi-key pool)\n` +
+    `     ZENMUX_API_KEY=sk-ai-v1-xxx     (ZenMux, single key)\n` +
+    `   Optional: API_PROVIDER=nvidia|zenmux (auto-detected if not set)\n`
   );
   process.exit(1);
 }
@@ -63,8 +69,11 @@ if (!hasSingleKey && !hasMultiKeys && !hasKeysFile) {
 // --- Exported Config --------------------------------------------------------
 
 export const config = {
-  /** NVIDIA NIM API key (required if NVIDIA_API_KEYS not set). */
-  nvidiaApiKey: process.env.NVIDIA_API_KEY ?? "",
+  /** API provider name ("nvidia" or "zenmux"). */
+  apiProvider: _provider,
+
+  /** API key for the active provider. */
+  nvidiaApiKey: _providerConfig.apiKey,
 
   /**
    * Multi-key pool (optional). Comma-separated list of NVIDIA API keys
@@ -75,8 +84,8 @@ export const config = {
   nvidiaApiKeys: process.env.NVIDIA_API_KEYS ?? "",
   nvidiaApiKeysFile: process.env.NVIDIA_API_KEYS_FILE ?? "",
 
-  /** Base URL for the NVIDIA NIM OpenAI-compatible endpoint. */
-  nvidiaBaseUrl: "https://integrate.api.nvidia.com/v1",
+  /** Base URL for the API endpoint (provider-specific). */
+  nvidiaBaseUrl: _providerConfig.baseUrl,
 
   /** Model identifier for the model on NVIDIA NIM. */
   model: process.env.MODEL ?? "moonshotai/kimi-k2.6",

@@ -123,9 +123,14 @@ let currentOnToolResult: ((toolName: string, ok: boolean, resultStr: string) => 
  * This prevents the model from spawning 5 sub-agents that would exhaust
  * all keys, leaving no room for hedging.
  *
- * Configurable via MAX_CONCURRENT_SUB_AGENTS env var (default 2).
+ * Configurable via MAX_CONCURRENT_SUB_AGENTS env var.
+ * Default depends on provider: NVIDIA=2, ZenMux=10.
  */
-const MAX_CONCURRENT_SUB_AGENTS = parseInt(process.env.MAX_CONCURRENT_SUB_AGENTS ?? "2", 10);
+import { getProviderMaxSubAgents } from "./apiProvider.js";
+const MAX_CONCURRENT_SUB_AGENTS = parseInt(
+  process.env.MAX_CONCURRENT_SUB_AGENTS ?? String(getProviderMaxSubAgents()),
+  10
+);
 let activeSubAgents = 0;
 const subAgentWaitQueue: Array<() => void> = [];
 

@@ -12,7 +12,7 @@
  */
 
 export interface ModelInfo {
-  /** NVIDIA NIM model identifier (e.g., "moonshotai/kimi-k2.6"). */
+  /** Model identifier (e.g., "moonshotai/kimi-k2.6"). */
   id: string;
   /** Display name for the model. */
   name: string;
@@ -28,15 +28,24 @@ export interface ModelInfo {
   supportsTools: boolean;
   /** Whether the model supports parallel tool calls. */
   supportsParallelTools: boolean;
+  /** Whether the model has a thinking/reasoning mode.
+   * NVIDIA models: thinking is server-controlled via chat_template_kwargs.
+   * ZenMux GLM models: thinking is built-in (always on, can't disable).
+   * ZenMux Kimi Code Free: no thinking at all.
+   */
+  hasThinking: boolean;
+  /** Which provider offers this model. */
+  provider: "nvidia" | "zenmux" | "both";
 }
 
 /**
- * Registry of known models on NVIDIA NIM.
+ * Registry of known models on NVIDIA NIM and ZenMux.
  *
  * If the user's MODEL env var doesn't match any entry, we fall back to a
- * safe default (128k context, 16k max output).
+ * safe default (128k context, 8k max output).
  */
 export const MODEL_REGISTRY: ModelInfo[] = [
+  // ─── NVIDIA NIM models ──────────────────────────────────────────────────
   {
     id: "moonshotai/kimi-k2.6",
     name: "Kimi K2.6 (Moonshot AI)",
@@ -46,6 +55,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
+    hasThinking: true,
+    provider: "nvidia",
   },
   {
     id: "minimaxai/minimax-m3",
@@ -56,6 +67,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
+    hasThinking: true,
+    provider: "nvidia",
   },
   {
     id: "qwen/qwen2.5-coder-32b-instruct",
@@ -66,6 +79,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "qwen/qwen3-235b-a22b-instruct-2507",
@@ -76,6 +91,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
+    hasThinking: true,
+    provider: "nvidia",
   },
   {
     id: "deepseek-ai/deepseek-r1",
@@ -86,6 +103,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: false,
     supportsParallelTools: false,
+    hasThinking: true,
+    provider: "nvidia",
   },
   {
     id: "deepseek-ai/deepseek-v3.1",
@@ -96,6 +115,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "meta/llama-3.3-70b-instruct",
@@ -106,6 +127,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "meta/llama-4-maverick-17b-128e-instruct",
@@ -116,6 +139,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "nvidia/llama-3.1-nemotron-70b-instruct",
@@ -126,6 +151,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "mistralai/mistral-nemotron",
@@ -136,6 +163,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "writer/palmyra-x5",
@@ -146,6 +175,8 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: false,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
   },
   {
     id: "thudm/glm-4.5",
@@ -156,6 +187,82 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
+  },
+
+  // ─── ZenMux models ──────────────────────────────────────────────────────
+  {
+    id: "moonshotai/kimi-k2.7-code-free",
+    name: "Kimi K2.7 Code (Free, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: true,
+    hasThinking: false,
+    provider: "zenmux",
+  },
+  {
+    id: "z-ai/glm-5.2-free",
+    name: "GLM 5.2 (Free, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: true,
+    hasThinking: true,
+    provider: "zenmux",
+  },
+  {
+    id: "z-ai/glm-4.7-flash-free",
+    name: "GLM 4.7 Flash (Free, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 4_096,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: false,
+    hasThinking: true,
+    provider: "zenmux",
+  },
+  {
+    id: "stepfun/step-3.7-flash-free",
+    name: "Step 3.7 Flash (Free, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 4_096,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: false,
+    hasThinking: true,
+    provider: "zenmux",
+  },
+  {
+    id: "z-ai/glm-5.2",
+    name: "GLM 5.2 (Paid, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: true,
+    hasThinking: true,
+    provider: "zenmux",
+  },
+  {
+    id: "moonshotai/kimi-k2.7-code",
+    name: "Kimi K2.7 Code (Paid, ZenMux)",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: true,
+    hasThinking: false,
+    provider: "zenmux",
   },
 ];
 
@@ -169,6 +276,8 @@ export const FALLBACK_MODEL_INFO: ModelInfo = {
   costPer1MCompletion: 0,
   supportsTools: true,
   supportsParallelTools: false,
+  hasThinking: false,
+  provider: "both",
 };
 
 /**

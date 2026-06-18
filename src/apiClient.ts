@@ -13,6 +13,8 @@ import { config } from "./config.js";
 import { getModelMaxOutputTokens } from "./modelRegistry.js";
 import * as log from "./logger.js";
 import { initApiKeyPool, acquireKeyForStreaming, tryAcquireKeyImmediate, getPoolSize, getAvailableKeyCount, getTotalKeyCount } from "./apiKeyPool.js";
+import { providerSendsThinkingMode, getProviderReasoningField, providerNeedsHedging } from "./apiProvider.js";
+import { getModelInfo } from "./modelRegistry.js";
 
 // --- OpenAI Client (pointed at NVIDIA NIM) ----------------------------------
 
@@ -926,26 +928,35 @@ function createStreamRequest(
   clientOverride?: OpenAI
 ) {
   const c = clientOverride ?? client;
-  return c.chat.completions.create({
+
+  // Dynamic thinking mode: only send chat_template_kwargs when:
+  //   1. Provider supports it (NVIDIA: yes, ZenMux: no — thinking is built-in)
+  //   2. Model has thinking (checked from modelRegistry)
+  // This prevents errors on ZenMux (which doesn't accept chat_template_kwargs)
+  // and on models that don't support thinking at all (kimi-k2.7-code-free).
+  const modelInfo = getModelInfo(config.model);
+  const shouldSendThinking = providerSendsThinkingMode() && modelInfo.hasThinking;
+
+  const requestBody: any = {
     model: config.model,
     messages,
     tools: tools ?? TOOL_DEFINITIONS,
     tool_choice: "auto",
-    // IDEIA 6: NVIDIA NIM (OpenAI-compatible) supports parallel tool calls.
     parallel_tool_calls: true,
     stream: true,
-    // Use the model's actual max output tokens (from modelRegistry) instead
-    // of the hardcoded config.maxTokens (16384). Each model has a different
-    // limit: kimi-k2.6 = 8192, minimax-m3 = 16384, deepseek-r1 = 32768.
-    // Sending a max_tokens larger than the model supports wastes server-side
-    // buffer allocation. Sending the exact limit lets the server optimize.
-    // We take the min of config.maxTokens (user override) and the model's
-    // actual limit, so the user can still lower it via MAX_TOKENS env var.
     max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(config.model)),
     temperature: config.temperature,
     top_p: config.topP,
-    chat_template_kwargs: { thinking_mode: "enabled" },
-  } as any);
+  };
+
+  // Only add chat_template_kwargs for NVIDIA provider with thinking-capable models.
+  // ZenMux models have thinking built-in (GLM) or don't have it (Kimi Code Free).
+  // Sending chat_template_kwargs to ZenMux may cause 400 errors.
+  if (shouldSendThinking) {
+    requestBody.chat_template_kwargs = { thinking_mode: "enabled" };
+  }
+
+  return c.chat.completions.create(requestBody);
 }
 
 function processReasoningChunk(
@@ -1293,13 +1304,11 @@ async function chatWithPool(
       // in use by the main agent or a sub-agent. If only 1 key is free,
       // hedging is skipped (no backup).
       const HEDGE_TIMEOUT_MS = 5000;
-      // Hedging activates if there's at least 1 FREE key available for backup.
-      // We already hold 1 key (poolHandle), so getAvailableKeyCount() counts
-      // keys that are NOT us and NOT busy.
-      // With 4 keys: 1 main + 2 subs = 3 busy, 1 free → canHedge = true
-      // With 4 keys: 1 main + 0 subs = 1 busy, 3 free → canHedge = true
-      // With 3 keys: 1 main + 2 subs = 3 busy, 0 free → canHedge = false
-      const canHedge = getAvailableKeyCount() >= 1 && getTotalKeyCount() >= 2;
+      // Hedging only makes sense for NVIDIA (GPU queue contention).
+      // ZenMux has no queue (10+ concurrent, no cold start) — hedging would
+      // just waste requests for no benefit.
+      // Also requires at least 1 free key in the pool for backup.
+      const canHedge = providerNeedsHedging() && getAvailableKeyCount() >= 1 && getTotalKeyCount() >= 2;
 
       let hedgeHandle: { client: OpenAI; entry: any; release: (success: boolean, httpStatus: number | null, latencyMs: number) => void } | null = null;
       let hedgeWinner: "primary" | "hedge" | null = null;
