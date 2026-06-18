@@ -10,6 +10,7 @@
 import OpenAI from "openai";
 import https from "node:https";
 import { config } from "./config.js";
+import { getModelMaxOutputTokens } from "./modelRegistry.js";
 import * as log from "./logger.js";
 import { initApiKeyPool, acquireKeyForStreaming, getPoolSize } from "./apiKeyPool.js";
 
@@ -933,7 +934,14 @@ function createStreamRequest(
     // IDEIA 6: NVIDIA NIM (OpenAI-compatible) supports parallel tool calls.
     parallel_tool_calls: true,
     stream: true,
-    max_tokens: config.maxTokens,
+    // Use the model's actual max output tokens (from modelRegistry) instead
+    // of the hardcoded config.maxTokens (16384). Each model has a different
+    // limit: kimi-k2.6 = 8192, minimax-m3 = 16384, deepseek-r1 = 32768.
+    // Sending a max_tokens larger than the model supports wastes server-side
+    // buffer allocation. Sending the exact limit lets the server optimize.
+    // We take the min of config.maxTokens (user override) and the model's
+    // actual limit, so the user can still lower it via MAX_TOKENS env var.
+    max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(config.model)),
     temperature: config.temperature,
     top_p: config.topP,
     chat_template_kwargs: { thinking_mode: "enabled" },

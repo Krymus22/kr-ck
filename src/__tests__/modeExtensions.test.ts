@@ -388,7 +388,7 @@ describe("modeExtensions", () => {
       const roblox = getBuiltInModes().find((m) => m.name === "roblox");
       expect(roblox).toBeDefined();
       // All original fields must still be present
-      expect(roblox!.enableTools.length).toBe(13);
+      expect(roblox!.enableTools.length).toBe(12);  // 13 - darklua (removed)
       expect(roblox!.enableSkills.length).toBe(16);
       expect(roblox!.enableFeatures.length).toBe(14);
       expect(roblox!.effortLevel).toBe("high");

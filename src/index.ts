@@ -17,6 +17,7 @@
 // Windows terminals with legacy code pages.
 import { forceUtf8Environment } from "./utf8Safety.js";
 import { setTuiMode } from "./logger.js";
+import { initApiKeyPool, prewarmPool } from "./apiKeyPool.js";
 
 import React from "react";
 import { render } from "ink";
@@ -65,6 +66,22 @@ async function main(): Promise<void> {
   // Seed bundled defaults (Roblox CLI tools, library skills, modes) on first run.
   // After this, the user owns everything in ~/.claude-killer/ and can edit/delete freely.
   seedUserConfig();
+
+  // Initialize the API key pool eagerly (instead of lazily on first chat() call).
+  // This way the pool is ready before the user types anything.
+  initApiKeyPool();
+
+  // Prewarm all keys in the pool — fire-and-forget.
+  // Sends a tiny "hi" request (max_tokens=1) to each key in parallel.
+  // This establishes TLS sessions, warms the keepAlive connection pool,
+  // and triggers the NVIDIA NIM server to load the model into GPU memory.
+  // Without prewarm, the first real user request would pay all these costs
+  // (200-500ms TLS + 5-30s model cold start = "millions of years").
+  // With prewarm, the first real request is fast (model already warm).
+  prewarmPool().catch((err) => {
+    // Never let prewarm errors crash the app — first real request will warm naturally
+    console.error(`Prewarm failed: ${err.message}`);
+  });
 
   // Check for tool updates in the background (non-blocking - don't delay startup)
   // If updates are available and auto-install is enabled, runs `rokit install`.

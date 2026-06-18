@@ -26,6 +26,10 @@ import OpenAI from "openai";
 import https from "node:https";
 import * as log from "./logger.js";
 
+// Prewarm config — model name comes from process.env.MODEL at module load.
+// We don't import config.js to avoid circular dependency (config imports apiKeyPool).
+const PREWARM_MODEL = process.env.MODEL ?? "moonshotai/kimi-k2.6";
+
 // --- Types -------------------------------------------------------------------
 
 export interface ApiKeyStats {
@@ -411,4 +415,92 @@ export function resetPoolStats(): void {
 export function resetPool(): void {
   pool = [];
   nextIndex = 0;
+}
+
+// --- Prewarm -----------------------------------------------------------------
+
+/**
+ * Whether prewarm has been requested (idempotent — only runs once).
+ * Subsequent calls to prewarmPool() are no-ops.
+ */
+let prewarmed = false;
+
+/**
+ * Prewarm all keys in the pool by sending a tiny "hi" request to each.
+ *
+ * Why this matters:
+ *   1. **TLS handshake**: the first HTTPS request to integrate.api.nvidia.com
+ *      takes 200-500ms for the TLS handshake. Prewarm does it once at startup
+ *      so the first real user request skips it.
+ *   2. **Connection pool**: the keepAlive agent reuses sockets. Prewarm
+ *      establishes the first socket so subsequent requests reuse it.
+ *   3. **Model warmup on NVIDIA side**: NVIDIA NIM keeps models "warm" in
+ *      GPU memory after the first request. Without prewarm, the first real
+ *      user request hits a cold model (load from disk = 5-30s). With prewarm,
+ *      the model is already loaded when the user sends their first message.
+ *
+ * This runs in the background (fire-and-forget) — the app doesn't wait for
+ * it. If prewarm fails (network error, invalid key), it's logged but doesn't
+ * crash the app. The first real request will do the warmup naturally.
+ *
+ * Idempotent: calling prewarmPool() multiple times only prewarms once.
+ *
+ * @returns a Promise that resolves when all prewarm requests complete (or fail).
+ *          Callers can await this if they want to block startup until warm,
+ *          but typically it's fire-and-forget.
+ */
+export async function prewarmPool(): Promise<void> {
+  if (prewarmed) return;
+  if (pool.length === 0) {
+    log.debug("[PREWARM] Pool not initialized, skipping prewarm");
+    return;
+  }
+  prewarmed = true;
+
+  const start = Date.now();
+  log.info(`[PREWARM] Warming ${pool.length} key(s) to ${PREWARM_MODEL}...`);
+
+  // Fire a tiny request to each key in parallel.
+  // max_tokens=1 keeps it cheap (1 token generated, ~10ms on warm model).
+  // stream=false so we don't trigger the streaming parser.
+  const results = await Promise.allSettled(
+    pool.map(async (entry, i) => {
+      const t0 = Date.now();
+      try {
+        await entry.client.chat.completions.create({
+          model: PREWARM_MODEL,
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1,
+          stream: false,
+        });
+        const elapsed = Date.now() - t0;
+        log.debug(`[PREWARM] Key #${i} (${entry.stats.keyPrefix}) warm in ${elapsed}ms`);
+        return { ok: true, elapsed, index: i };
+      } catch (err: unknown) {
+        const elapsed = Date.now() - t0;
+        const msg = err instanceof Error ? err.message : String(err);
+        log.warn(`[PREWARM] Key #${i} (${entry.stats.keyPrefix}) failed in ${elapsed}ms: ${msg}`);
+        return { ok: false, elapsed, index: i, error: msg };
+      }
+    })
+  );
+
+  const ok = results.filter((r) => r.status === "fulfilled" && r.value.ok).length;
+  const fail = results.length - ok;
+  const totalMs = Date.now() - start;
+
+  if (fail === 0) {
+    log.success(`[PREWARM] All ${ok} key(s) warm in ${totalMs}ms`);
+  } else if (ok > 0) {
+    log.warn(`[PREWARM] ${ok}/${results.length} key(s) warm in ${totalMs}ms (${fail} failed)`);
+  } else {
+    log.error(`[PREWARM] All ${fail} key(s) failed in ${totalMs}ms — first real request will be slow`);
+  }
+}
+
+/**
+ * Reset prewarm state — for tests that want to re-prewarm.
+ */
+export function resetPrewarm(): void {
+  prewarmed = false;
 }
