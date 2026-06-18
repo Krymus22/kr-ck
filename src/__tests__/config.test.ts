@@ -100,6 +100,8 @@ describe("Config", () => {
 
   it("calls process.exit when NVIDIA_API_KEY is missing", async () => {
     delete process.env.NVIDIA_API_KEY;
+    delete process.env.NVIDIA_API_KEYS;
+    delete process.env.NVIDIA_API_KEYS_FILE;
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => { throw new Error("exit called"); }) as any);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -120,6 +122,8 @@ describe("Config", () => {
 
   it("calls process.exit when NVIDIA_API_KEY is empty string", async () => {
     process.env.NVIDIA_API_KEY = "   ";
+    delete process.env.NVIDIA_API_KEYS;
+    delete process.env.NVIDIA_API_KEYS_FILE;
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => { throw new Error("exit called"); }) as any);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 

@@ -17,7 +17,9 @@
 // Windows terminals with legacy code pages.
 import { forceUtf8Environment } from "./utf8Safety.js";
 import { setTuiMode } from "./logger.js";
-import { initApiKeyPool, prewarmPool } from "./apiKeyPool.js";
+import { initApiKeyPool, prewarmPool, getPoolSize, getPoolStats } from "./apiKeyPool.js";
+import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
+import OpenAI from "openai";
 
 import React from "react";
 import { render } from "ink";
@@ -83,6 +85,35 @@ async function main(): Promise<void> {
     console.error(`Prewarm failed: ${err.message}`);
   });
 
+  // Start background heartbeat to keep the model warm.
+  // NVIDIA NIM free tier unloads models from GPU after 30-60 min of inactivity.
+  // The heartbeat sends a tiny request every 5 min to reset the idle timer,
+  // keeping the model loaded in VRAM. Without this, the first request after
+  // a pause takes 5-60s (cold start); with heartbeat, it's ~600ms (warm).
+  // Uses the first key in the pool (round-robin could be added later).
+  if (getPoolSize() > 0) {
+    const firstKeyStats = getPoolStats()[0];
+    if (firstKeyStats) {
+      // Create a dedicated client for the heartbeat (first key)
+      // We can't access the pool's internal client directly, so we create one.
+      // The pool's keepAlive agent is shared, so TLS session is reused.
+      const heartbeatClient = new OpenAI({
+        apiKey: firstKeyStats.keyPrefix === "" ? "" : (process.env.NVIDIA_API_KEYS?.split(",")[0] ?? process.env.NVIDIA_API_KEY ?? ""),
+        baseURL: "https://integrate.api.nvidia.com/v1",
+        timeout: 30_000, // 30s timeout for heartbeat (shorter than real requests)
+      });
+      startHeartbeat(heartbeatClient);
+    }
+  } else if (process.env.NVIDIA_API_KEY) {
+    // Single-key mode: start heartbeat with the single key
+    const heartbeatClient = new OpenAI({
+      apiKey: process.env.NVIDIA_API_KEY,
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      timeout: 30_000,
+    });
+    startHeartbeat(heartbeatClient);
+  }
+
   // Check for tool updates in the background (non-blocking - don't delay startup)
   // If updates are available and auto-install is enabled, runs `rokit install`.
   performUpdateCheck().catch((err) => {
@@ -107,6 +138,7 @@ async function main(): Promise<void> {
 
   // Handle graceful shutdown
   const cleanup = () => {
+    stopHeartbeat();
     setTuiMode(false);
     shutdownMCPServers();
     unmount();
