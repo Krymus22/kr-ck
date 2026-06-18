@@ -165,9 +165,12 @@ function getVersion(binaryPath: string): string | null {
  * Detect a tool on the user's machine.
  *
  * @param toolName  The binary name (e.g., "rojo", "selene", "stylua")
+ * @param options   Optional: forceDeepSearch=true to ignore AUTO_DETECT_TOOLS setting
+ *                  (used by the manual "S" search button in the Hub)
  * @returns         Detection result with status, path, version
  */
-export function detectTool(toolName: string): ToolDetectionResult {
+export function detectTool(toolName: string, options?: { forceDeepSearch?: boolean }): ToolDetectionResult {
+  const forceDeep = options?.forceDeepSearch ?? false;
   const searchedPaths: string[] = [];
 
   // Step 1: Always check PATH first (cheap, non-invasive)
@@ -186,19 +189,19 @@ export function detectTool(toolName: string): ToolDetectionResult {
     }
   }
 
-  // Step 2: If auto-detect is OFF, stop here (privacy)
-  if (!AUTO_DETECT_ENABLED) {
-    searchedPaths.push("(deep search disabled — set AUTO_DETECT_TOOLS=1)");
+  // Step 2: If auto-detect is OFF and not forced, stop here (privacy)
+  if (!AUTO_DETECT_ENABLED && !forceDeep) {
+    searchedPaths.push("(deep search disabled — set AUTO_DETECT_TOOLS=1 or use manual search)");
     return {
       status: "missing",
       binaryPath: null,
       version: null,
-      error: "Not found in PATH. Enable AUTO_DETECT_TOOLS=1 to search more locations.",
+      error: "Not found in PATH. Press S in Hub for manual deep search.",
       searchedPaths,
     };
   }
 
-  // Step 3: Deep search in common locations
+  // Step 3: Deep search in common locations (most obvious first)
   const searchPaths = getSearchPaths(toolName);
   for (const p of searchPaths) {
     searchedPaths.push(p);
@@ -224,12 +227,40 @@ export function detectTool(toolName: string): ToolDetectionResult {
     }
   }
 
+  // Step 4: Windows extra search — check common download locations
+  if (process.platform === "win32") {
+    const home = os.homedir();
+    const extraPaths = [
+      path.join(home, "Downloads", toolName, `${toolName}.exe`),
+      path.join(home, "Downloads", `${toolName}.exe`),
+      path.join(home, "Desktop", toolName, `${toolName}.exe`),
+      path.join(home, "Documents", toolName, `${toolName}.exe`),
+      path.join(home, "Tools", toolName, `${toolName}.exe`),
+      path.join(home, "Tools", `${toolName}.exe`),
+      path.join("C:\\Tools", toolName, `${toolName}.exe`),
+      path.join("C:\\Tools", `${toolName}.exe`),
+      path.join("D:\\Tools", toolName, `${toolName}.exe`),
+      path.join("D:\\Tools", `${toolName}.exe`),
+      path.join("C:\\Users", os.userInfo().username, "scoop", "apps", toolName, "current", `${toolName}.exe`),
+    ];
+    for (const p of extraPaths) {
+      searchedPaths.push(p);
+      if (isExecutable(p)) {
+        const version = getVersion(p);
+        if (version) {
+          return { status: "found", binaryPath: p, version, error: null, searchedPaths };
+        }
+        return { status: "found", binaryPath: p, version: null, error: `Found at ${p} but --version failed`, searchedPaths };
+      }
+    }
+  }
+
   // Not found anywhere
   return {
     status: "missing",
     binaryPath: null,
     version: null,
-    error: `Not found in PATH or any common location (${searchPaths.length} locations checked)`,
+    error: `Not found in PATH or any common location (${searchedPaths.length} locations checked)`,
     searchedPaths,
   };
 }
@@ -412,4 +443,95 @@ export function getSearchPathsForTool(toolName: string): string[] {
  */
 export function isAutoDetectEnabled(): boolean {
   return AUTO_DETECT_ENABLED;
+}
+
+// --- Batch search (for manual Hub button) -----------------------------------
+
+export interface SearchResult {
+  toolName: string;
+  status: ToolStatus;
+  binaryPath: string | null;
+  version: string | null;
+  searchedPaths: string[];
+}
+
+export interface SearchProgress {
+  currentTool: string;
+  currentPath: string;
+  toolsDone: number;
+  toolsTotal: number;
+  results: SearchResult[];
+}
+
+/**
+ * Search for multiple tools in sequence, calling onProgress after each one.
+ * Always does deep search (ignores AUTO_DETECT_TOOLS setting) because this
+ * is triggered manually by the user pressing 'S' in the Hub.
+ *
+ * @param toolNames  Array of tool binary names to search (e.g., ["rojo", "selene"])
+ * @param onProgress  Callback called after each tool is searched
+ * @returns  Array of search results
+ */
+export async function searchAllTools(
+  toolNames: string[],
+  onProgress?: (progress: SearchProgress) => void,
+): Promise<SearchResult[]> {
+  const results: SearchResult[] = [];
+
+  for (let i = 0; i < toolNames.length; i++) {
+    const toolName = toolNames[i];
+
+    // Report: starting search for this tool
+    onProgress?.({
+      currentTool: toolName,
+      currentPath: "(searching...)",
+      toolsDone: i,
+      toolsTotal: toolNames.length,
+      results: [...results],
+    });
+
+    // Do the search with forceDeepSearch=true (manual trigger = user consent)
+    const detection = detectTool(toolName, { forceDeepSearch: true });
+
+    const result: SearchResult = {
+      toolName,
+      status: detection.status,
+      binaryPath: detection.binaryPath,
+      version: detection.version,
+      searchedPaths: detection.searchedPaths,
+    };
+    results.push(result);
+
+    // Report: done with this tool
+    onProgress?.({
+      currentTool: toolName,
+      currentPath: detection.binaryPath ?? "(not found)",
+      toolsDone: i + 1,
+      toolsTotal: toolNames.length,
+      results: [...results],
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Get tool names from mode tool IDs.
+ * "tool:rojo_build" → "rojo"
+ * "tool:selene_lint" → "selene"
+ * "tool:wally_install" → "wally"
+ */
+export function extractToolBinaryName(toolId: string): string {
+  return toolId
+    .replace(/^tool:/, "")
+    .replace(/_(build|serve|sourcemap|install|search|publish|lint|format|run|process|add)$/, "");
+}
+
+/**
+ * Get all tool binary names needed by a mode.
+ */
+export function getModeToolNames(modeToolIds: string[]): string[] {
+  const names = modeToolIds.map(extractToolBinaryName);
+  // Deduplicate (rojo_build and rojo_serve both map to "rojo")
+  return [...new Set(names)];
 }
