@@ -997,6 +997,25 @@ function processStreamChunk(
   onToken?: (token: string) => void,
   onThinking?: () => void,
 ): void {
+  // BUG FIX: previously, this function did `if (!choice) return;` at the top,
+  // which meant that chunks containing ONLY `usage` (no `choices` array, or
+  // empty `choices`) were discarded before we could read the token counts.
+  //
+  // The NVIDIA NIM API (and OpenAI-compatible APIs in general) sends the
+  // final `usage` object in a separate chunk that has NO choices. This
+  // chunk is the only one that contains accurate prompt_tokens and
+  // completion_tokens. By returning early, we never captured them, so
+  // state.promptTokens and state.completionTokens stayed at 0 forever,
+  // and the StatusBar always showed "0/256k 0%".
+  //
+  // Fix: process `usage` BEFORE the `if (!choice) return` guard.
+
+  // Process usage FIRST — it may arrive in a chunk without choices.
+  if (chunk.usage) {
+    state.promptTokens = chunk.usage.prompt_tokens ?? 0;
+    state.completionTokens = chunk.usage.completion_tokens ?? 0;
+  }
+
   const choice = chunk.choices?.[0];
   if (!choice) return;
 
@@ -1022,9 +1041,12 @@ function processStreamChunk(
 
   if (choice.finish_reason) state.finishReason = choice.finish_reason;
 
+  // Note: usage was already processed above (before the choice guard).
+  // Some APIs also send usage in the final choice chunk, so check again
+  // in case it wasn't in the separate usage-only chunk.
   if (chunk.usage) {
-    state.promptTokens = chunk.usage.prompt_tokens ?? 0;
-    state.completionTokens = chunk.usage.completion_tokens ?? 0;
+    state.promptTokens = chunk.usage.prompt_tokens ?? state.promptTokens;
+    state.completionTokens = chunk.usage.completion_tokens ?? state.completionTokens;
   }
 }
 

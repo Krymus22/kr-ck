@@ -696,11 +696,24 @@ export function App() {
     let streamStartTime = 0;
     let tokenCount = 0;
 
+    // BUG FIX: reset tokensPerSecond at the start of each turn so we don't
+    // show stale values from the previous turn (which could be misleading
+    // if the current turn has no streaming, e.g., slash commands).
+    setTokensPerSecond(0);
+
     const response = await runAgentLoop(
       fullInput,
       () => {
         streamStarted = true;
+        // BUG FIX: reset streamStartTime AND tokenCount on EVERY stream
+        // start. The agent may call chat() multiple times in one turn
+        // (e.g., after tool calls). Without resetting tokenCount, it would
+        // accumulate tokens across all streams, but streamStartTime would
+        // only reflect the latest stream — producing absurd tok/s values
+        // like 500 tok/s (tokenCount=100 from 3 streams, elapsed=0.2s
+        // from the last stream only).
         streamStartTime = Date.now();
+        tokenCount = 0;
         setStatus("streaming");
         setMessages((prev) => {
           const updated = [...prev];
@@ -714,7 +727,8 @@ export function App() {
       (token: string) => {
         streamContent += token;
         tokenCount++;
-        // Update tok/s every 10 tokens
+        // Update tok/s every 10 tokens — based on THIS stream's token count
+        // and THIS stream's elapsed time only (both reset on onStreamStart).
         if (tokenCount % 10 === 0 && streamStartTime > 0) {
           const elapsed = (Date.now() - streamStartTime) / 1000;
           if (elapsed > 0) setTokensPerSecond(Math.round(tokenCount / elapsed * 10) / 10);
@@ -735,7 +749,8 @@ export function App() {
       },
       (usage) => {
         setLastUsage(usage);
-        // Final tok/s calculation
+        // Final tok/s calculation — uses THIS stream's elapsed time
+        // (streamStartTime was reset on the last onStreamStart).
         if (streamStartTime > 0 && usage.completion_tokens > 0) {
           const elapsed = (Date.now() - streamStartTime) / 1000;
           if (elapsed > 0) setTokensPerSecond(Math.round(usage.completion_tokens / elapsed * 10) / 10);
