@@ -255,14 +255,110 @@ export function detectTool(toolName: string, options?: { forceDeepSearch?: boole
     }
   }
 
-  // Not found anywhere
+  // Not found in common locations
   return {
     status: "missing",
     binaryPath: null,
     version: null,
-    error: `Not found in PATH or any common location (${searchedPaths.length} locations checked)`,
+    error: `Not found in PATH or common locations (${searchedPaths.length} locations checked)`,
     searchedPaths,
   };
+}
+
+// --- Deep filesystem scan ---------------------------------------------------
+
+/**
+ * Scan the ENTIRE filesystem for a binary.
+ *
+ * On Windows: uses `where /R <drive> <name>.exe` for each drive (C:\, D:\, etc.)
+ * On Unix: uses `find / -name <name> -type f 2>/dev/null`
+ *
+ * This is SLOW (30s-5min depending on drive size) but finds binaries
+ * ANYWHERE on the machine — even in unusual locations like
+ * C:\Users\kryst\Projects\MyGame\tools\rojo.exe
+ *
+ * Only triggered manually by the user pressing 'S' in the Hub.
+ * Never runs automatically.
+ *
+ * @param toolName  Binary name (e.g., "rojo")
+ * @param onProgress  Callback for progress updates
+ * @returns  Detection result or null if not found
+ */
+export async function deepFilesystemSearch(
+  toolName: string,
+  onProgress?: (msg: string) => void,
+): Promise<ToolDetectionResult | null> {
+  const searchedPaths: string[] = [];
+
+  if (process.platform === "win32") {
+    // Windows: use `where /R <drive> <name>.exe` for each drive
+    // `where /R` recursively searches from a root path
+    const drives = ["C:\\", "D:\\", "E:\\"];
+    const exeName = `${toolName}.exe`;
+
+    for (const drive of drives) {
+      onProgress?.(`Escaneando ${drive}...`);
+      searchedPaths.push(`${drive} (where /R scan)`);
+
+      try {
+        const result = execSync(`where /R "${drive}" "${exeName}"`, {
+          encoding: "utf8",
+          timeout: 120000, // 2 min per drive
+          stdio: ["pipe", "pipe", "ignore"],
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large outputs
+        });
+
+        // `where /R` returns one path per line
+        const lines = result.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          const binaryPath = lines[0]!;
+          onProgress?.(`Encontrado: ${binaryPath}`);
+          const version = getVersion(binaryPath);
+          return {
+            status: "found",
+            binaryPath,
+            version,
+            error: null,
+            searchedPaths,
+          };
+        }
+      } catch {
+        // Not found on this drive (or drive doesn't exist, or timeout)
+      }
+    }
+  } else {
+    // Unix: use `find / -name <name> -type f`
+    onProgress?.(`Escaneando / (find)...`);
+    searchedPaths.push("/ (find scan)");
+
+    try {
+      const result = execSync(`find / -name "${toolName}" -type f -executable 2>/dev/null`, {
+        encoding: "utf8",
+        timeout: 120000,
+        stdio: ["pipe", "pipe", "ignore"],
+        maxBuffer: 10 * 1024 * 1024,
+      });
+
+      const lines = result.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        const binaryPath = lines[0]!;
+        onProgress?.(`Encontrado: ${binaryPath}`);
+        const version = getVersion(binaryPath);
+        return {
+          status: "found",
+          binaryPath,
+          version,
+          error: null,
+          searchedPaths,
+        };
+      }
+    } catch {
+      // find failed or timeout
+    }
+  }
+
+  onProgress?.(`${toolName}: nao encontrado em nenhum lugar`);
+  return null;
 }
 
 // --- Functional verification -------------------------------------------------
@@ -484,14 +580,40 @@ export async function searchAllTools(
     // Report: starting search for this tool
     onProgress?.({
       currentTool: toolName,
-      currentPath: "(searching...)",
+      currentPath: "(buscando em locais comuns...)",
       toolsDone: i,
       toolsTotal: toolNames.length,
       results: [...results],
     });
 
-    // Do the search with forceDeepSearch=true (manual trigger = user consent)
-    const detection = detectTool(toolName, { forceDeepSearch: true });
+    // Step 1: Search common locations (fast, ~1s per tool)
+    let detection = detectTool(toolName, { forceDeepSearch: true });
+
+    // Step 2: If not found in common locations, do DEEP filesystem scan
+    // This searches the ENTIRE C:\, D:\, etc. (slow but thorough)
+    if (detection.status === "missing") {
+      onProgress?.({
+        currentTool: toolName,
+        currentPath: "(escaneando filesystem inteiro...)",
+        toolsDone: i,
+        toolsTotal: toolNames.length,
+        results: [...results],
+      });
+
+      const deepResult = await deepFilesystemSearch(toolName, (msg) => {
+        onProgress?.({
+          currentTool: toolName,
+          currentPath: msg,
+          toolsDone: i,
+          toolsTotal: toolNames.length,
+          results: [...results],
+        });
+      });
+
+      if (deepResult) {
+        detection = deepResult;
+      }
+    }
 
     const result: SearchResult = {
       toolName,
@@ -505,7 +627,7 @@ export async function searchAllTools(
     // Report: done with this tool
     onProgress?.({
       currentTool: toolName,
-      currentPath: detection.binaryPath ?? "(not found)",
+      currentPath: detection.binaryPath ?? "(nao encontrado)",
       toolsDone: i + 1,
       toolsTotal: toolNames.length,
       results: [...results],
