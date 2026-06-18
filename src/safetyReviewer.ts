@@ -334,7 +334,7 @@ export function formatSafetyReview(result: SafetyReviewResult): string {
       }
     }
     lines.push("");
-    lines.push("⚠️ NÃO escreva este código sem:");
+    lines.push("[!] NÃO escreva este código sem:");
     lines.push("  1. Confirmar explicitamente com o usuário que ele quer essa operação");
     lines.push("  2. Adicionar guardrails (ex: if not IS_TEST_SERVER then return end)");
     lines.push("  3. Implementar backup/rollback antes da operação destrutiva");

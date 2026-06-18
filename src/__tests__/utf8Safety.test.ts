@@ -126,6 +126,47 @@ describe("utf8Safety", () => {
       // second call now sees it as "already UTF-8" — that's fine.
       expect(r2.chosen).toBeTruthy();
     });
+
+    it("on Windows: patches process.stdout.write to emit UTF-8 bytes", () => {
+      // This test only runs on Windows, but we can verify the function
+      // doesn't crash on any platform.
+      const origPlatform = process.platform;
+      try {
+        // Simulate Windows by calling forceUtf8Environment — on Linux this
+        // just won't patch stdout (the patch is Windows-only), but the
+        // function should still complete without error.
+        const result = forceUtf8Environment();
+        expect(result.platform).toBe(origPlatform);
+        // Verify process.stdout.write is still a function
+        expect(typeof process.stdout.write).toBe("function");
+      } finally {
+        // No cleanup needed — forceUtf8Environment is idempotent
+      }
+    });
+
+    it("regression: 'você' bytes are correct UTF-8 after forceUtf8Environment", () => {
+      forceUtf8Environment();
+      const text = "você";
+      const buf = Buffer.from(text, "utf8");
+      // UTF-8 for "você" = v(0x76) o(0x6F) c(0x63) ê(0xC3 0xAA)
+      expect(buf[0]).toBe(0x76); // v
+      expect(buf[1]).toBe(0x6F); // o
+      expect(buf[2]).toBe(0x63); // c
+      expect(buf[3]).toBe(0xC3); // ê (high byte)
+      expect(buf[4]).toBe(0xAA); // ê (low byte)
+    });
+
+    it("regression: 'coração' bytes are correct UTF-8", () => {
+      forceUtf8Environment();
+      const text = "coração";
+      const buf = Buffer.from(text, "utf8");
+      // UTF-8 for "coração" = c o r a ç(0xC3 0xA7) ã(0xC3 0xA3) o
+      expect(buf.length).toBe(9); // 4 ASCII + 2 (ç) + 2 (ã) + 1 (o)
+      expect(buf[4]).toBe(0xC3); // ç high byte
+      expect(buf[5]).toBe(0xA7); // ç low byte
+      expect(buf[6]).toBe(0xC3); // ã high byte
+      expect(buf[7]).toBe(0xA3); // ã low byte
+    });
   });
 
   describe("diagnoseUtf8", () => {

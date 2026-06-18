@@ -31,8 +31,28 @@ function formatElapsed(ms: number): string {
   return `${m}m${rem.toString().padStart(2, "0")}s`;
 }
 
+/**
+ * Returns a spinner character for the current frame.
+ *
+ * Uses ASCII-only spinner (|/-\) when USE_ASCII_SPINNER env var is set OR
+ * when running on Windows terminals that may not render Braille patterns
+ * correctly. Otherwise uses Braille patterns for a smoother animation.
+ *
+ * The Braille chars (U+2800 block) are widely supported on modern terminals
+ * but can render as garbage on:
+ *   - Windows cmd.exe with default fonts (Consolas doesn't have Braille)
+ *   - Old terminal emulators without Unicode font fallback
+ *   - SSH sessions with mismatched locale
+ */
 function spinnerChar(idx: number): string {
-  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  // Detect: env var forces ASCII, otherwise use Braille (modern terminals
+  // including Windows Terminal, VS Code terminal, and most Linux terminals
+  // support Braille patterns).
+  const useAscii = process.env.USE_ASCII_SPINNER === "1" ||
+    (process.platform === "win32" && !process.env.WT_SESSION && !process.env.TERM_PROGRAM);
+  const frames = useAscii
+    ? ["|", "/", "-", "\\"]
+    : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   return frames[idx % frames.length] ?? "•";
 }
 
