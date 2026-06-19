@@ -446,4 +446,79 @@ describe("luauValidator (extended)", () => {
       expect(rules).toEqual([]);
     });
   });
+
+  // ─── luau-lsp (BUG 5 — coverage gap) ────────────────────────────────────
+
+  describe("luau-lsp tool path", () => {
+    // NOTE: luauValidator.ts line 184 calls detectTool(rule.tool.replace("_lint/_format/_run", ""))
+    // For rule "luau_lsp", the suffixes "_lint"/"_format"/"_run" don't match, so the
+    // detectTool call gets "luau_lsp" → that's NOT a known tool name. But the tool name
+    // used in runCommand() is "luau-lsp" (line 281 of luauValidator.ts). So we need to
+    // mock detectTool to return "working" for "luau_lsp" (the lookup key), AND mock
+    // spawn to respond to "luau-lsp" (the actual command name).
+    it("regra blocking com luau-lsp retorna ok=false quando há erro", async () => {
+      toolDetectorState.set("luau_lsp", "working");
+      spawnState.set("luau-lsp", { code: 1, stdout: "TypeError: foo" });
+
+      const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
+      const tmpFile = path.join(os.tmpdir(), `test-luau-lsp-${Date.now()}.luau`);
+      fs.writeFileSync(tmpFile, "local x = 1\n", "utf8");
+      try {
+        const result = await validateLuauBeforeWrite(
+          tmpFile,
+          "local x = 1\n",
+          [{ tool: "luau_lsp", filePattern: "*.luau", blocking: true }],
+          tmpProject,
+        );
+        expect(result.ok).toBe(false);
+        expect(result.blockingError).toMatch(/luau-lsp/);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    it("regra non-blocking com luau-lsp adiciona warning mas não bloqueia", async () => {
+      toolDetectorState.set("luau_lsp", "working");
+      spawnState.set("luau-lsp", { code: 1, stdout: "warning: unused variable" });
+
+      const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
+      const tmpFile = path.join(os.tmpdir(), `test-luau-lsp-warn-${Date.now()}.luau`);
+      fs.writeFileSync(tmpFile, "local x = 1\n", "utf8");
+      try {
+        const result = await validateLuauBeforeWrite(
+          tmpFile,
+          "local x = 1\n",
+          [{ tool: "luau_lsp", filePattern: "*.luau", blocking: false }],
+          tmpProject,
+        );
+        expect(result.ok).toBe(true);
+        expect(result.warnings.length).toBeGreaterThan(0);
+        expect(result.warnings[0]).toMatch(/luau-lsp/);
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    it("luau-lsp com exit 0 não adiciona warnings nem erros", async () => {
+      toolDetectorState.set("luau_lsp", "working");
+      spawnState.set("luau-lsp", { code: 0, stdout: "" });
+
+      const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
+      const tmpFile = path.join(os.tmpdir(), `test-luau-lsp-ok-${Date.now()}.luau`);
+      fs.writeFileSync(tmpFile, "local x = 1\n", "utf8");
+      try {
+        const result = await validateLuauBeforeWrite(
+          tmpFile,
+          "local x = 1\n",
+          [{ tool: "luau_lsp", filePattern: "*.luau", blocking: true }],
+          tmpProject,
+        );
+        expect(result.ok).toBe(true);
+        expect(result.warnings).toEqual([]);
+        expect(result.rulesApplied).toContain("luau_lsp");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
 });

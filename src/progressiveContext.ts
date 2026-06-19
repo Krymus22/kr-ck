@@ -153,13 +153,28 @@ export async function readSymbolFromFile(
  *   "read function GetCoins from InventoryService.luau"
  *   "ler a função GetCoins"
  *   "show me the parseArgs function"
+ *   "show me the parseArgs from file.ts"
+ *   "show parseArgs from file.ts"
+ *   "ver função GetCoins em arquivo.luau"
  *
  * Returns { filePath, symbolName } or null if no specific function requested.
+ *
+ * BUG FIX (audit issue #6): previously the regex only allowed ONE optional
+ * word between the verb (read/show/ver) and the symbol name. Phrases like
+ * "show me the parseArgs" (two filler words "me the") failed to match,
+ * silently returning null and falling back to reading the entire file.
+ *
+ * Fix: allow 0-3 filler words (me|the|a|o|as|os|meu|minha) between the verb
+ * and the symbol, plus optional "function"/"função" prefix.
  */
 export function detectSymbolRequest(userMessage: string): { filePath: string; symbolName: string } | null {
+  // Filler words that can appear between verb and symbol: "me", "the", "a", "o", etc.
+  // Allow up to 3 of them in sequence (handles "show me the", "ver a função", etc.)
+  const filler = "(?:(?:me|the|a|o|as|os|meu|minha|function|fun[cç][aã]o)\\s+){0,3}";
+
   // Pattern: "function <name> from <file>" or "function <name> in <file>"
   const patterns = [
-    /(?:read|ler|show|mostra|ver)\s+(?:function\s+|fun[cç][aã]o\s+|the\s+)?(\w+)\s+(?:from|de|in|em)\s+([^\s]+)/i,
+    new RegExp(`(?:read|ler|show|mostra|ver)\\s+${filler}(\\w+)\\s+(?:from|de|in|em)\\s+([^\\s]+)`, "i"),
     /(?:function|fun[cç][aã]o)\s+(\w+)\s+(?:from|de|in|em)\s+([^\s]+)/i,
   ];
 

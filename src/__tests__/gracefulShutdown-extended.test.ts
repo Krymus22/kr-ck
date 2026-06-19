@@ -83,20 +83,24 @@ describe("gracefulShutdown — cobertura estendida", () => {
     // O módulo não faz dedup explícita: cada chamada adiciona novos listeners
     // em process. Testamos o comportamento real (cada chamada registra os 4
     // sinais novamente).
-    const { registerShutdownHandlers } = await import("./../gracefulShutdown.js");
+    const { registerShutdownHandlers, resetShutdownState } = await import("./../gracefulShutdown.js");
+    resetShutdownState();
 
     onSpy.mockClear();
     registerShutdownHandlers();
     const callsAfterFirst = onSpy.mock.calls.length;
 
-    registerShutdownHandlers();
+    registerShutdownHandlers();  // should be a no-op now
     const callsAfterSecond = onSpy.mock.calls.length;
 
-    // Segunda chamada adiciona mais listeners (não há dedup)
-    expect(callsAfterSecond).toBeGreaterThan(callsAfterFirst);
+    // BUG FIX (audit issue #7): segunda chamada NÃO adiciona mais listeners
+    // (dedup guard via handlersRegistered flag). Antes do fix, isso adicionava
+    // 4 listeners duplicados a cada chamada.
+    expect(callsAfterSecond).toBe(callsAfterFirst); // sem crescimento
     // Cada chamada registra pelo menos SIGINT, SIGTERM, SIGHUP, uncaughtException
     expect(callsAfterFirst).toBeGreaterThanOrEqual(4);
-    expect(callsAfterSecond).toBeGreaterThanOrEqual(8);
+    expect(callsAfterSecond).toBeGreaterThanOrEqual(4);
+    expect(callsAfterSecond).toBeLessThan(8); // não dobrou
   });
 
   // --- Ordem de execução dos handlers ----------------------------------------

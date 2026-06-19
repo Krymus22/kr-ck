@@ -16,11 +16,13 @@ import * as log from "./logger.js";
 
 let isShuttingDown = false;
 let shutdownHandlers: Array<() => void> = [];
+let handlersRegistered = false; // dedup guard for registerShutdownHandlers()
 
 /** Clear shutdown state (for tests). */
 export function resetShutdownState(): void {
   isShuttingDown = false;
   shutdownHandlers = [];
+  handlersRegistered = false; // also reset dedup flag so tests can re-register
 }
 
 /**
@@ -35,6 +37,14 @@ export function onShutdown(handler: () => void): void {
  * Perform graceful shutdown.
  * Runs all registered handlers, saves state, then exits.
  * Safe to call multiple times (idempotent).
+ *
+ * BUG FIX (audit issue #7): previously, a handler that hung (e.g., a
+ * database connection that never closed) would block shutdown forever,
+ * requiring the user to Ctrl+C twice. Now each handler runs with a 5s
+ * timeout — if it doesn't complete in time, we log a warning and move on.
+ *
+ * Default timeout is 5s per handler, configurable via SHUTDOWN_HANDLER_TIMEOUT_MS.
+ * Total shutdown budget is 30s (also configurable via SHUTDOWN_TOTAL_TIMEOUT_MS).
  */
 export async function shutdown(signal: string = "SIGINT"): Promise<void> {
   if (isShuttingDown) return;
@@ -42,11 +52,39 @@ export async function shutdown(signal: string = "SIGINT"): Promise<void> {
 
   log.info(`[SHUTDOWN] Received ${signal}. Saving state...`);
 
-  // Run registered handlers in reverse order
+  // Per-handler timeout (default 5s)
+  const handlerTimeoutMs = parseInt(
+    process.env.SHUTDOWN_HANDLER_TIMEOUT_MS ?? "5000",
+    10,
+  );
+  // Total shutdown budget (default 30s)
+  const totalTimeoutMs = parseInt(
+    process.env.SHUTDOWN_TOTAL_TIMEOUT_MS ?? "30000",
+    10,
+  );
+
+  const shutdownStart = Date.now();
+  const remainingBudget = () => Math.max(0, totalTimeoutMs - (Date.now() - shutdownStart));
+
+  // Run registered handlers in reverse order (LIFO)
   const reversedHandlers = [...shutdownHandlers].reverse();
   for (const handler of reversedHandlers) {
+    const budget = remainingBudget();
+    if (budget <= 0) {
+      log.warn(`[SHUTDOWN] Total timeout (${totalTimeoutMs}ms) exceeded, skipping remaining ${reversedHandlers.length - reversedHandlers.indexOf(handler)} handler(s)`);
+      break;
+    }
+    const perHandlerBudget = Math.min(handlerTimeoutMs, budget);
     try {
-      handler();
+      await Promise.race([
+        Promise.resolve(handler()),
+        new Promise<void>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Handler timeout after ${perHandlerBudget}ms`)),
+            perHandlerBudget,
+          ),
+        ),
+      ]);
     } catch (err) {
       log.warn(`[SHUTDOWN] Handler failed: ${(err as Error).message}`);
     }
@@ -154,8 +192,24 @@ export function loadLastPlan(): { plan: any; savedAt: string } | null {
 
 /**
  * Register signal handlers. Call this once at startup.
+ *
+ * BUG FIX (audit issue #7): previously, calling registerShutdownHandlers()
+ * multiple times (e.g., in tests, or if index.ts was loaded twice) would
+ * add duplicate listeners for SIGINT/SIGTERM/SIGHUP/uncaughtException.
+ * Each Ctrl+C would then trigger shutdown() N times, where N is the number
+ * of duplicate registrations — causing handlers to run N times, files to
+ * be written N times, and "max listeners exceeded" warnings.
+ *
+ * Fix: guard with `handlersRegistered` flag. Subsequent calls are no-ops.
+ * Use `resetShutdownState()` (for tests) to clear the flag and re-register.
  */
 export function registerShutdownHandlers(): void {
+  if (handlersRegistered) {
+    log.debug("[SHUTDOWN] Handlers already registered, skipping duplicate registration");
+    return;
+  }
+  handlersRegistered = true;
+
   const handler = async (signal: string) => {
     await shutdown(signal);
     // Give a brief moment for logs to flush

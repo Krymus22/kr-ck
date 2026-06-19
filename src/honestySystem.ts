@@ -418,13 +418,68 @@ export async function checkUserClaims(
 /**
  * Extract confidence level from a pensar() call.
  * Returns 0 if no confidence was provided.
+ *
+ * BUG FIX (audit issue #5): previously only recognized the literal pattern
+ * `confian[çc]a: N` where N is an integer 0-9. Common variants like
+ * `100%`, `1.0`, `high`/`medium`/`low` were silently ignored, returning 0
+ * even when the model clearly stated a confidence level.
+ *
+ * Now recognizes:
+ *   - "confian[çc]a: 8"        → 8
+ *   - "confian[çc]a: 8/10"     → 8
+ *   - "confian[çc]a: 80%"      → 8 (normalized 0-100 → 0-10)
+ *   - "confidence: 0.8"        → 8 (decimal 0-1 → 0-10)
+ *   - "confidence: high"       → 9 (qualitative high → 9/10)
+ *   - "confidence: medium"     → 6 (qualitative medium → 6/10)
+ *   - "confidence: low"        → 3 (qualitative low → 3/10)
+ *   - "confidence: 5/10"       → 5
+ *
+ * Accepts both PT ("confianca"/"confiança") and EN ("confidence") spellings,
+ * with `:` or `=` as separator, case-insensitive.
+ *
+ * Returned value is always clamped to [1, 10] (matching the 1-10 scale used
+ * by checkConfidenceAction below).
  */
 export function extractConfidence(pensarContent: string): number {
-  const match = pensarContent.match(/confian[cç]a\s*[:=]\s*(\d+)/i);
-  if (match) {
-    const n = parseInt(match[1]!, 10);
-    return Math.max(1, Math.min(10, n));
+  const text = pensarContent.toLowerCase();
+
+  // 1. Try numeric pattern: "confian[çc]a: N" or "confidence: N"
+  //    Accepts N as integer (0-10 or 0-100), decimal (0.0-1.0 or 0.0-10.0),
+  //    or fraction (N/10 or N/100).
+  const numericMatch = text.match(/confian[cç]a\s*[:=]\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+))?%?|confidence\s*[:=]\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+))?%?/i);
+  if (numericMatch) {
+    const raw = parseFloat(numericMatch[1] ?? numericMatch[3] ?? "0");
+    const denom = numericMatch[2] ?? numericMatch[4] ?? null;
+    const hadPercentSign = /%/i.test(numericMatch[0] ?? "");
+
+    let normalized: number;
+    if (hadPercentSign || raw > 10) {
+      // 0-100 scale (percent or large integer) → divide by 10
+      normalized = raw / 10;
+    } else if (denom !== null) {
+      // explicit fraction like "8/10" or "80/100"
+      const d = parseInt(denom, 10);
+      normalized = d === 100 ? raw / 10 : d === 10 ? raw : raw / 10;
+    } else if (raw <= 1.0) {
+      // decimal 0.0-1.0 → multiply by 10
+      normalized = raw * 10;
+    } else {
+      // 1-10 integer scale — use as-is
+      normalized = raw;
+    }
+    return Math.max(1, Math.min(10, Math.round(normalized)));
   }
+
+  // 2. Try qualitative pattern: "confidence: high|medium|low"
+  //    Also accepts PT: "alta|média|media|baixa"
+  const qualitativeMatch = text.match(/confian[cç]a\s*[:=]\s*(\w+)|confidence\s*[:=]\s*(\w+)/i);
+  if (qualitativeMatch) {
+    const word = (qualitativeMatch[1] ?? qualitativeMatch[2] ?? "").toLowerCase();
+    if (["high", "alta", "alto", "muito alta", "very high"].includes(word)) return 9;
+    if (["medium", "media", "média", "medio", "médio", "moderate"].includes(word)) return 6;
+    if (["low", "baixa", "baixo", "muito baixa", "very low"].includes(word)) return 3;
+  }
+
   return 0; // not provided
 }
 

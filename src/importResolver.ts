@@ -119,6 +119,16 @@ function extractImports(filePath: string, content: string): ImportEntry[] {
 
 /**
  * Resolve a relative import path to an absolute file path.
+ *
+ * BUG FIX (audit issue #4): previously, if the user imported './utils' and
+ * './utils' was a DIRECTORY (containing index.ts), `fs.existsSync(resolved)`
+ * returned true for the directory itself, and the resolver returned the
+ * directory path immediately — never trying '/index.ts' extensions.
+ * The downstream code then tried to readFileSync on a directory, which
+ * either threw or returned garbage, breaking symbol export checks.
+ *
+ * Fix: skip directories in the initial existsSync check (only accept files).
+ * This lets the extensions loop fall through to '/index.ts' / '/index.js'.
  */
 function resolveImportPath(source: string, fromFile: string): string | null {
   // Skip non-relative imports (node_modules, packages, etc.)
@@ -129,12 +139,22 @@ function resolveImportPath(source: string, fromFile: string): string | null {
   const dir = path.dirname(fromFile);
   const resolved = path.resolve(dir, source);
 
-  // Try exact path, then with extensions
+  // Try exact path, then with extensions.
+  // NOTE: only accept FILES here, not directories — otherwise
+  // `import './utils'` where 'utils' is a directory would short-circuit
+  // before we get to try 'utils/index.ts'.
+  const existsAsFile = (p: string): boolean => {
+    try {
+      return fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+
   const extensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".luau", ".lua", ".py", ".rs", ".go", "/index.ts", "/index.js"];
-  if (fs.existsSync(resolved)) return resolved;
+  if (existsAsFile(resolved)) return resolved;
   for (const ext of extensions) {
-    if (fs.existsSync(resolved + ext)) return resolved + ext;
-    if (fs.existsSync(resolved + ext.replace("/", ""))) return resolved + ext.replace("/", "");
+    if (existsAsFile(resolved + ext)) return resolved + ext;
   }
   return null;
 }

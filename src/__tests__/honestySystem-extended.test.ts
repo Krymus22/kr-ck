@@ -228,13 +228,24 @@ describe("honestySystem (extended)", () => {
       expect(extractConfidence("confianca: 0")).toBe(1);
     });
 
-    it("retorna 0 (não null) para texto sem confiança — formato '100%' não é suportado", async () => {
+    it("agora reconhece formatos estendidos (BUG FIX audit issue #5)", async () => {
       const { extractConfidence } = await import("./../honestySystem.js");
-      // O módulo só reconhece o pattern "confian[çc]a: N"
-      // Formatos como "100%", "1.0", "high" não são parseados — retornam 0
-      expect(extractConfidence("Estou 100% confiante")).toBe(0);
-      expect(extractConfidence("confidence: 1.0")).toBe(0);
-      expect(extractConfidence("high confidence")).toBe(0);
+      // BUG FIX: previously only "confian[çc]a: N" was recognized.
+      // Now we accept percent, decimal, fraction, and qualitative formats.
+      expect(extractConfidence("confianca: 80%")).toBe(8);   // 80% → 8
+      expect(extractConfidence("confidence: 1.0")).toBe(10);  // decimal 1.0 → 10
+      expect(extractConfidence("confidence: high")).toBe(9);  // qualitative high → 9
+      expect(extractConfidence("confidence: medium")).toBe(6); // qualitative medium → 6
+      expect(extractConfidence("confidence: low")).toBe(3);   // qualitative low → 3
+      expect(extractConfidence("confianca: 8/10")).toBe(8);   // fraction → 8
+    });
+
+    it("ainda retorna 0 para texto que não menciona confiança", async () => {
+      const { extractConfidence } = await import("./../honestySystem.js");
+      // Mensagens que não mencionam confiança continuam retornando 0
+      expect(extractConfidence("Estou pensando no problema")).toBe(0);
+      expect(extractConfidence("vamos verificar o código")).toBe(0);
+      expect(extractConfidence("high temperature today")).toBe(0); // "high" sem "confidence:"
     });
 
     it("retorna 0 para string vazia", async () => {
