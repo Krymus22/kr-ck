@@ -53,6 +53,8 @@ const hoisted = vi.hoisted(() => ({
   preHookResult: { skip: false } as { skip?: boolean; modifiedArgs?: any; resultOverride?: string },
   postHookResult: { modifiedResult: null as string | null },
   // Pré-filtros de tools (toolReduction real, retorna todas as tools)
+  // Flag para forçar lerArquivo a lançar exceção (teste 8c: tool throws → capturado)
+  lerArquivoShouldThrow: false,
 }));
 
 // ─── Mocks de dependências externas ─────────────────────────────────────────
@@ -242,6 +244,23 @@ vi.mock("../checkpointWriter.js", () => ({
   formatCheckpoint: vi.fn(() => ""),
 }));
 
+// tools.js: por padrão, usa a implementação REAL (lerArquivo lê arquivos do
+// disco, aplicarDiff escreve, etc.). Mas expomos um flag hoisted
+// (lerArquivoShouldThrow) que, quando true, faz lerArquivo lançar uma exceção
+// — usado pelo teste 8c para exercitar o try/catch em executeHandler.
+vi.mock("../tools.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../tools.js")>();
+  return {
+    ...actual,
+    lerArquivo: vi.fn(async (args: { caminho: string }) => {
+      if (hoisted.lerArquivoShouldThrow) {
+        throw new Error("simulated handler throw");
+      }
+      return actual.lerArquivo(args);
+    }),
+  };
+});
+
 // ─── Imports REAIS (módulos internos que vão rodar de verdade) ──────────────
 
 import { runAgentLoop } from "../agent.js";
@@ -331,6 +350,7 @@ beforeEach(() => {
   hoisted.contextWindowTokens = 128000;
   hoisted.preHookResult = { skip: false };
   hoisted.postHookResult = { modifiedResult: null };
+  hoisted.lerArquivoShouldThrow = false;
 
   // Snapshot do env/cwd
   originalEnv = { ...process.env };
@@ -791,40 +811,40 @@ describe("8b. Error recovery: erro não-retryável propagado pra UI", () => {
   });
 });
 
-describe("8c. Tool lança exceção → comportamento documentado (BUG)", () => {
-  it("tool throws (ler_arquivo lança Error) — erro NÃO é capturado como tool result; propaga", async () => {
-    // Cria arquivo real (precisa existir para passar pelo gate)
+describe("8c. Tool lança exceção → erro capturado como tool result (BUG corrigido)", () => {
+  it("tool throws (ler_arquivo lança Error) — erro é capturado em tool result; IA continua", async () => {
+    // Cria arquivo real (precisa existir para passar pelo gate de schema/leitura)
     const filePath = path.join(tmpProject, "throws.txt");
     fs.writeFileSync(filePath, "ok", "utf8");
 
-    // O tool handler `ler_arquivo` em agent.ts chama lerArquivo de tools.ts.
-    // tools.ts é real, então não conseguimos fazer o handler lançar diretamente.
-    // Mas podemos fazer o hook pré-tool-call pular a execução e injetar um override.
-    // Para simular um throw real, configuramos o hook para retornar um skip+override.
-    //
-    // Como o agente não tem try/catch em executeToolCallsSequentially, um throw
-    // real propagaria para o caller. Aqui verificamos indiretamente o caminho:
-    // o hook pré-call pode impedir a execução e devolver um resultado de erro.
-    hoisted.preHookResult = {
-      skip: true,
-      resultOverride: "[ERRO] Simulação: tool lançaria exceção.",
-    };
+    // Faz o handler real (lerArquivo de tools.ts) lançar uma exceção.
+    // Antes do fix, esse throw propagaria sem tratamento para o caller (UI)
+    // e derrubaria o turn. Após o fix, executeHandler tem try/catch e
+    // converte o throw em um tool result "[ERRO] <msg>".
+    hoisted.lerArquivoShouldThrow = true;
 
-    const call = makeToolCall("ler_arquivo", { caminho: filePath }, "call_preempt");
+    const call = makeToolCall("ler_arquivo", { caminho: filePath }, "call_throw");
     mockedChat
       .mockResolvedValueOnce(mockToolCallsResponse([call]))
       .mockResolvedValueOnce(mockStopResponse("Vi o erro e decidi parar."));
 
+    // runAgentLoop NÃO deve rejeitar — o erro foi capturado.
     const result = await runAgentLoop("use a tool que falha");
 
     expect(result).toBe("Vi o erro e decidi parar.");
-    // O tool result contém o erro injetado pelo hook
+
+    // O tool result no histórico contém o erro capturado pelo try/catch.
     const hist = history.getHistory();
     const toolMsg = hist.find(
       (m) => (m as { role: string }).role === "tool",
     ) as { content?: string } | undefined;
     expect(toolMsg).toBeDefined();
     expect(toolMsg!.content).toContain("[ERRO]");
+    expect(toolMsg!.content).toContain("simulated handler throw");
+
+    // chat() foi chamado 2x: uma para o tool_call, outra para a resposta final.
+    // Isto confirma que a IA continuou o loop após receber o erro como tool result.
+    expect(mockedChat).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -241,11 +241,38 @@ export function toggleExtension(id: string): boolean | null {
   if (!ext) return null;
   ext.enabled = !ext.enabled;
   if (!ext.enabled) {
+    // Desligando: marca como disabled.
     ext.triggerMode = "disabled";
+  } else if (ext.triggerMode === "disabled") {
+    // Re-habilitando: restaura o triggerMode para um default sensato baseado
+    // na categoria (BUG FIX — antes o triggerMode ficava "disabled" mesmo com
+    // enabled=true, deixando a extensão em estado inconsistente — o card
+    // mostrava "ON [OFF]" e getEnabledExtensions filtrava ela).
+    ext.triggerMode = defaultTriggerForCategory(ext.category);
   }
   saveState(hubState);
   emitChange();
   return ext.enabled;
+}
+
+/**
+ * Trigger mode default por categoria, usado ao re-habilitar uma extensão
+ * via toggleExtension (não temos info do triggerMode anterior).
+ *   - feature: "always" (features internas rodam sempre)
+ *   - tool:    "on_file" (rodam após modificar arquivo)
+ *   - skill:   "on_file"
+ *   - mcp:     "on_task" (rodados ao terminar task)
+ *   - plugin:  "on_file"
+ */
+function defaultTriggerForCategory(category: ExtensionCategory): TriggerMode {
+  switch (category) {
+    case "feature": return "always";
+    case "mcp":     return "on_task";
+    case "tool":
+    case "skill":
+    case "plugin":
+    default:        return "on_file";
+  }
 }
 
 /** Set trigger mode for an extension. Returns new mode or null if not found. */

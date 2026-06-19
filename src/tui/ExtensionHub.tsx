@@ -32,6 +32,7 @@ import {
   toggleExtension,
   cycleTriggerMode,
   setTriggerMode,
+  syncExtensions,
   getTriggerLabel,
   getTriggerModes,
   getCategoryIcon,
@@ -439,6 +440,21 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         import("../toolInstaller.js").then(({ installTool }) => {
           installTool(toolName).then((result) => {
             if (result.success) {
+              // BUG FIX: após installTool success, re-sincroniza o hub para
+              // marcar a tool como `installed=true`. Antes o bloco era vazio e
+              // o card continuava mostrando [FALTA] mesmo após instalação.
+              //
+              // syncExtensions preserva enabled/triggerMode das extensões
+              // existentes (merge por id), apenas atualiza os demais campos.
+              const entries = getAllExtensions().map((e) => ({
+                id: e.id,
+                name: e.name,
+                category: e.category,
+                description: e.description,
+                installed: e.id === item.id ? true : e.installed,
+                meta: e.meta,
+              }));
+              syncExtensions(entries);
             }
           }).catch(() => {
             // ignore — logged by installer

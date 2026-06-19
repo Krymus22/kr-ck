@@ -522,8 +522,41 @@ export async function applyMode(name: string): Promise<ModeApplyResult> {
   }
 }
 
-/** Deactivate the current mode (just clears the pointer). */
+/**
+ * Deactivate the current mode: reverte as tools habilitadas pelo modo e
+ * limpa o ponteiro do modo ativo.
+ *
+ * IMPORTANTE: só desliga TOOLS (não skills/features), seguindo o mesmo padrão
+ * do `applyMode` — o usuário pode ter habilitado skills/features manualmente.
+ */
 export function deactivateMode(): void {
+  // ANTES de limpar o ponteiro, lê o modo ativo para saber quais tools reverter.
+  const mode = getActiveMode();
+  if (mode && mode.enableTools.length > 0) {
+    try {
+      // Lazy-import para evitar dependência circular (mesmo padrão do applyMode).
+      // Como o dynamic import é async, usamos um wrapper fire-and-forget —
+      // chamadas sincronizadas a deactivateMode ainda limpam o ponteiro
+      // imediatamente (abaixo), mas a reversão das tools acontece de forma
+      // assíncrona. O handler do TUI aguarda a próxima renderização.
+      void (async () => {
+        const { toggleExtension, getAllExtensions } = await import("./extensionCenter.js");
+        const all = getAllExtensions();
+        for (const toolId of mode.enableTools) {
+          const ext = all.find((e) => e.id === toolId);
+          // Só desliga se estiver ON (enabled && triggerMode !== "disabled").
+          // Não desliga skills/features — usuário pode ter habilitado manualmente.
+          if (ext && ext.category === "tool" && ext.enabled && ext.triggerMode !== "disabled") {
+            toggleExtension(toolId);
+          }
+        }
+      })().catch((err) => {
+        log.warn(`deactivateMode: failed to revert tools: ${(err as Error).message}`);
+      });
+    } catch (err) {
+      log.warn(`deactivateMode: failed to revert tools: ${(err as Error).message}`);
+    }
+  }
   setActiveMode(null);
 }
 

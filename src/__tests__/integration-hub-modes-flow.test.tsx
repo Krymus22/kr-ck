@@ -497,16 +497,28 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
       // getActiveModeName() retorna null (deactivateMode real → setActiveMode(null))
       expect(getActiveModeName()).toBeNull();
 
-      // ═══ NOTA DE BUG ═══
-      // deactivateMode() apenas limpa o ponteiro do modo ativo — NÃO reverte
-      // as mudanças que applyMode fez nas extensões. Ou seja, as tools que
-      // applyMode ligou continuam ligadas. Isso é comportamento atual (não um
-      // bug confirmado, mas é surpreendente para o usuário).
+      // ═══ BUG FIX ═══
+      // deactivateMode() agora REVERTE as tools que o modo ativo havia
+      // habilitado (mesmo padrão do applyMode: só toca tools, não skills/
+      // features). rojo_build, selene_lint e stylua_format (todas no
+      // enableTools do roblox) devem voltar a OFF após desativar o modo.
       //
-      // Verificamos o comportamento real: extensions NÃO voltam ao estado
-      // anterior automaticamente. rojo_build continua ON.
+      // A reversão é async (dynamic import), mas o delay(50) acima dá tempo
+      // suficiente para o fire-and-forget completar.
       const rojo = getExtension("tool:rojo_build");
-      expect(rojo?.enabled).toBe(true);
+      expect(rojo?.enabled).toBe(false);
+      expect(rojo?.triggerMode).toBe("disabled");
+
+      const selene = getExtension("tool:selene_lint");
+      expect(selene?.enabled).toBe(false);
+
+      const stylua = getExtension("tool:stylua_format");
+      expect(stylua?.enabled).toBe(false);
+
+      // Skills/features NÃO são desligadas (usuário pode tê-las habilitado
+      // manualmente — mesmo regra do applyMode).
+      const profilestore = getExtension("skill:profilestore");
+      expect(profilestore?.enabled).toBe(true);
 
       // Hub não mostra mais "Active mode: roblox"
       const frame = stripAnsi(lastFrame() ?? "");
@@ -658,16 +670,19 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
       expect(getExtension(id)?.triggerMode).toBe("disabled");
       expect(getExtension(id)?.enabled).toBe(false);
 
-      // Enter → toggleExtension (re-habilita, mas triggerMode continua "disabled")
-      // ═══ NOTA DE BUG ═══
-      // toggleExtension não restaura o triggerMode — apenas inverte enabled.
-      // Resultado: extensão fica "enabled=true, triggerMode=disabled", o que é
-      // um estado inconsistente (getEnabledExtensions filtra por triggerMode).
+      // Enter → toggleExtension re-habilita a extensão.
+      // ═══ BUG FIX ═══
+      // Antes, toggleExtension apenas invertia `enabled` e deixava
+      // triggerMode="disabled", resultando em estado inconsistente
+      // (enabled=true, triggerMode=disabled — card mostrava "ON [OFF]").
+      //
+      // Agora, ao re-habilitar (false → true), o triggerMode é restaurado
+      // para o default da categoria. Para tool, default é "on_file".
       stdin.write("\r");
       await delay(30);
       expect(getExtension(id)?.enabled).toBe(true);
-      // triggerMode permanece "disabled" — bug documentado
-      expect(getExtension(id)?.triggerMode).toBe("disabled");
+      // triggerMode restaurado para o default da categoria tool = "on_file"
+      expect(getExtension(id)?.triggerMode).toBe("on_file");
     });
 
     it("variação: teclas 1-4 setam trigger mode específico", async () => {
@@ -726,15 +741,13 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
       const args = mockInstallTool.mock.calls[0];
       expect(args[0]).toBe("rojo");
 
-      // ═══ NOTA DE BUG ═══
-      // O handler 'I' no ExtensionHub NÃO atualiza o campo `installed` da
-      // extensão após installTool resolver com sucesso. O bloco
-      // `if (result.success) { /* vazio */ }` está vazio. Portanto, o card
-      // continua mostrando [FALTA] mesmo após a instalação bem-sucedida.
-      // O teste abaixo verifica o comportamento real (installTool foi chamado
-      // — não verificamos [OK] pois não acontece).
+      // ═══ BUG FIX ═══
+      // Após installTool resolver com success=true, o handler 'I' agora
+      // chama syncExtensions() para marcar a tool como installed=true.
+      // Antes o bloco `if (result.success) { /* vazio */ }` não fazia nada,
+      // e o card continuava mostrando [FALTA].
       const rojo = getExtension("tool:rojo_build");
-      expect(rojo?.installed).toBe(false); // AINDA false — bug
+      expect(rojo?.installed).toBe(true);
     });
   });
 

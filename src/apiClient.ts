@@ -959,16 +959,25 @@ function createStreamRequest(
   return c.chat.completions.create(requestBody);
 }
 
+// BUG FIX (BUG 5): processReasoningChunk antes retornava `!wasFirst` (boolean
+// indicando se NÃO foi o primeiro chunk), mas `processStreamChunk` ignorava o
+// retorno — código morto. Mudado para `void` e o retorno foi removido.
+//
+// BUG FIX (BUG 3 complemento): antes, esta função também consumia o flag
+// `isFirstChunk` (setava para false). Mas `isFirstChunk` é usado por
+// `processContentChunk` para disparar `onStreamStart` no PRIMEIRO chunk de
+// CONTEÚDO. Como `processReasoningChunk` NÃO chama `onStreamStart`, consumir o
+// flag aqui fazia com que `onStreamStart` nunca fosse chamado quando o stream
+// começava com reasoning. Removida a manipulação de `isFirstChunk` — o flag
+// só é consumido quando o primeiro CONTENT chunk chega.
 function processReasoningChunk(
   state: StreamState,
   onThinking?: () => void,
-): boolean {
-  const wasFirst = state.isFirstChunk;
-  if (wasFirst) {
-    state.isFirstChunk = false;
-  }
+): void {
+  // state é recebido apenas para manter a assinatura consistente com as outras
+  // funções processXxxChunk. Não há estado a mutar aqui.
+  void state;
   onThinking?.();
-  return !wasFirst;
 }
 
 function processContentChunk(
@@ -977,12 +986,19 @@ function processContentChunk(
   onStreamStart?: () => void,
   onToken?: (token: string) => void,
 ): void {
+  // BUG FIX (BUG 3): antes havia um `else if (state.totalContent === "")`
+  // morto — totalContent só cresce, nunca volta a ser "". onStreamStart deve
+  // ser chamado APENAS na primeira vez que isFirstChunk é true.
   if (state.isFirstChunk) {
     state.isFirstChunk = false;
     onStreamStart?.();
-  } else if (state.totalContent === "") {
-    onStreamStart?.();
   }
+  // BUG FIX (BUG 2): antes, o caller usava `if (delta.content)` (falsy para
+  // string vazia), então chunks com content="" nunca chegavam aqui. Agora o
+  // caller testa `typeof delta.content === "string"`, então strings vazias
+  // chegam. Chamamos onToken mesmo com string vazia (alguns provedores enviam
+  // chunks vazios como heartbeats). totalContent += "" é no-op, então a
+  // contagem de tokens no conteúdo final não é afetada.
   onToken?.(content);
   state.totalContent += content;
 }
@@ -1050,12 +1066,17 @@ function processStreamChunk(
     return;
   }
 
-  if (delta.content) {
-    processContentChunk(state, delta.content, onStreamStart, onToken);
-  }
-
   if (delta.tool_calls) {
     processToolCallDelta(state.toolCallsAccumulator, delta.tool_calls);
+  }
+
+  // BUG FIX (BUG 2): antes era `if (delta.content)` (falsy para string vazia),
+  // então chunks com content="" nunca chamavam onToken. Agora testamos
+  // `typeof delta.content === "string"` para que chunks vazios (heartbeats)
+  // também sejam processados. O acúmulo em totalContent não é afetado porque
+  // somar "" é no-op.
+  if (typeof delta.content === "string") {
+    processContentChunk(state, delta.content, onStreamStart, onToken);
   }
 
   if (choice.finish_reason) state.finishReason = choice.finish_reason;
@@ -1097,7 +1118,12 @@ function buildChatResponse(state: StreamState): ChatResponse {
           tool_calls: toolCallsList.length > 0 ? toolCallsList : undefined,
           refusal: null,
         },
-        finish_reason: (state.finishReason as any) ?? "stop",
+        // BUG FIX (BUG 4): antes, quando o stream terminava sem finish_reason
+        // explícito, o default era "stop" — isso mascarava streams que
+        // terminaram abruptamente. Agora o default é null, e o caller é
+        // responsável por interpretar a ausência de finish_reason. O tipo
+        // ChatCompletion do OpenAI SDK aceita null para finish_reason.
+        finish_reason: (state.finishReason as any) ?? null,
         logprobs: null,
       },
     ],
@@ -1166,12 +1192,28 @@ function is429Error(err: unknown): boolean {
     (apiErr == null && (err as { status?: number })?.status === 429);
 }
 
+// BUG FIX (BUG 1): antes, só 429 e erros de rede (ECONNRESET, ETIMEDOUT) eram
+// retried. 502/503 frequentemente são transientes (gateway restart, deploy,
+// overload momentâneo) e deveriam ser retried. 500 NÃO é retriable (geralmente
+// é bug real no servidor). 504 também não (gateway timeout — retry provável de
+// falhar da mesma forma; o cliente de HTTP já tem seu próprio timeout).
+const RETRIABLE_5XX_STATUSES = new Set([502, 503]);
+
+function is5xxRetryableError(err: unknown): boolean {
+  const apiErr = err instanceof OpenAI.APIError ? err : null;
+  const status = apiErr?.status ?? (err as { status?: number })?.status;
+  return typeof status === "number" && RETRIABLE_5XX_STATUSES.has(status);
+}
+
 function handleStreamError(
   err: unknown,
   attempt: number,
 ): Promise<{ retried: boolean; newAttempt: number }> | null {
   if (is429Error(err)) {
     return handle429Error(err, attempt);
+  }
+  if (is5xxRetryableError(err)) {
+    return handle5xxRetryableError(err, attempt);
   }
   if (isTransientNetworkError(err)) {
     return handleTransientNetworkError(err, attempt);
@@ -1212,6 +1254,29 @@ async function retryWithDelay(retryAfterS: number, attempt: number): Promise<{ r
   log.throttle(
     `API retornou 429. Retry-After: ${retryAfterS}s. ` +
     `Aguardando ${retryAfterS}s (tentativa ${newAttempt}/${MAX_429_RETRIES})...`
+  );
+  await sleep(waitMs);
+  return { retried: true, newAttempt };
+}
+
+// BUG FIX (BUG 1): handler de retry para 502/503 (transientes). Usa o mesmo
+// limite e backoff de erros de rede (MAX_NETWORK_RETRIES = 8, 500ms..3000ms),
+// porque 5xx transiente tem perfil de recuperação similar a um erro de rede.
+async function handle5xxRetryableError(
+  err: unknown,
+  attempt: number,
+): Promise<{ retried: boolean; newAttempt: number }> {
+  if (attempt >= MAX_NETWORK_RETRIES) {
+    return { retried: false, newAttempt: attempt };
+  }
+
+  const newAttempt = attempt + 1;
+  const waitMs = Math.min(newAttempt * 500, 3000);
+  const apiErr = err instanceof OpenAI.APIError ? err : null;
+  const status = apiErr?.status ?? (err as { status?: number })?.status ?? "?";
+  log.warn(
+    `Erro ${status} do servidor (transiente). ` +
+    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES})...`
   );
   await sleep(waitMs);
   return { retried: true, newAttempt };
@@ -1269,6 +1334,18 @@ export async function chat(
     }
   }
   return chatSingleKey(messages, tools, onStreamStart, onToken, onThinking);
+}
+
+// BUG FIX (BUG 6): helper para cancelar/abortar um stream perdedor do hedging.
+// Tenta várias APIs comuns: OpenAI SDK Stream expõe `.controller` (AbortController);
+// Node streams têm `.destroy()`; alguns objetos têm `.abort()`. Se nada for
+// disponível (ex: mock async iterable em testes), a função é no-op.
+function abortStreamSafe(s: any): void {
+  if (s == null) return;
+  try { s?.controller?.abort?.(); } catch { /* noop */ }
+  try { s?.abort?.(); } catch { /* noop */ }
+  try { s?.destroy?.(); } catch { /* noop */ }
+  try { s?.return?.(); } catch { /* noop */ } // encerra async iterators
 }
 
 /** Pool-mode chat: pick a free key from the pool, run the request, release. */
@@ -1345,17 +1422,32 @@ async function chatWithPool(
           const hedgeState = createStreamState();
 
           // Race: first stream to produce content wins
-          const primaryPromise = consumeStream(rawStream, primaryState, undefined, undefined, undefined).then(() => "primary");
+          // BUG FIX (BUG 6): antes, o `.catch(() => {})` do perdedor era
+          // registrado APÓS o `Promise.race` resolver. Se o stream perdedor
+          // rejeitasse antes do catch ser anexado, vira unhandled rejection.
+          // Agora anexamos o catch ANTES da race em AMBAS as promises —
+          // qualquer rejeição é silenciada imediatamente.
+          const primaryPromise = consumeStream(rawStream, primaryState, undefined, undefined, undefined).then(() => "primary" as const);
+          primaryPromise.catch(() => {}); // suppress unhandled rejection no perdedor
+
+          let hedgeRawStream: any = null;
           const hedgeStreamPromise = createStreamRequest(messages, tools, (hedgeHandle as any)!.client)
-            .then(hs => consumeStream(hs, hedgeState, undefined, undefined, undefined).then(() => "hedge"));
+            .then(hs => {
+              hedgeRawStream = hs;
+              return consumeStream(hs, hedgeState, undefined, undefined, undefined).then(() => "hedge" as const);
+            });
+          hedgeStreamPromise.catch(() => {}); // suppress unhandled rejection no perdedor
 
           const winner = await Promise.race([primaryPromise, hedgeStreamPromise]);
           hedgeWinner = winner as "primary" | "hedge";
 
-          // Consume the loser stream (to avoid unhandled rejection)
+          // BUG FIX (BUG 6): cancelar/abortar o stream perdedor para evitar
+          // leak. Tenta chamar `.abort()` / `.destroy()` / `.controller.abort()`
+          // se disponível (OpenAI SDK Stream expõe `.controller`). Se o stream
+          // for um mock/async iterable sem esses métodos, nada acontece.
           if (hedgeWinner === "primary") {
-            // Hedge lost — consume it silently
-            hedgeStreamPromise.catch(() => {});
+            // Hedge lost — aborta o stream subjacente do hedge
+            abortStreamSafe(hedgeRawStream);
             const response = buildChatResponse(primaryState);
             // But we need to call onStreamStart/onToken with the winner's content
             if (onStreamStart) onStreamStart();
@@ -1365,8 +1457,8 @@ async function chatWithPool(
             releaseSuccess = true;
             return response;
           } else {
-            // Primary lost — consume it silently
-            primaryPromise.catch(() => {});
+            // Primary lost — aborta o stream subjacente do primary
+            abortStreamSafe(rawStream);
             const response = buildChatResponse(hedgeState);
             if (onStreamStart) onStreamStart();
             if (onToken && response.choices[0]?.message?.content) {

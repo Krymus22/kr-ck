@@ -1107,8 +1107,28 @@ function trackFileAccess(name: string, args: Record<string, unknown>): void {
 
 async function executeHandler(name: string, args: Record<string, unknown>, toolCall: ToolCall, healRetry: number): Promise<ToolResult> {
   const handler = toolHandlers[name];
-  if (handler) return handler(args, toolCall, healRetry);
-  if (name.includes("__")) return { resultStr: await callMCPTool(name, args), usedHeal: false };
+  if (handler) {
+    try {
+      return await handler(args, toolCall, healRetry);
+    } catch (err) {
+      // BUGFIX: Se o tool handler lançar uma exceção síncrona/assíncrona
+      // (em vez de retornar uma string [ERRO]), o erro não deve propagar
+      // para o caller (UI) e derrubar o turn. Capturamos aqui e convertemos
+      // em um tool result [ERRO] para que a IA veja o erro e possa continuar.
+      const errMsg = `[ERRO] ${(err as Error).message ?? String(err)}`;
+      log.error(`Handler "${name}" lançou exceção: ${(err as Error).message ?? String(err)}`);
+      return { resultStr: errMsg, usedHeal: false };
+    }
+  }
+  if (name.includes("__")) {
+    try {
+      return { resultStr: await callMCPTool(name, args), usedHeal: false };
+    } catch (err) {
+      const errMsg = `[ERRO] ${(err as Error).message ?? String(err)}`;
+      log.error(`MCP tool "${name}" lançou exceção: ${(err as Error).message ?? String(err)}`);
+      return { resultStr: errMsg, usedHeal: false };
+    }
+  }
   const unknown = `[ERRO] Ferramenta desconhecida: "${name}"`;
   log.error(unknown);
   return { resultStr: unknown, usedHeal: false };

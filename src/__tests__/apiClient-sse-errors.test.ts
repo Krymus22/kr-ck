@@ -15,7 +15,9 @@
  * internas (handle429Error, handleTransientNetworkError, chatWithPool) através
  * da função pública chat().
  *
- * NOTA: o apiClient.ts NÃO retenta 5xx (só 429 e erros de rede transientes).
+ * NOTA: o apiClient.ts NÃO retenta 500 (geralmente é bug real no servidor).
+ * 502 e 503 SÃO retried (BUG 1 fix) — frequentemente são transientes.
+ * Erros de rede (ECONNRESET, ETIMEDOUT, etc.) também são retried.
  * Os testes refletem o comportamento real do código.
  */
 
@@ -319,8 +321,9 @@ describe("Rate limit (429)", () => {
 // ─── 2. Server errors (5xx) ────────────────────────────────────────────────
 
 describe("Server errors (5xx)", () => {
-  // NOTA: apiClient.ts NÃO retenta 5xx — só 429 e erros de rede transientes.
-  // Os testes abaixo refletem o comportamento real do código.
+  // NOTA: apiClient.ts NÃO retenta 500 (geralmente é bug real no servidor).
+  // 502 e 503 SÃO retried (BUG 1 fix) — frequentemente são transientes
+  // (gateway restart, deploy, overload momentâneo).
 
   it("500 internal server error → NÃO retry → erro propagado", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
@@ -333,23 +336,44 @@ describe("Server errors (5xx)", () => {
     await vi.advanceTimersByTimeAsync(500);
     await assertion;
 
-    // Apenas 1 chamada — 5xx não é retried
+    // Apenas 1 chamada — 500 NÃO é retried (bug real no servidor)
     expect(hoisted.createMock).toHaveBeenCalledTimes(1);
   });
 
-  it("503 service unavailable → NÃO retry → erro propagado", async () => {
+  it("503 service unavailable → RETRY com backoff → erro propagado após esgotar retries (BUG 1)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     vi.setSystemTime(new Date(0));
 
+    // BUG 1 fix: 503 agora é retried (transiente). Retry 8x com backoff
+    // crescente (500+1000+1500+2000+2500+3000+3000+3000 = 16500ms), depois
+    // propaga o erro.
     hoisted.createMock.mockRejectedValue(make5xxError(503, "service unavailable"));
 
     const p = chat(sampleMessages);
+    // Registra handler ANTES de avançar o tempo (evita unhandled rejection)
     const assertion = expect(p).rejects.toThrow("service unavailable");
-    await vi.advanceTimersByTimeAsync(500);
+    // 8 retries com backoff crescente → 16500ms no total
+    await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
-    // Apenas 1 chamada — 503 não é retried (poderia ser, mas não é)
-    expect(hoisted.createMock).toHaveBeenCalledTimes(1);
+    // 1 chamada inicial + 8 retries = 9 chamadas
+    expect(hoisted.createMock).toHaveBeenCalledTimes(9);
+  });
+
+  it("502 bad gateway → RETRY com backoff → erro propagado após esgotar retries (BUG 1)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.setSystemTime(new Date(0));
+
+    // BUG 1 fix: 502 também é retried (mesmo motivo que 503).
+    hoisted.createMock.mockRejectedValue(make5xxError(502, "bad gateway"));
+
+    const p = chat(sampleMessages);
+    const assertion = expect(p).rejects.toThrow("bad gateway");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    // 1 inicial + 8 retries = 9
+    expect(hoisted.createMock).toHaveBeenCalledTimes(9);
   });
 });
 

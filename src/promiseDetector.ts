@@ -31,7 +31,14 @@ export interface PromiseDetectionResult {
   reason: string;
 }
 
-/** Phrases that indicate a promise to take action. */
+/**
+ * Phrases that indicate a promise to take action.
+ *
+ * NOTA: Cada frase é um "vou + verbo de ação" específico. NÃO incluir frases
+ * genéricas como "eu vou" (que apareceriam em "eu vou explicar", "eu vou
+ * pensar", etc. — falsos positivos). A correspondência usa word boundaries
+ * (`\b`) para evitar matches no meio de palavras.
+ */
 const PROMISE_PHRASES_PT = [
   "vou investigar",
   "vou verificar",
@@ -63,6 +70,12 @@ const PROMISE_PHRASES_PT = [
   "vou corrigir",
   "vou arrumar",
   "vou consertar",
+  "vou fazer",
+  "vou fazer isso",
+  "vou continuar",
+  "vou seguir",
+  "vou prosseguir",
+  "vou avançar",
   "deixa eu ver",
   "deixa eu verificar",
   "deixa eu olhar",
@@ -76,12 +89,6 @@ const PROMISE_PHRASES_PT = [
   "aguarde enquanto",
   "um momento,",
   "instante,",
-  "vou fazer isso",
-  "vou continuar",
-  "vou seguir",
-  "vou prosseguir",
-  "vou avançar",
-  "eu vou ",
 ];
 
 const PROMISE_PHRASES_EN = [
@@ -94,7 +101,7 @@ const PROMISE_PHRASES_EN = [
   "i'll find",
   "i'll test",
   "i'll run",
-  "i'll try",
+  "i'll implement",
   "i will check",
   "i will look",
   "i will investigate",
@@ -103,6 +110,7 @@ const PROMISE_PHRASES_EN = [
   "i will search",
   "i will test",
   "i will run",
+  "i will implement",
   "let me check",
   "let me look",
   "let me investigate",
@@ -150,6 +158,29 @@ const ALL_PROMISE_PHRASES = [...PROMISE_PHRASES_PT, ...PROMISE_PHRASES_EN];
 const ALL_REFUSAL_PHRASES = REFUSAL_PHRASES.map((s) => s.toLowerCase());
 
 /**
+ * Pré-compila um regex por frase com word boundaries (`\b`).
+ *
+ * BUGFIX: Antes usávamos `String.includes(phrase)`, que matcheava substrings
+ * sem considerar fronteiras de palavra. Isso gerava falsos positivos quando
+ * frases genéricas como "eu vou " ou "i'll try" apareciam em respostas
+ * explicativas (ex.: "eu vou explicar X", "i'll try to think").
+ *
+ * Agora cada frase vira um regex `\b<frase>\b` (case-insensitive). O `\b`
+ * inicial é sempre adicionado (todas as frases começam com caractere de
+ * palavra). O `\b` final só é adicionado quando a frase termina com caractere
+ * de palavra — frases terminadas em vírgula (ex.: "um momento,") não
+ * recebem `\b` final porque não há fronteira após a pontuação.
+ */
+function buildPhraseRegex(phrase: string): RegExp {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefix = /^\w/.test(phrase) ? "\\b" : "";
+  const suffix = /\w$/.test(phrase) ? "\\b" : "";
+  return new RegExp(`${prefix}${escaped}${suffix}`, "i");
+}
+
+const ALL_PROMISE_REGEXES = ALL_PROMISE_PHRASES.map(buildPhraseRegex);
+
+/**
  * Detect whether the agent's final message contains a "false promise" —
  * i.e. it promises to take action but the turn ends without any tool call
  * or file edit.
@@ -185,9 +216,11 @@ export function detectFalsePromise(
     }
   }
 
-  // Look for promise phrases
-  for (const phrase of ALL_PROMISE_PHRASES) {
-    if (lower.includes(phrase)) {
+  // Look for promise phrases (com word boundaries para evitar falsos positivos)
+  for (let i = 0; i < ALL_PROMISE_REGEXES.length; i++) {
+    const regex = ALL_PROMISE_REGEXES[i];
+    if (regex.test(lower)) {
+      const phrase = ALL_PROMISE_PHRASES[i];
       return {
         detected: true,
         matchedPhrase: phrase,

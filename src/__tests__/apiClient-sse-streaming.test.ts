@@ -301,7 +301,7 @@ describe("Streaming básico de texto", () => {
       contentChunk(" "),
       contentChunk("world"),
       contentChunk("!"),
-      contentChunk(""), // 5º chunk vazio — não deve gerar token nem conteúdo
+      contentChunk(""), // 5º chunk vazio — BUG 2: agora também chama onToken
       finishChunk("stop"),
     ]);
     hoisted.createMock.mockResolvedValue(stream);
@@ -309,10 +309,12 @@ describe("Streaming básico de texto", () => {
     const tokens: string[] = [];
     const response = await chat(sampleMessages, undefined, (t) => tokens.push(t));
 
-    // Conteúdo acumulado = concatenação dos 4 chunks não-vazios
+    // Conteúdo acumulado = concatenação dos 4 chunks não-vazios (string vazia
+    // não adiciona nada ao conteúdo total)
     expect(response.choices[0].message.content).toBe("Hello world!");
-    // onToken chamado apenas para chunks com content truthy (string vazia é falsy)
-    expect(tokens).toEqual(["Hello", " ", "world", "!"]);
+    // BUG 2 fix: onToken é chamado para TODOS os chunks de content, inclusive
+    // o vazio (alguns provedores enviam chunks vazios como heartbeat).
+    expect(tokens).toEqual(["Hello", " ", "world", "!", ""]);
   });
 
   it("1 chunk vazio (só role) → não crasha", async () => {
@@ -404,8 +406,11 @@ describe("Reasoning content (thinking)", () => {
     expect(tokens).toEqual(["A resposta é ", "42"]);
     // Conteúdo final contém APENAS o content (não o reasoning)
     expect(response.choices[0].message.content).toBe("A resposta é 42");
-    // onStreamStart chamado quando o primeiro content aparece
-    expect(streamStartCount).toBeGreaterThanOrEqual(1);
+    // BUG 3 fix: onStreamStart é chamado quando o primeiro CONTENT chunk chega
+    // (não quando o reasoning chega). Como removemos a manipulação de
+    // isFirstChunk em processReasoningChunk, o flag ainda está true quando o
+    // primeiro content chega → onStreamStart dispara exatamente 1x.
+    expect(streamStartCount).toBe(1);
   });
 });
 
@@ -592,7 +597,9 @@ describe("Edge cases de stream", () => {
   it("Stream que termina abruptamente (sem [DONE]) → gracefully handle", async () => {
     // Stream SEM chunk de finish — só chunks de content.
     // O iterador termina normalmente após o último chunk (sem [DONE] marker).
-    // buildChatResponse deve defaultar finish_reason para "stop".
+    // BUG 4 fix: buildChatResponse agora defaulta finish_reason para null
+    // (antes era "stop"), para que o caller possa distinguir streams que
+    // terminaram abruptamente de streams que terminaram normalmente.
     const stream = makeChunkStream([
       contentChunk("texto"),
       contentChunk(" mais"),
@@ -603,7 +610,7 @@ describe("Edge cases de stream", () => {
 
     // Conteúdo acumulado corretamente
     expect(response.choices[0].message.content).toBe("texto mais");
-    // finish_reason default "stop" quando nenhum finishReason veio no stream
-    expect(response.choices[0].finish_reason).toBe("stop");
+    // finish_reason default null quando nenhum finishReason veio no stream
+    expect(response.choices[0].finish_reason).toBeNull();
   });
 });

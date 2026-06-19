@@ -225,6 +225,10 @@ describe("Fase 3 E2E (mocked) — modes, plans, goal verifier, failure memory, h
     it("agent cannot finish if plan has incomplete steps", async () => {
       // First stop: plan says incomplete
       // Second stop: plan complete (agent did the work)
+      //
+      // NOTA: A primeira resposta NÃO contém frase de promessa (ex.: "vou fazer")
+      // para que o false-promise detector não dispare antes do plan executor.
+      // Este teste isola o comportamento do plan executor.
       mockedHasIncompletePlan
         .mockReturnValueOnce(true)   // first check: incomplete
         .mockReturnValueOnce(false); // second check: complete
@@ -232,7 +236,7 @@ describe("Fase 3 E2E (mocked) — modes, plans, goal verifier, failure memory, h
       mockedFormatPlan.mockReturnValue("Plan: 1. ler arquivo [pending]");
 
       mockedChat
-        .mockResolvedValueOnce(makeStopResponse("Vou fazer o trabalho."))
+        .mockResolvedValueOnce(makeStopResponse("Iniciando o trabalho."))
         .mockResolvedValueOnce(makeStopResponse("Trabalho concluído."));
 
       const result = await runAgentLoop("Faz o trabalho");
