@@ -79,22 +79,25 @@ describe("property-pure-functions", () => {
       );
     });
 
-    // BUG DOCUMENTADO (property-pure-functions #1):
+    // BUG P-2 DOCUMENTADO (property-pure-functions #1):
     //   truncateMiddle não adiciona "..." quando maxChars <= 3. Nesses casos
     //   a função retorna s.slice(0, maxChars) (apenas os primeiros caracteres).
-    //   Counterexample encontrado pelo fast-check:
+    //   Counterexample encontrado pelo fast-check (ANTES do ajuste):
     //     truncateMiddle("hello", 3) === "hel"   (não contém "...")
     //     truncateMiddle("hello", 0) === ""      (não contém "...")
+    //   DECISÃO: comportamento INTENCIONAL — o próprio "..." ocupa 3 chars,
+    //   então para maxChars <= 3 não haveria espaço para conteúdo além das
+    //   reticências. O JSDoc da função agora documenta isso explicitamente.
     //   A propriedade "sempre contém '...' quando trunca" só vale para n > 3
-    //   (há espaço suficiente para os 3 chars de "..."). Ver propriedade
-    //   extra logo abaixo para a versão corrigida.
-    it.skip(
-      "truncateMiddle(s, n) sempre contém '...' quando trunca (s.length > n)",
+    //   (há espaço suficiente para os 3 chars de "..."). Pré-condição
+    //   ajustada de min: 0 para min: 4 abaixo.
+    it(
+      "truncateMiddle(s, n) sempre contém '...' quando trunca (s.length > n e n > 3)",
       () => {
         fc.assert(
           fc.property(
             fc
-              .integer({ min: 0, max: 200 })
+              .integer({ min: 4, max: 200 })
               .chain((n) =>
                 fc.tuple(
                   fc.constant(n),
@@ -102,7 +105,7 @@ describe("property-pure-functions", () => {
                 ),
               ),
             ([n, s]) => {
-              // Pré-condição garantida pelo chain: s.length > n.
+              // Pré-condição garantida pelo chain: s.length > n e n > 3.
               return truncateMiddle(s, n).includes("...");
             },
           ),
@@ -111,8 +114,9 @@ describe("property-pure-functions", () => {
       },
     );
 
-    // Propriedade extra (refinada) — SUBSTITUI a acima para n > 3.
-    // Esta versão DEVE passar: quando há espaço para "...", a função adiciona.
+    // Propriedade extra (refinada) — versão canônica para n > 3.
+    // Mantida como sanity check adicional; semanticamente equivalente à
+    // acima (ambas garantem "..." presente quando há espaço para ele).
     it("truncateMiddle(s, n) contém '...' quando s.length > n e n > 3", () => {
       fc.assert(
         fc.property(
@@ -207,17 +211,17 @@ describe("property-pure-functions", () => {
       );
     });
 
-    // BUG DOCUMENTADO (property-pure-functions #2):
-    //   Para N=1, extractConfidence retorna 10 (não 1). A condição
-    //   `raw <= 1.0` em honestySystem.ts:463 trata o inteiro "1" como se
-    //   fosse o decimal "1.0" (= 100%), multiplicando por 10.
-    //   Counterexample encontrado pelo fast-check:
+    // BUG P-1 CORRIGIDO: a função extractConfidence agora distingue o
+    // inteiro "1" (escala 1-10 → retorna 1) do decimal "1.0" (escala
+    // 0.0-1.0 → retorna 10) checando a presença do ponto no match.
+    // Antes, ambos caíam no branch `raw <= 1.0` e eram multiplicados
+    // por 10 — assim "confianca: 1" retornava 10 (confiança MÁXIMA),
+    // bypassando o gate confidence <= 3 do checkConfidenceAction.
+    //   Counterexample (ANTES do fix):
     //     extractConfidence("confianca: 1") === 10   (esperado: 1)
     //     extractConfidence("confidence: 1") === 10  (esperado: 1)
-    //   Para N em 2..10, a propriedade passa (ver extra abaixo).
-    //   Correção sugerida (NÃO aplicada): distinguir "1" (inteiro) de "1.0"
-    //   (decimal) — talvez checar a presença do ponto no match original.
-    it.skip(
+    //   Após o fix: retorna N para qualquer N em 1..10 (inteiro).
+    it(
       "extractConfidence('confianca: N' ou 'confidence: N') retorna N para N entre 1-10",
       () => {
         fc.assert(

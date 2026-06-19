@@ -339,6 +339,21 @@ export async function getActiveValidationRules(): Promise<ValidationRule[]> {
  * a validation rule with a matching filePattern.
  *
  * For backwards compat, .luau and .lua files with `luauValidation` rules still work.
+ *
+ * COMPORTAMENTO INTENCIONAL (opt-in por modo):
+ *   A validação é OPT-IN via modo ativo. Esta função retorna `false` quando
+ *   NENHUM modo está ativo (ou o modo ativo não define regras de validação),
+ *   MESMO para paths `.luau`/`.lua`. Isso é design: a validação só roda se o
+ *   usuário (ou mode) explicitamente ativou regras, evitando bloquear writes
+ *   em ambientes onde as ferramentas (selene/stylua/luau-lsp) não estão
+ *   instaladas ou não são desejadas.
+ *
+ *   Propriedades que assumem "sempre true para .luau/.lua" só valem quando
+ *   há um modo ativo com regras de validação. Em ambiente sem modo ativo
+ *   (ex.: testes unitários), o retorno é sempre `false`.
+ *
+ * @param filePath - Caminho do arquivo a verificar
+ * @returns true se houver regra ativa cujo `filePattern` bate com `filePath`
  */
 export async function shouldValidateFile(filePath: string): Promise<boolean> {
   const rules = await getActiveValidationRules();

@@ -514,29 +514,24 @@ describe("property-state-machines — sequência mista toggle+cycle", () => {
     resetHub();
   });
 
-  // BUG DOCUMENTADO (property-state-machines #1):
-  //   syncExtensions cria estado INCONSISTENTE para skill/mcp/plugin
-  //   instaladas: enabled=true MAS triggerMode="disabled". O card mostra
-  //   "ON [OFF]" e getEnabledExtensions() filtra a extensão (porque exige
-  //   enabled && triggerMode !== "disabled").
-  //
-  //   O BUG FIX em toggleExtension (linhas 246-251 de extensionCenter.ts)
-  //   só corrige o caso de toggle ON a partir de disabled — NÃO corrige o
-  //   estado inicial criado por syncExtensions.
-  //
-  //   Counterexample encontrado pelo fast-check:
+  // BUG P-5 CORRIGIDO: syncExtensions agora cria estado CONSISTENTE para
+  // skill/mcp/plugin instaladas — quando defaultEnabled=true, o
+  // defaultTrigger passa a ser defaultTriggerForCategory(category) em vez
+  // de "disabled". Antes, o estado inicial ficava inconsistente
+  // (enabled=true MAS triggerMode="disabled") — o card mostrava "ON [OFF]"
+  // e getEnabledExtensions() filtrava a extensão. O BUG FIX em
+  // toggleExtension (linhas 246-251 de extensionCenter.ts) só corrigia o
+  // caso de toggle ON a partir de disabled — não o estado inicial criado
+  // por syncExtensions.
+  //   Counterexample (ANTES do fix):
   //     syncExtensions([{ id: "x", category: "mcp", installed: true, ... }])
   //     → getExtension("x") === { enabled: true, triggerMode: "disabled" }
   //     (inconsistente: enabled=true mas triggerMode="disabled")
-  //   O mesmo acontece para category: "skill" e category: "plugin".
-  //
-  //   Correção sugerida (NÃO aplicada): em syncExtensions, quando
-  //   defaultEnabled=true para categoria não-feature, usar
-  //   defaultTrigger = defaultTriggerForCategory(category) em vez de
-  //   "disabled". Ou então defaultEnabled=false quando defaultTrigger
-  //   for "disabled".
-  it.skip(
-    "11. (BUG) sequência aleatória de toggles+cycles nunca quebra o estado (invariantes básicas)",
+  //   O mesmo acontecia para category: "skill" e category: "plugin".
+  //   Após o fix: para qualquer categoria, syncExtensions cria estado em
+  //   que (enabled ⇔ triggerMode != "disabled") — invariantes básicas.
+  it(
+    "11. sequência aleatória de toggles+cycles nunca quebra o estado (invariantes básicas)",
     () => {
       type Cmd =
         | { type: "toggle" }

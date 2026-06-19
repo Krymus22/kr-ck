@@ -221,7 +221,16 @@ export function syncExtensions(entries: Omit<ExtensionEntry, "enabled" | "trigge
     // - MCPs: ON by default (user configured them)
     const isInternalFeature = entry.category === "feature";
     const defaultEnabled = isInternalFeature ? true : entry.installed && entry.category !== "tool";
-    const defaultTrigger: TriggerMode = isInternalFeature ? "always" : "disabled";
+    // BUG FIX (P-5 property test): quando defaultEnabled=true para categoria
+    // não-feature (skill/mcp/plugin instalados), usar defaultTriggerForCategory
+    // em vez de "disabled". Antes, o estado inicial ficava inconsistente —
+    // enabled=true MAS triggerMode="disabled" — fazendo o card mostrar "ON
+    // [OFF]" e getEnabledExtensions() filtrar a extensão. tools continuam com
+    // defaultEnabled=false (logo defaultTrigger="disabled") — não muda nada
+    // para elas.
+    const defaultTrigger: TriggerMode = defaultEnabled
+      ? defaultTriggerForCategory(entry.category)
+      : "disabled";
     
     return {
       ...entry,

@@ -448,9 +448,17 @@ export function extractConfidence(pensarContent: string): number {
   //    or fraction (N/10 or N/100).
   const numericMatch = text.match(/confian[cç]a\s*[:=]\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+))?%?|confidence\s*[:=]\s*(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+))?%?/i);
   if (numericMatch) {
-    const raw = parseFloat(numericMatch[1] ?? numericMatch[3] ?? "0");
+    const rawStr = numericMatch[1] ?? numericMatch[3] ?? "0";
+    const raw = parseFloat(rawStr);
     const denom = numericMatch[2] ?? numericMatch[4] ?? null;
     const hadPercentSign = /%/i.test(numericMatch[0] ?? "");
+    // BUG FIX (P-1 property test): distinguir inteiro "1" (escala 1-10) de
+    // decimal "1.0" (escala 0.0-1.0). Antes, ambos caíam no branch
+    // `raw <= 1.0` e eram multiplicados por 10 — assim "confianca: 1"
+    // retornava 10 (confiança MÁXIMA), bypassando o gate confidence <= 3
+    // do checkConfidenceAction. Agora só multiplicamos por 10 quando o
+    // match contém explicitamente um ponto decimal.
+    const hasDecimalPoint = rawStr.includes(".");
 
     let normalized: number;
     if (hadPercentSign || raw > 10) {
@@ -460,8 +468,8 @@ export function extractConfidence(pensarContent: string): number {
       // explicit fraction like "8/10" or "80/100"
       const d = parseInt(denom, 10);
       normalized = d === 100 ? raw / 10 : d === 10 ? raw : raw / 10;
-    } else if (raw <= 1.0) {
-      // decimal 0.0-1.0 → multiply by 10
+    } else if (hasDecimalPoint && raw <= 1.0) {
+      // decimal 0.0-1.0 (com ponto explícito) → multiply by 10
       normalized = raw * 10;
     } else {
       // 1-10 integer scale — use as-is

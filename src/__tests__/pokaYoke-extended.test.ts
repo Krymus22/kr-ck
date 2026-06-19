@@ -152,11 +152,15 @@ describe("pokaYokeCheck — sanitização de entrada", () => {
 // === checkDangerousPatterns — padrões suspeitos ==============================
 
 describe("pokaYokeCheck — padrões potencialmente perigosos", () => {
-  it("não bloqueia caminho com null byte (validação é apenas não-vazio)", () => {
-    // PokaYoke não tem check específico para null bytes — apenas verifica string não-vazia.
-    // Documenta o comportamento atual: pokaYoke permite, validação de bytes é de outra camada.
+  it("bloqueia caminho com null byte (path injection defense)", () => {
+    // BUG P-3 CORRIGIDO: pokaYoke agora REJEITA paths com null byte.
+    // Em bindings nativos/C, "\0" é terminador de string — permite path
+    // injection (ex.: "/tmp/foo\0.txt" pode virar "/tmp/foo" em C).
+    // Antes do fix, pokaYoke permitia; agora retorna ok=false com erro.
     const r = pokaYokeCheck("ler_arquivo", { caminho: "/tmp/file\x00.txt" });
-    expect(r.ok).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(typeof r.error).toBe("string");
+    expect(r.error).toMatch(/null byte/i);
   });
 
   it("bloqueia aplicar_diff com bloco_diff contendo apenas marcadores (sem conteúdo)", () => {
