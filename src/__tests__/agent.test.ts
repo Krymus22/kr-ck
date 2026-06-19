@@ -167,6 +167,9 @@ vi.mock("../externalTools.js", () => ({
 
 vi.mock("../extensionCenter.js", () => ({
   executeTrigger: vi.fn(() => Promise.resolve()),
+  // Reactive store hooks — required by useSyncExternalStore in ExtensionHub
+  subscribeToHubChanges: vi.fn((_l: () => void) => () => {}),
+  getHubVersion: vi.fn(() => 0),
 }));
 
 // ─── Now import agent with mocked dependencies ───────────────────────────

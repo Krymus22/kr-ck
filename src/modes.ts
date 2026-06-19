@@ -207,7 +207,44 @@ function findBundledModesDir(): string | null {
 
 // --- Built-in modes discovery ----------------------------------------------
 
+/** Cache of built-in mode definitions (invalidated by emitModesChange). */
 let cachedBuiltInModes: ModeDefinition[] | null = null;
+
+// --- Reactive subscription system (mirrors extensionCenter.ts) --------------
+//
+// Same pattern: subscribe() + getSnapshot() (version counter) that works
+// with React's useSyncExternalStore. Every mutation that affects what the
+// Hub displays (setActiveMode, saveUserMode, deleteUserMode, deactivateMode,
+// applyMode, confirmAndSaveMode) calls emitModesChange().
+
+let modesVersion = 0;
+const modesSubscribers = new Set<() => void>();
+
+/** Subscribe to modes store changes. Returns unsubscribe function. */
+export function subscribeToModesChanges(listener: () => void): () => void {
+  modesSubscribers.add(listener);
+  return () => modesSubscribers.delete(listener);
+}
+
+/** Get current modes store version (bumped on every mutation). */
+export function getModesVersion(): number {
+  return modesVersion;
+}
+
+function emitModesChange(): void {
+  modesVersion++;
+  // Invalidate the cached built-in modes so the next read picks up changes
+  // (e.g., after seedBuiltInModes runs).
+  cachedBuiltInModes = null;
+  for (const listener of modesSubscribers) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn(`Modes subscriber threw: ${(err as Error).message}`);
+    }
+  }
+}
+
 
 /**
  * Load built-in mode definitions from defaults/modes/*.json.
@@ -315,6 +352,7 @@ export function saveUserMode(mode: ModeDefinition): void {
   const filePath = getModeFile(mode.name);
   fs.writeFileSync(filePath, JSON.stringify(mode, null, 2), "utf8");
   log.info(`modes: saved user mode "${mode.name}" to ${filePath}`);
+  emitModesChange();
 }
 
 /** Delete a user mode. Returns true if deleted, false if not found. */
@@ -324,6 +362,7 @@ export function deleteUserMode(name: string): boolean {
   try {
     fs.unlinkSync(filePath);
     log.info(`modes: deleted user mode "${name}"`);
+    emitModesChange();
     return true;
   } catch (err) {
     log.warn(`modes: failed to delete "${name}": ${(err as Error).message}`);
@@ -370,6 +409,7 @@ export function setActiveMode(name: string | null): void {
   } else {
     log.info(`modes: active mode cleared`);
   }
+  emitModesChange();
 }
 
 // --- Mode application -------------------------------------------------------
@@ -683,5 +723,6 @@ export function seedBuiltInModes(): number {
   } catch (err) {
     log.warn(`modes: failed to seed: ${(err as Error).message}`);
   }
+  if (count > 0) emitModesChange();
   return count;
 }

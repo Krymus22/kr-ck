@@ -119,6 +119,9 @@ vi.mock("../extensionCenter.js", () => ({
   getCategoryIcon: vi.fn(() => "T"),
   discoverExtensions: vi.fn(),
   executeTrigger: vi.fn(() => Promise.resolve()),
+  // Reactive store hooks — required by useSyncExternalStore in ExtensionHub
+  subscribeToHubChanges: vi.fn((_l: () => void) => () => {}),
+  getHubVersion: vi.fn(() => 0),
 }));
 
 const mockedGetActiveMode = vi.hoisted(() => vi.fn(() => ({
@@ -133,6 +136,9 @@ vi.mock("../modes.js", () => ({
   getActiveMode: mockedGetActiveMode,
   applyMode: vi.fn(async () => ({ success: true })),
   deactivateMode: vi.fn(),
+  // Reactive store hooks — required by useSyncExternalStore
+  subscribeToModesChanges: vi.fn((_l: () => void) => () => {}),
+  getModesVersion: vi.fn(() => 0),
 }));
 
 vi.mock("../effortLevels.js", () => ({ getEffortLevel: vi.fn(() => "medium"), setEffortLevel: vi.fn(), getEffortLabel: vi.fn(() => "MEDIUM") }));

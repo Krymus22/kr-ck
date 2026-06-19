@@ -70,6 +70,9 @@ vi.mock("../extensionCenter.js", () => ({
   getCategoryIcon: mockedGetCategoryIcon,
   discoverExtensions: mockedDiscoverExtensions,
   executeTrigger: vi.fn(() => Promise.resolve()),
+  // Reactive store hooks — required by useSyncExternalStore in ExtensionHub
+  subscribeToHubChanges: vi.fn((_l: () => void) => () => {}),
+  getHubVersion: vi.fn(() => 0),
 }));
 
 // Mock modes
@@ -84,6 +87,9 @@ vi.mock("../modes.js", () => ({
   getActiveMode: vi.fn(() => null),
   applyMode: mockedApplyMode,
   deactivateMode: mockedDeactivateMode,
+  // Reactive store hooks — required by useSyncExternalStore
+  subscribeToModesChanges: vi.fn((_l: () => void) => () => {}),
+  getModesVersion: vi.fn(() => 0),
   getMode: vi.fn(() => null),
   suggestMode: vi.fn(() => null),
   confirmAndSaveMode: vi.fn(async () => true),

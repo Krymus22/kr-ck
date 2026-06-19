@@ -89,6 +89,56 @@ function ensureDir(): void {
   }
 }
 
+// --- Reactive subscription system -------------------------------------------
+//
+// BUG FIX (audit issue #1 — setRenderKey hack): the Hub component used to
+// call setRenderKey((n) => n + 1) after every mutation (25 occurrences) to
+// force a remount, because the store here was non-reactive — React had no
+// way to know when hubState changed.
+//
+// Now we expose a subscribe() function and a getSnapshot() function that
+// work with React's useSyncExternalStore(). Every mutation calls
+// emitChange() which notifies all subscribers, who then re-render naturally
+// without losing focus or component state.
+//
+// The version counter is the snapshot — useSyncExternalStore compares
+// snapshots by Object.is, so we bump the version on every change.
+
+let hubVersion = 0;
+const subscribers = new Set<() => void>();
+
+/**
+ * Subscribe to store changes. Returns an unsubscribe function.
+ * Used by React's useSyncExternalStore.
+ */
+export function subscribeToHubChanges(listener: () => void): () => void {
+  subscribers.add(listener);
+  return () => subscribers.delete(listener);
+}
+
+/**
+ * Get the current store version. Bumped on every mutation.
+ * Used by React's useSyncExternalStore as the snapshot.
+ */
+export function getHubVersion(): number {
+  return hubVersion;
+}
+
+/**
+ * Notify all subscribers that the store changed.
+ * Called internally after every mutation (toggle, setTriggerMode, etc).
+ */
+function emitChange(): void {
+  hubVersion++;
+  for (const listener of subscribers) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn(`Hub subscriber threw: ${(err as Error).message}`);
+    }
+  }
+}
+
 function loadState(): ExtensionHubState {
   const p = getHubPath();
   try {
@@ -182,6 +232,7 @@ export function syncExtensions(entries: Omit<ExtensionEntry, "enabled" | "trigge
 
   hubState.extensions = merged;
   saveState(hubState);
+  emitChange();
 }
 
 /** Toggle enabled/disabled for an extension. Returns new state. */
@@ -193,6 +244,7 @@ export function toggleExtension(id: string): boolean | null {
     ext.triggerMode = "disabled";
   }
   saveState(hubState);
+  emitChange();
   return ext.enabled;
 }
 
@@ -203,6 +255,7 @@ export function setTriggerMode(id: string, mode: TriggerMode): TriggerMode | nul
   ext.triggerMode = mode;
   ext.enabled = mode !== "disabled";
   saveState(hubState);
+  emitChange();
   return ext.triggerMode;
 }
 
@@ -216,6 +269,7 @@ export function cycleTriggerMode(id: string): TriggerMode | null {
   ext.triggerMode = nextMode;
   ext.enabled = nextMode !== "disabled";
   saveState(hubState);
+  emitChange();
   return ext.triggerMode;
 }
 
@@ -230,6 +284,7 @@ export function enableAllInCategory(category: ExtensionCategory, mode: TriggerMo
     }
   }
   saveState(hubState);
+  emitChange();
   return count;
 }
 
@@ -240,6 +295,7 @@ export function disableAll(): void {
     ext.triggerMode = "disabled";
   }
   saveState(hubState);
+  emitChange();
 }
 
 // --- Trigger Engine ---------------------------------------------------------

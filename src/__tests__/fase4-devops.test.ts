@@ -46,6 +46,9 @@ vi.mock("../modes.js", () => ({
   suggestMode: vi.fn(() => null),
   confirmAndSaveMode: vi.fn(async () => true),
   deactivateMode: vi.fn(),
+  // Reactive store hooks — required by useSyncExternalStore
+  subscribeToModesChanges: vi.fn((_l: () => void) => () => {}),
+  getModesVersion: vi.fn(() => 0),
 }));
 
 // Mock modeExtensions

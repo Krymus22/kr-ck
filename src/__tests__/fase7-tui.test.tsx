@@ -50,6 +50,9 @@ vi.mock("../extensionCenter.js", () => ({
   getExtension: vi.fn(),
   discoverExtensions: vi.fn(),
   executeTrigger: vi.fn(() => Promise.resolve()),
+  // Reactive store hooks — required by useSyncExternalStore in ExtensionHub
+  subscribeToHubChanges: vi.fn((_l: () => void) => () => {}),
+  getHubVersion: vi.fn(() => 0),
 }));
 
 // Mock i18n

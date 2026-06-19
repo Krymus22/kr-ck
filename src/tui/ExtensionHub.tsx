@@ -25,6 +25,7 @@ import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors } from "./theme.js";
 import { useTerminalWidth, calculateCardWidth } from "./useTerminal.js";
+import { useHubAndModesVersions } from "./useStoreVersion.js";
 import {
   getAllExtensions,
   getExtensionsByCategory,
@@ -85,8 +86,21 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   const [tabIndex, setTabIndex] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
-  const [renderKey, setRenderKey] = useState(0);
   const [modeFilter, setModeFilter] = useState(false);
+
+  // Replaces the old setRenderKey hack. The component now subscribes to both
+  // stores (extensionCenter + modes) via useSyncExternalStore and re-renders
+  // naturally when either changes. This means:
+  //   - No more key={hub-${renderKey}} remount (which lost focus/state)
+  //   - No more setRenderKey((n) => n + 1) calls scattered through the code
+  //   - Cursor position, scroll position, and search state are preserved
+  //     across store mutations (toggles, trigger mode changes, etc.)
+  //
+  // We don't use the returned version numbers directly — calling the hook
+  // is what subscribes us. The values are available for debugging if needed.
+  const _storeVersions = useHubAndModesVersions();
+  // Mark as used to satisfy linters; the subscription side-effect is the point.
+  void _storeVersions;
 
   // Search state
   const [searching, setSearching] = useState(false);
@@ -170,7 +184,6 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         extremeAbortSignal.aborted = true;
         setExtremeSearching(false);
         setExtremeProgress((prev) => prev ? { ...prev, currentPath: "(cancelado pelo usuario)" } : prev);
-        setRenderKey((n) => n + 1);
         return;
       }
       onClose();
@@ -188,7 +201,6 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         setModeFilter((prev) => !prev);
         setCursorIndex(0);
         setScrollTop(0);
-        setRenderKey((n) => n + 1);
       }
       return;
     }
@@ -225,7 +237,6 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
   function triggerToolSearch() {
     setSearching(true);
     setSearchProgress({ currentTool: "(iniciando)", toolsDone: 0, toolsTotal: 0, results: [] });
-    setRenderKey((n) => n + 1);
 
     // Determine which tools to search for:
     // - If mode is active: search only tools from that mode
@@ -253,17 +264,13 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
             version: r.version,
           })),
         });
-        setRenderKey((n) => n + 1);
       }).then(() => {
         setSearching(false);
-        setRenderKey((n) => n + 1);
       }).catch(() => {
         setSearching(false);
-        setRenderKey((n) => n + 1);
       });
     }).catch(() => {
       setSearching(false);
-      setRenderKey((n) => n + 1);
     });
   }
 
@@ -279,7 +286,6 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       toolsTotal: 0,
       results: [],
     });
-    setRenderKey((n) => n + 1);
 
     // Create an abort signal object that the Esc handler can flip
     const abortSignal = { aborted: false };
@@ -310,20 +316,16 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
             version: r.version,
           })),
         });
-        setRenderKey((n) => n + 1);
       }, abortSignal).then(() => {
         setExtremeSearching(false);
         setExtremeAbortSignal(null);
-        setRenderKey((n) => n + 1);
       }).catch(() => {
         setExtremeSearching(false);
         setExtremeAbortSignal(null);
-        setRenderKey((n) => n + 1);
       });
     }).catch(() => {
       setExtremeSearching(false);
       setExtremeAbortSignal(null);
-      setRenderKey((n) => n + 1);
     });
   }
 
@@ -339,7 +341,6 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
       toolsTotal: 0,
       results: [],
     });
-    setRenderKey((n) => n + 1);
 
     // Determine which tools to search for (same logic as triggerToolSearch)
     const mode = getActiveMode();
@@ -366,17 +367,13 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
             version: r.version,
           })),
         });
-        setRenderKey((n) => n + 1);
       }).then(() => {
         setAiSearching(false);
-        setRenderKey((n) => n + 1);
       }).catch(() => {
         setAiSearching(false);
-        setRenderKey((n) => n + 1);
       });
     }).catch(() => {
       setAiSearching(false);
-      setRenderKey((n) => n + 1);
     });
   }
 
@@ -412,26 +409,22 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
           // Activate the selected mode (async, but we trigger immediate re-render)
           applyMode(mode.name).then((result) => {
             if (result.success) {
-              setRenderKey((n) => n + 1);
             }
           }).catch(() => {
             // ignore - logged by applyMode
           });
-          setRenderKey((n) => n + 1);
         }
         return;
       }
       const item = visibleItems[cursorIndex];
       if (item) {
         toggleExtension(item.id);
-        setRenderKey((n) => n + 1);
       }
     }
 
     // 'D' on Modes tab deactivates the current mode
     if (isModesTab && (inputChar === "d" || inputChar === "D")) {
       deactivateMode();
-      setRenderKey((n) => n + 1);
       return;
     }
 
@@ -446,7 +439,6 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         import("../toolInstaller.js").then(({ installTool }) => {
           installTool(toolName).then((result) => {
             if (result.success) {
-              setRenderKey((n) => n + 1);
             }
           }).catch(() => {
             // ignore — logged by installer
@@ -454,7 +446,6 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         }).catch(() => {
           // toolInstaller not available
         });
-        setRenderKey((n) => n + 1);
       }
       return;
     }
@@ -463,7 +454,6 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
       const item = visibleItems[cursorIndex];
       if (item) {
         cycleTriggerMode(item.id);
-        setRenderKey((n) => n + 1);
       }
     }
     const modes = getTriggerModes();
@@ -473,7 +463,6 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
       const mode = modes[modeIdx];
       if (item && mode) {
         setTriggerMode(item.id, mode);
-        setRenderKey((n) => n + 1);
       }
     }
   }
@@ -489,7 +478,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
   const cardWidth = calculateCardWidth(termWidth, GRID_COLS, 1, 2);
 
   return (
-    <Box key={`hub-${renderKey}`} flexDirection="column" borderStyle="double" borderColor={colors.primary} paddingX={1}>
+    <Box flexDirection="column" borderStyle="double" borderColor={colors.primary} paddingX={1}>
       {/* Header */}
       <Box justifyContent="center" marginBottom={0}>
         <Text color={colors.primary} bold>
