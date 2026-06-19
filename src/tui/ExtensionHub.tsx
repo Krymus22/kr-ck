@@ -234,6 +234,42 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
     handleActions(key, inputChar);
   });
 
+  // -- Apply search results to extensionCenter (BUG FIX) -------------------
+  // Após qualquer busca (S/A/X) terminar, pegar os resultados e marcar
+  // installed=true no extensionCenter para as tools que foram encontradas.
+  // Antes, o card continuava mostrando [FALTA] mesmo após a busca achar
+  // o binary — só o painel de progresso atualizava.
+  function applySearchResultsToExtensions(results: any[]) {
+    if (!results || results.length === 0) return;
+
+    // Set de toolNames encontrados (status !== "missing")
+    const foundTools = new Set(
+      results
+        .filter((r: any) => r.status !== "missing" && r.toolName)
+        .map((r: any) => r.toolName as string)
+    );
+    if (foundTools.size === 0) return;
+
+    // Pegar extensions atuais e marcar installed=true para as encontradas
+    const currentExts = getAllExtensions();
+    const updatedEntries = currentExts.map((e) => {
+      // Extension id é tipo "tool:rojo_build" — extrair o toolName
+      // comparando com o que foi encontrado (rojo, selene, etc.)
+      const toolName = e.id.replace(/^tool:/, "").replace(/_.+$/, "");
+      const wasFound = foundTools.has(toolName);
+      return {
+        id: e.id,
+        name: e.name,
+        category: e.category,
+        description: e.description,
+        installed: wasFound ? true : e.installed,
+        meta: e.meta,
+      };
+    });
+
+    syncExtensions(updatedEntries);
+  }
+
   // -- Manual tool search (triggered by 'S' key) --------------------------
   function triggerToolSearch() {
     setSearching(true);
@@ -258,14 +294,19 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
           currentTool: progress.currentTool,
           toolsDone: progress.toolsDone,
           toolsTotal: progress.toolsTotal,
-          results: progress.results.map((r) => ({
+          results: progress.results.map((r: any) => ({
             toolName: r.toolName,
             status: r.status,
             binaryPath: r.binaryPath,
             version: r.version,
           })),
         });
-      }).then(() => {
+      }).then((results: any[]) => {
+        // BUG FIX: após a busca terminar, atualizar o extensionCenter
+        // marcando installed=true para as tools que foram encontradas.
+        // Antes, o card continuava mostrando [FALTA] mesmo após a busca
+        // achar o binary.
+        applySearchResultsToExtensions(results);
         setSearching(false);
       }).catch(() => {
         setSearching(false);
@@ -310,14 +351,16 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
           currentPath: progress.currentPath,
           toolsDone: progress.toolsDone,
           toolsTotal: progress.toolsTotal,
-          results: progress.results.map((r) => ({
+          results: progress.results.map((r: any) => ({
             toolName: r.toolName,
             status: r.status,
             binaryPath: r.binaryPath,
             version: r.version,
           })),
         });
-      }, abortSignal).then(() => {
+      }, abortSignal).then((results: any[]) => {
+        // BUG FIX: aplicar resultados no extensionCenter (mesmo fix do S)
+        applySearchResultsToExtensions(results);
         setExtremeSearching(false);
         setExtremeAbortSignal(null);
       }).catch(() => {
@@ -361,14 +404,16 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
           currentPath: progress.currentPath,
           toolsDone: progress.toolsDone,
           toolsTotal: progress.toolsTotal,
-          results: progress.results.map((r) => ({
+          results: progress.results.map((r: any) => ({
             toolName: r.toolName,
             status: r.status,
             binaryPath: r.binaryPath,
             version: r.version,
           })),
         });
-      }).then(() => {
+      }).then((results: any[]) => {
+        // BUG FIX: aplicar resultados no extensionCenter (mesmo fix do S e X)
+        applySearchResultsToExtensions(results);
         setAiSearching(false);
       }).catch(() => {
         setAiSearching(false);
