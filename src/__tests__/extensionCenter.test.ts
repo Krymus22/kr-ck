@@ -95,7 +95,12 @@ describe("extensionCenter", () => {
       const ext = getExtension("test:1");
       expect(ext).toBeDefined();
       expect(ext!.enabled).toBe(true);
-      expect(ext!.triggerMode).toBe("disabled");
+      // BUG FIX (P-5 property test): skill instalada default ON agora tem
+      // triggerMode="on_file" (não mais "disabled") — antes o estado inicial
+      // ficava inconsistente (enabled=true MAS triggerMode="disabled"),
+      // fazendo o card mostrar "ON [OFF]" e getEnabledExtensions() filtrar
+      // a extensão. defaultTriggerForCategory("skill") === "on_file".
+      expect(ext!.triggerMode).toBe("on_file");
     });
 
     it("should preserve existing state on re-sync", () => {
@@ -152,10 +157,9 @@ describe("extensionCenter", () => {
     it("should cycle through all modes", () => {
       syncExtensions([makeExt({ id: "test:1", installed: true })]);
       const modes = getTriggerModes();
+      // Após BUG FIX (P-5), skill default é triggerMode="on_file" (idx 1),
+      // não mais "disabled" (idx 0). O ciclo começa a partir de on_file.
       let mode = cycleTriggerMode("test:1");
-      expect(mode).toBe(modes[1]); // on_file
-
-      mode = cycleTriggerMode("test:1");
       expect(mode).toBe(modes[2]); // on_task
 
       mode = cycleTriggerMode("test:1");
@@ -163,6 +167,9 @@ describe("extensionCenter", () => {
 
       mode = cycleTriggerMode("test:1");
       expect(mode).toBe(modes[0]); // disabled
+
+      mode = cycleTriggerMode("test:1");
+      expect(mode).toBe(modes[1]); // on_file (voltou ao início)
     });
 
     it("should return null for non-existent extension", () => {

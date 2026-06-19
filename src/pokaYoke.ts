@@ -70,7 +70,20 @@ export function pokaYokeCheck(
           `Exemplo: ${toolName}({ caminho: "/abs/path/to/file.ts" })`,
       };
     }
-    // path is present - fall through to tool-specific checks below
+    // Null bytes em paths são PERIGOSOS: em bindings nativos/C, "\0" é
+    // terminador de string — permite path injection (ex.: "/tmp/foo\0.txt"
+    // pode virar "/tmp/foo" em certas chamadas C). Rejeitamos sempre.
+    if (rawPath.includes("\0")) {
+      return {
+        ok: false,
+        error:
+          `[POKA-YOKE] Caminho inválido para "${toolName}": contém null byte (\\0). ` +
+          `Null bytes em paths podem causar path injection em bindings nativos ` +
+          `(ex.: "/tmp/foo\\0.txt" pode ser interpretado como "/tmp/foo" em C). ` +
+          `Remova o caractere nulo do caminho e tente novamente.`,
+      };
+    }
+    // path is present and safe - fall through to tool-specific checks below
     // (we'll attach resolvedPath to the final return)
   }
 

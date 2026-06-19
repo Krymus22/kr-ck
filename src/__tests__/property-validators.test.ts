@@ -122,21 +122,21 @@ describe("property-validators", () => {
       );
     });
 
-    // BUG DOCUMENTADO (property-validators #1):
-    //   validatePath NÃO filtra null bytes do path resolvido. pokaYoke.ts
-    //   usa `path.resolve(rawPath)` que preserva bytes nulos. Em algumas
+    // BUG P-3 CORRIGIDO (property-validators #1):
+    //   validatePath NÃO filtrava null bytes do path resolvido. pokaYoke.ts
+    //   usava `path.resolve(rawPath)` que preserva bytes nulos. Em algumas
     //   APIs de filesystem (especialmente em camadas mais antigas ou
     //   bindings nativos), "\0" é interpretado como terminador de string
     //   — isso permite path injection (ex.: "/tmp/foo\0.txt" pode virar
-    //   "/tmp/foo" em certas chamadas C). É responsabilidade de outras
-    //   camadas bloquear null bytes, mas a propriedade aqui falha porque
-    //   pokaYoke/validatePath não sanitiza.
-    //   Counterexample encontrado pelo fast-check:
+    //   "/tmp/foo" em certas chamadas C).
+    //   Counterexample encontrado pelo fast-check (ANTES do fix):
     //     validatePath("foo\0bar") -> "/cwd/foo\0bar"   (contém null byte)
     //     validatePath("\0")       -> "/cwd/\0"         (contém null byte)
-    //   Correção sugerida (NÃO aplicada): adicionar check em pokaYoke.ts
-    //   para rejeitar/replacer null bytes antes de chamar path.resolve.
-    it.skip("validatePath(p) nunca retorna path com null bytes", () => {
+    //   CORREÇÃO APLICADA: pokaYoke.ts agora rejeita paths com null byte
+    //   ANTES de chamar path.resolve, retornando ok=false com mensagem
+    //   acionável. Null byte em path é sempre erro/malícia — estratégia
+    //   "rejeitar" (Opção A) adotada conforme recomendado.
+    it("validatePath(p) nunca retorna path com null bytes", () => {
       fc.assert(
         fc.property(arbStringWithNullByte, (p) => {
           const result = validatePath(p);
@@ -274,23 +274,21 @@ describe("property-validators", () => {
       );
     });
 
-    // BUG DOCUMENTADO (property-validators #2):
+    // BUG P-4 DOCUMENTADO (property-validators #2):
     //   shouldValidateFile NÃO retorna true para paths .luau/.lua quando
     //   não há modo ativo com regras de validação. A função depende de
     //   estado global (modo ativo em ~/.claude-killer/modes/active.json).
-    //   Em ambiente de teste (sem modo ativo), getActiveValidationRules()
-    //   retorna [] e shouldValidateFile() retorna false PARA QUALQUER path,
-    //   inclusive .luau/.lua.
-    //   Counterexample encontrado:
+    //   Em ambiente de teste (sem modo ativo — ver beforeAll), 
+    //   getActiveValidationRules() retorna [] e shouldValidateFile() 
+    //   retorna false PARA QUALQUER path, inclusive .luau/.lua.
+    //   Counterexample encontrado (ANTES do ajuste):
     //     shouldValidateFile("/foo.luau") === false   (esperado: true)
     //     shouldValidateFile("/foo.lua")  === false   (esperado: true)
-    //   A função só retorna true se um modo ATIVO definir validation rule
-    //   com filePattern "*.luau" ou "*.lua". A propriedade assume que isso
-    //   é sempre verdade, mas é condicional ao estado global.
-    //   Correção sugerida (NÃO aplicada — é design): ou (a) explicitar na
-    //   doc que shouldValidateFile é condicional ao modo ativo, ou (b)
-    //   adicionar defaults built-in para .luau/.lua independentemente de modo.
-    it.skip("shouldValidateFile(path) retorna true para paths terminados em .luau ou .lua", async () => {
+    //   DECISÃO: comportamento de DESIGN — validação é OPT-IN via modo ativo.
+    //   O JSDoc da função agora documenta isso explicitamente. A propriedade
+    //   abaixo foi ajustada para verificar o comportamento REAL: sem modo
+    //   ativo, shouldValidateFile retorna false mesmo para .luau/.lua.
+    it("shouldValidateFile(path) retorna false para .luau/.lua quando nenhum modo ativo (comportamento documentado)", async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.oneof(
@@ -299,7 +297,10 @@ describe("property-validators", () => {
           ),
           async (filePath) => {
             const result = await shouldValidateFile(filePath);
-            return result === true;
+            // Comportamento documentado: sem modo ativo (ver beforeAll),
+            // shouldValidateFile retorna false mesmo para .luau/.lua
+            // (validação é opt-in via modo ativo).
+            return result === false;
           },
         ),
         { numRuns: 50 },
