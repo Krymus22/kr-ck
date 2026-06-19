@@ -64,11 +64,16 @@ describe("utf8Safety — extended", () => {
   // ─── pickBestUtf8Locale / probeLocale (2) ──────────────────────────────────
 
   describe("pickBestUtf8Locale — extras", () => {
-    it("retorna 'tried' contendo ao menos os candidatos principais", () => {
+    it("retorna 'tried' contendo ao menos os candidatos principais (até o primeiro match)", () => {
       const { tried } = pickBestUtf8Locale();
+      // pickBestUtf8Locale faz early-return no primeiro candidato disponível,
+      // então 'tried' só contém os candidatos testados ATÉ o match.
+      // Em ambientes Ubuntu CI, en_US.UTF-8 costuma estar disponível, então
+      // 'tried' não chega a incluir C.UTF-8.
+      // Verificamos apenas que pt_BR.UTF-8 SEMPRE está em 'tried' (primeiro candidato).
       expect(tried).toContain("pt_BR.UTF-8");
-      expect(tried).toContain("en_US.UTF-8");
-      expect(tried).toContain("C.UTF-8");
+      // E que tried contém pelo menos 1 candidato
+      expect(tried.length).toBeGreaterThanOrEqual(1);
     });
 
     it("quando escolhe um locale, este deve estar na lista 'tried'", () => {
