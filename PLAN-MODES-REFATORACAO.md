@@ -1,8 +1,9 @@
 # Plano de Refatoração: Modos Completos + Tools Declarativas + Inbox
 
 > **Criado em:** 2026-06-19
-> **Status:** Aprovado (com hooks + mini chat + busca + compartilhamento + AskUser)
-> **Estimativa total:** ~64h (12 sprints, incluindo Sprint 8.6 AskUser)
+> **Atualizado em:** 2026-06-20
+> **Status:** Aprovado (reordenado + sandbox madura + edge cases resolvidos)
+> **Estimativa total:** ~64h (12 sprints em 3 fases)
 
 ## Contexto
 
@@ -366,468 +367,32 @@ Tool configurada. IA principal já pode usar.
 
 ## Sprints de implementação
 
-### Sprint 1: Limpeza + Estrutura + Tools (10h)
+O plano está organizado em **3 fases**:
 
-**Objetivo:** Remover sistema antigo de busca, criar estrutura de pastas, toolDetector simples.
+- **FASE 1 — Fundação (28h):** MVP que já tem valor isolado. Cada sprint entrega valor independente.
+- **FASE 2 — Sistema Completo (34h):** Features que dependem da fundação. Completam o sistema de modos.
+- **FASE 3 — Robustez (11h):** Schema validation + cobertura completa de testes.
 
-**Tarefas:**
-- [ ] **F1.1** Remover `src/aiSearch.ts` (~250 linhas)
-- [ ] **F1.2** Remover funções de busca do `src/toolDetector.ts`:
-  - `smartSearch()`, `findToolchainConfig()`, `getRegistryPathDirs()`
-  - `queryPackageManagers()`, `extremeFilesystemSearch()`
-  - `deepFilesystemSearch()`, `extremeSearchAllTools()`, `aiOnlySearchAllTools()`
-  - `searchAllTools()` (versão antiga)
-  - Manter só `detectTool()` (sem busca profunda) e `getModeToolNames()`
-- [ ] **F1.3** Remover do `ExtensionHub.tsx`:
-  - Estados: `searching`, `extremeSearching`, `aiSearching` + progress
-  - Funções: `triggerToolSearch()`, `triggerExtremeSearch()`, `triggerAiSearch()`
-  - Keybinds: S, A, X
-  - Painéis de busca
-- [ ] **F1.4** Criar estrutura de pastas:
-  - `defaults/modes/roblox/{tools,manifests,skills,hooks,mcps,inbox}/`
-  - `defaults/modes/devops/{tools,manifests,skills,hooks,mcps,inbox}/`
-- [ ] **F1.5** Refatorar `toolDetector.ts`:
-  - Nova função `findToolBinary(toolName, modeName)` — olha só em `modes/<mode>/tools/`
-  - 5 linhas em vez de 1500
-- [ ] **F1.6** Atualizar `externalTools.ts`:
-  - `ToolRegistry` lê tools da pasta do modo ativo
-  - `isInstalled()` verifica se binary existe (sem cache de 5min)
-- [ ] **F1.7** Migrar binaries existentes (opcional, migration tool):
-  - Script que copia `~/.rokit/bin/*.exe` → `~/.claude-killer/modes/roblox/tools/`
-- [ ] **F1.8** Deletar testes antigos de busca:
-  - `hub-manual-search.test.tsx`
-  - `hub-e2e.test.tsx` ( partes de search)
-  - `toolDetector-extended.test.ts` (partes de search)
-  - `aiSearch.test.ts`, `aiSearch-extended.test.ts`
-  - `tool-detection-hub.test.tsx`
-
-**Entregável:** Hub sem S/A/X, tools sendo detectadas só na pasta do modo.
+**Total:** ~64h (12 sprints)
 
 ---
 
-### Sprint 2: Manifests + Function Calls Dinâmicas (6h)
+### FASE 1 — Fundação (MVP que já tem valor)
 
-**Objetivo:** Tools viram function calls específicas baseadas em manifests.
-
-**Tarefas:**
-- [ ] **F2.1** Definir schema do manifest (TypeScript interface)
-- [ ] **F2.2** Criar manifests pré-feitos:
-  - `defaults/modes/roblox/manifests/rojo.json`
-  - `defaults/modes/roblox/manifests/selene.json`
-  - `defaults/modes/roblox/manifests/stylua.json`
-  - `defaults/modes/roblox/manifests/wally.json`
-  - `defaults/modes/roblox/manifests/lune.json`
-  - `defaults/modes/roblox/manifests/rokit.json`
-- [ ] **F2.3** Criar `src/manifestLoader.ts`:
-  - `loadToolManifest(toolName, modeName)` — lê custom ou bundled
-  - `loadAllManifests(modeName)` — carrega todos do modo
-- [ ] **F2.4** Refatorar `getExternalToolDefinitions()` em `agent.ts`:
-  - Em vez de `executar_tool` genérico, gera function calls dos manifests
-  - Cada action vira 1 function call (ex: `rojo_build`, `rojo_serve`)
-- [ ] **F2.5** Refatorar handler de tool calls em `agent.ts`:
-  - Despachar `${toolName}_${actionName}` → `toolExecutor.execute(toolName, actionName, args)`
-- [ ] **F2.6** Refatorar `ToolExecutor.execute()`:
-  - Lê manifest, substitui placeholders nos args
-  - Spawn com args corretos
-  - Retorna output estruturado
-
-**Entregável:** IA vê `rojo_build({projectFile, outputPath})` em vez de `executar_tool({tool: "rojo_build"})`.
-
----
-
-### Sprint 3: Skills por Modo (3h)
-
-**Objetivo:** Skills moram na pasta do modo, são injetadas no system prompt.
-
-**Tarefas:**
-- [ ] **F3.1** Mover skills existentes:
-  - `defaults/skills/*-cli.md` → `defaults/modes/roblox/skills/`
-- [ ] **F3.2** Refatorar `getActiveSkills()`:
-  - Lê skills da pasta do modo ativo + globais
-  - Modo específico > global
-- [ ] **F3.3** Atualizar `applyMode()`:
-  - Carrega skills e injeta no system prompt
-- [ ] **F3.4** Atualizar `deactivateMode()`:
-  - Remove skills injetadas
-- [ ] **F3.5** Criar pasta global `~/.claude-killer/skills/` (skills compartilhadas)
-
-**Entregável:** Modo Roblox ativo → skills rojo-cli, wally-cli, etc. disponíveis pra IA.
-
----
-
-### Sprint 4: Hooks por Modo (4h)
-
-**Objetivo:** Hooks customizados rodam em eventos do agent loop.
-
-**Tarefas:**
-- [ ] **F4.1** Definir interface de hooks (TypeScript)
-- [ ] **F4.2** Criar `src/hookRunner.ts`:
-  - `loadHooks(modeName)` — carrega hooks da pasta
-  - `runHooks(trigger, context)` — roda hooks de um trigger
-- [ ] **F4.3** Integrar hooks no `fileEdit.ts`:
-  - Antes de salvar: `runHooks("before_write", { filePath, content })`
-  - Depois de salvar: `runHooks("on_file", { filePath, content })`
-- [ ] **F4.4** Integrar hooks no `agent.ts`:
-  - Após task completa: `runHooks("on_task", { toolExecutor })`
-  - A cada iteração: `runHooks("always", { toolExecutor })`
-- [ ] **F4.5** Criar 2 hooks de exemplo:
-  - `defaults/modes/roblox/hooks/auto-build.js` (on_file)
-  - `defaults/modes/roblox/hooks/validate-config.js` (on_task)
-- [ ] **F4.6** Sandbox de segurança (limitar APIs disponíveis pros hooks)
-
-**Entregável:** Editar .luau → auto-build roda automaticamente.
-
----
-
-### Sprint 5: MCPs por Modo (3h)
-
-**Objetivo:** MCP servers moram na pasta do modo, são iniciados com o modo.
-
-**Tarefas:**
-- [ ] **F5.1** Mover configs MCP:
-  - `~/.claude-killer/mcp-config.json` → `~/.claude-killer/modes/<mode>/mcps/`
-- [ ] **F5.2** Refatorar `loadAllExtensions()`:
-  - Carrega MCPs da pasta do modo ativo + globais
-- [ ] **F5.3** Atualizar `applyMode()`:
-  - Inicia MCP servers do modo
-- [ ] **F5.4** Atualizar `deactivateMode()`:
-  - Para MCP servers do modo
-- [ ] **F5.5** Criar pasta global `~/.claude-killer/mcps/` (MCPs compartilhados)
-
-**Entregável:** Modo Roblox ativo → roblox-api MCP disponível.
-
----
-
-### Sprint 6: Validators por Modo (3h)
-
-**Objetivo:** Validators (selene, stylua) rodam automáticos baseados em config.
-
-**Tarefas:**
-- [ ] **F6.1** Refatorar `luauValidator.ts`:
-  - Lê validators do config.json do modo ativo (em vez de hardcoded)
-  - Cada validator tem: tool, filePattern, blocking
-- [ ] **F6.2** Atualizar `fileEdit.ts`:
-  - `validateLuauBeforeWrite()` lê validators do config
-  - Suporte a qualquer validator (não só selene/stylua)
-- [ ] **F6.3** Generalizar pra outras linguagens:
-  - `validateBeforeWrite()` (não só Luau)
-  - Python mode → validators com black, mypy, ruff
-  - TS mode → validators com tsc, eslint
-
-**Entregável:** Adicionar validator novo = só editar config.json, sem código.
-
----
-
-### Sprint 7: IA Configuradora + Mini Chat (10h)
-
-**Objetivo:** Sub-agente limitado com mini chat interativo para configurar tools, buscar arquivos na máquina, e criar manifests.
-
-#### 7.A — Mini Chat de Configuração (3h)
-
-**Objetivo:** Interface de chat dedicada pra configuração (não é só sim/não).
-
-**Tarefas:**
-- [ ] **F7.1** Criar `src/tui/ConfiguratorChat.tsx`:
-  - Componente Ink que renderiza um mini chat dentro do Hub
-  - Mostra mensagens do configurador + input do usuário
-  - Suporta múltiplos turnos de conversa
-  - Pode ser aberto via tecla 'C' no Hub OU via comando `/configurar`
-- [ ] **F7.2** System prompt do configurador:
-  ```
-  "Você é uma IA configuradora. Sua tarefa é ajudar o usuário a configurar
-  tools, skills, hooks e MCPs para o modo ativo.
-  
-  Você PODE:
-  - Rodar comandos pra entender tools (--help, --version)
-  - Pesquisar na web pra achar documentação
-  - Criar arquivos .json (manifests, configs)
-  - Buscar arquivos na máquina do usuário (com permissão)
-  - Mover/copiar arquivos entre pastas do modo
-  - Fazer perguntas ao usuário quando incerta
-  
-  Você NÃO PODE:
-  - Editar código fonte do projeto
-  - Deletar arquivos do usuário
-  - Rodar comandos arbitrários (só --help, --version, where, find)
-  - Acessar arquivos fora das pastas do claude-iller
-  
-  Sempre explique o que está fazendo antes de fazer."
-  ```
-- [ ] **F7.3** Tools do configurador (limitadas):
-  - `executar_comando` (só --help, --version, where, find, ls)
-  - `pesquisar` (web search)
-  - `criar_arquivo` (só em modes/<mode>/)
-  - `buscar_arquivo` (procura arquivo na máquina — vê 7.B)
-  - `mover_arquivo` (só entre pastas do modo)
-  - `perguntar_usuario` (faz pergunta no mini chat)
-- [ ] **F7.4** Render do mini chat no Hub:
-  - Painel dedicado quando configurador ativo
-  - Mostra histórico de mensagens
-  - Input field pra usuário responder
-  - Botões: [Enter] enviar, [Esc] cancelar configuração
-
-#### 7.B — Busca de Arquivos na Máquina (3h)
-
-**Objetivo:** Usuário pode pedir "tenho darklua.exe em algum lugar, encontre e instale".
-
-**Tarefas:**
-- [ ] **F7.5** Criar `src/fileFinder.ts`:
-  - `searchInDefinedFolders(fileName, modeName)` — busca nas pastas padrão:
-    - `~/.claude-killer/modes/<mode>/tools/`
-    - `~/.claude-killer/modes/<mode>/inbox/`
-    - `~/.rokit/bin/` (legacy fallback)
-    - `~/.aftman/bin/` (legacy fallback)
-    - `~/.cargo/bin/` (legacy fallback)
-    - PATH do sistema
-  - `searchEntireMachine(fileName)` — busca em tudo (com permissão):
-    - Windows: `where /R C:\ darklua.exe` (por drive)
-    - Unix: `find / -name darklua -type f 2>/dev/null`
-    - Mostra progresso em tempo real
-    - Pode ser cancelado com Esc
-  - `searchWithProgress(fileName, onProgress, abortSignal)` — busca com callback
-- [ ] **F7.6** Fluxo de busca (pergunta permissão):
-  ```
-  Usuário: "tenho darklua.exe em algum lugar, instala pra mim"
-  ↓
-  Configurador: "Vou procurar darklua.exe. Primeiro nas pastas padrão..."
-  ↓
-  Sistema: searchInDefinedFolders("darklua.exe", "roblox")
-  ↓
-  Se encontrar: "Achei em ~/.rokit/bin/darklua.exe! Posso copiar pra 
-                 modes/roblox/tools/? (s/n)"
-  ↓
-  Se NÃO encontrar: "Não encontrei nas pastas padrão. Quer que eu procure
-                      em toda a máquina? (pode demorar 1-5 min) (s/n)"
-  ↓
-  Se sim: searchEntireMachine com progresso
-  ↓
-  Se encontrar: "Achei em D:\Tools\darklua.exe! Copiar? (s/n)"
-  Se não: "darklua.exe não encontrado em lugar nenhum. TALVEZ você 
-          precise baixar de https://github.com/..."
-  ```
-- [ ] **F7.7** Permissões de busca:
-  - Busca em pastas padrão: automática (sem perguntar)
-  - Busca em toda máquina: PRECISA permissão explícita do usuário
-  - Busca nunca roda automaticamente (sempre perguntana)
-  - Usuário pode cancelar a qualquer momento (Esc)
-- [ ] **F7.8** Resultado da busca:
-  - Pode encontrar múltiplos arquivos → pergunta qual usar
-  - Copia (não move) pra pasta do modo
-  - Cria manifest automaticamente após copiar
-
-#### 7.C — Configuração Interativa via Chat (4h)
-
-**Objetivo:** Usuário conversa com configurador pra configurar tudo.
-
-**Tarefas:**
-- [ ] **F7.9** Criar `src/toolConfigurator.ts`:
-  - `startConfigurationSession(modeName)` — inicia mini chat
-  - Usa `runAgentLoop` com tools limitadas + system prompt do configurador
-  - Session persiste até usuário cancelar (Esc) ou configurador terminar
-- [ ] **F7.10** Fluxo de configuração de tool desconhecida:
-  ```
-  Hub detecta: darklua.exe sem manifest
-  ↓
-  Hub mostra: "darklua.exe encontrado sem config. [C]onfigurar?"
-  ↓
-  Usuário pressiona 'C' → abre mini chat
-  ↓
-  Configurador: "Vou configurar darklua. Primeiro, deixa eu entender 
-                 o que ela faz..."
-  Configurador: [roda darklua --help]
-  Configurador: "Ok, darklua é um minifier/transformer pra Luau. 
-                 Tem 3 comandos: process, transform, minify.
-                 Quer que eu crie o manifest? (s/n)"
-  Usuário: "sim"
-  Configurador: [cria manifests/darklua.json]
-  Configurador: "Manifest criado! darklua agora aparece como 
-                 darklua_process, darklua_transform, darklua_minify 
-                 pra IA. Quer testar? (s/n)"
-  Usuário: "não"
-  Configurador: "Tudo certo! darklua configurada."
-  ↓
-  Mini chat fecha, Hub atualiza, card mostra [OK]
-  ```
-- [ ] **F7.11** Fluxo de busca + instalação via chat:
-  ```
-  Usuário: "tenho uma tool chamada my-linter em algum lugar"
-  ↓
-  Configurador: "Vou procurar my-linter. Primeiro nas pastas padrão..."
-  Configurador: [searchInDefinedFolders]
-  Configurador: "Não encontrei nas pastas padrão. Quer que eu procure 
-                 em toda a máquina? (s/n)"
-  Usuário: "sim"
-  ↓
-  Configurador: [searchEntireMachine com progresso]
-  Configurador: "Achei em C:\Users\kryst\Downloads\my-linter.exe! 
-                 Copiar pra modes/roblox/tools/? (s/n)"
-  Usuário: "sim"
-  ↓
-  Configurador: [copia + roda --help + cria manifest]
-  Configurador: "my-linter instalada e configurada! 
-                 Aparece como my_linter_lint pra IA."
-  ```
-- [ ] **F7.12** Schema validation do manifest criado:
-  - Valida JSON contra schema
-  - Se inválido, configurador corrige automaticamente (loop)
-- [ ] **F7.13** Múltiplas configurações na mesma session:
-  - Usuário pode configurar várias tools na mesma conversa
-  - "agora configura selene também"
-  - "tem mais uma tool chamada X"
-  - Session só termina quando usuário diz "pronto" ou Esc
-
-**Entregável:** Abrir mini chat → conversar com IA → tools configuradas automaticamente.
-
----
-
-### Sprint 8: Inbox + Organizadora (4h)
-
-**Objetivo:** Usuário joga arquivos no inbox, IA organiza.
-
-**Tarefas:**
-- [ ] **F8.1** Criar `src/inboxOrganizer.ts`:
-  - `organizeInbox(modeName)` — entry point
-- [ ] **F8.2** Heurística por extensão:
-  - `.exe` → tool, `.md` → skill, `.js` → hook/mcp, `.json` → manifest/config/mcp
-- [ ] **F8.3** Inspeção de conteúdo:
-  - `.js`: procura `module.exports.run` (hook) vs JSON-RPC (mcp)
-  - `.json`: schema check (manifest vs config vs mcp)
-  - `.exe`: roda `--version`/`--help`
-- [ ] **F8.4** IA organizadora (casos ambíguos):
-  - Usa IA configuradora pra classificar
-- [ ] **F8.5** Move arquivos pros lugares certos
-- [ ] **F8.6** Atualiza config.json com novos itens
-- [ ] **F8.7** Comando `/organize` no App.tsx
-- [ ] **F8.8** Tecla 'O' no Hub
-- [ ] **F8.9** Inbox/README.md explicando uso
-
-**Entregável:** Jogar 4 arquivos no inbox → /organize → tudo configurado.
-
----
-
-### Sprint 8.5: Modo Normal + Compartilhamento Entre Modos (5h)
-
-**Objetivo:** Modo "normal" também tem pasta. Tools podem ser compartilhadas entre modos (marcar quais modos usam as mesmas).
-
-#### 8.5.A — Modo Normal com Pasta (1.5h)
-
-**Objetivo:** Mesmo sem modo ativo, usuário tem pasta `~/.claude-killer/modes/normal/` com tools globais.
-
-**Tarefas:**
-- [ ] **F8.5.1** Criar modo "normal" built-in:
-  - `defaults/modes/normal/config.json` — config mínimo (sem validators, sem hooks)
-  - `defaults/modes/normal/{tools,manifests,skills,hooks,mcps,inbox}/` — estrutura vazia
-  - Sempre ativo quando nenhum outro modo está ativo
-  - Tools do modo normal são "padrão" — servem pra qualquer projeto
-- [ ] **F8.5.2** Quando nenhum modo ativo → carrega modo normal:
-  - `getActiveMode()` retorna modo normal em vez de null
-  - Function calls do modo normal ficam disponíveis
-  - Validators do modo normal rodam (se houver)
-- [ ] **F8.5.3** Modo normal é "base" pra outros modos:
-  - Outros modos HERDAM tools do normal (a menos que sobrescrevam)
-  - Ex: modo roblox tem rojo + herda git do normal
-  - Modo python tem pytest + herda git do normal
-- [ ] **F8.5.4** Config do modo normal:
-  ```json
-  {
-    "name": "normal",
-    "label": "Padrão",
-    "description": "Modo padrão com ferramentas básicas",
-    "isBase": true,
-    "tools": {
-      "items": ["git"]
-    },
-    "skills": {
-      "items": ["git-cli"]
-    }
-  }
-  ```
-
-#### 8.5.B — Compartilhamento de Tools Entre Modos (2h)
-
-**Objetivo:** Usuário marca quais modos usam as mesmas tools. Ex: tool X no modo normal → também quero no modo roblox.
-
-**Tarefas:**
-- [ ] **F8.5.5** Adicionar campo `sharedWith` no manifest:
-  ```json
-  {
-    "name": "darklua",
-    "category": "action",
-    "sharedWith": ["roblox", "devops"],
-    "actions": { ... }
-  }
-  ```
-  - Tool mora em UMA pasta (ex: `modes/normal/tools/darklua.exe`)
-  - Mas é visível nos modos listados em `sharedWith`
-- [ ] **F8.5.6** UI pra marcar compartilhamento (no Hub):
-  ```
-  ┌─────────────────────────────────────────┐
-  │ Tool: darklua                           │
-  │                                         │
-  │ Compartilhar com:                       │
-  │ [x] normal (origem)                     │
-  │ [x] roblox                              │
-  │ [ ] devops                              │
-  │ [ ] python                              │
-  │                                         │
-  │ [Enter] salvar  [Esc] cancelar          │
-  └─────────────────────────────────────────┘
-  ```
-- [ ] **F8.5.7** `getExternalToolDefinitions()` respeita `sharedWith`:
-  - Se modo ativo = roblox → mostra tools de roblox + tools compartilhadas COM roblox
-  - Tool compartilhada usa manifest da pasta de origem
-  - Tool compartilhada usa binary da pasta de origem (não duplica)
-- [ ] **F8.5.8** Comando `/compartilhar <tool> <modo>`:
-  - `/compartilhar darklua roblox` → marca darklua como sharedWith roblox
-  - `/compartilhar darklua roblox devops` → marca pra vários
-  - `/compartilhar darklua --todos` → compartilha com todos os modos
-- [ ] **F8.5.9** Comando `/descompartilhar <tool> <modo>`:
-  - Remove modo de `sharedWith`
-- [ ] **F8.5.10** Tecla 'X' no Hub (não é mais extreme search) → abre painel de compartilhamento da tool selecionada
-
-#### 8.5.C — Lógica de Herança (1.5h)
-
-**Objetivo:** Modo normal é base. Outros modos herdam + adicionam próprias.
-
-**Tarefas:**
-- [ ] **F8.5.11** Resolução de tools visíveis no modo ativo:
-  ```typescript
-  function getVisibleTools(modeName: string): Tool[] {
-    const modeTools = loadModeTools(modeName);  // tools do próprio modo
-    const normalTools = loadModeTools("normal"); // tools do modo normal
-    const sharedTools = findSharedWith(modeName); // tools de outros modos marcadas
-    
-    // Merge: modo específico > compartilhadas > normal
-    // Sobrescreve por nome (modo específico ganha)
-    return mergeTools(modeTools, sharedTools, normalTools);
-  }
-  ```
-- [ ] **F8.5.12** Tools padrão (já bundled) NÃO entram no compartilhamento:
-  - git, npm, node, etc. são padrão em todos os modos (hardcoded)
-  - Não aparecem na UI de compartilhamento
-  - Sempre disponíveis
-- [ ] **F8.5.13** Prioridade de resolução:
-  1. Tool do modo ativo (específica) → prioridade máxima
-  2. Tool compartilhada com o modo ativo → prioridade média
-  3. Tool do modo normal (herdada) → prioridade baixa
-  4. Tool padrão hardcoded → sempre disponível
-
-**Entregável:** Modo normal tem tools. Outros modos herdam + adicionam. Usuário pode marcar compartilhamento.
-
----
-
-### Sprint 8.6: Sistema de Perguntas Interativas (AskUser) (7h)
+#### Sprint 1: AskUser — Sistema de Perguntas Interativas (7h)
 
 **Objetivo:** Implementar sistema de perguntas igual ao Claude Code — IA faz pergunta, PARA, e usuário escolhe alternativa ou digita resposta. Disponível tanto no chat normal quanto no configurador.
 
 > **Inspirado em:** Claude Code's `AskUserQuestion` tool — quando a IA não tem certeza de algo, ela faz uma pergunta com múltipla escolha + opção de resposta livre. O agent loop PARA até o usuário responder. Isso reduz MUITO os erros em casos reais.
 
-#### 8.6.A — Tool `perguntar_usuario` (2h)
+> **Independente do sistema de modos:** Este sprint não depende de pastas, manifests, ou qualquer outra feature. Pode ser implementado e testado isoladamente. É a feature de maior impacto individual — reduz erros desde cedo no chat normal.
+
+##### 1.A — Tool `perguntar_usuario` (2h)
 
 **Objetivo:** Nova function call que IA pode usar pra fazer perguntas.
 
 **Tarefas:**
-- [ ] **F8.6.1** Definir tool `perguntar_usuario` em `agent.ts`:
+- [ ] **F1.1** Definir tool `perguntar_usuario` em `agent.ts`:
   ```typescript
   {
     type: "function",
@@ -863,23 +428,23 @@ Tool configurada. IA principal já pode usar.
     }
   }
   ```
-- [ ] **F8.6.2** Handler de `perguntar_usuario`:
+- [ ] **F1.2** Handler de `perguntar_usuario`:
   - Quando IA chama essa tool, o agent loop PARA
-  - Renderiza UI de pergunta (8.6.B)
+  - Renderiza UI de pergunta (1.B)
   - Aguarda usuário responder (escolher alternativa ou digitar)
   - Retorna resposta como tool result pra IA
   - Agent loop CONTINUA com a resposta
-- [ ] **F8.6.3** Disponibilizar `perguntar_usuario` no chat normal E no configurador:
+- [ ] **F1.3** Disponibilizar `perguntar_usuario` no chat normal E no configurador:
   - Chat normal: sempre disponível
-  - Configurador: sempre disponível (já estava no prompt do 7.A)
+  - Configurador: sempre disponível (já estava no prompt do 11.A)
   - Sub-agentes: disponível se `allowUserQuestions: true` (default: false)
 
-#### 8.6.B — UI de Pergunta no Terminal (3h)
+##### 1.B — UI de Pergunta no Terminal (3h)
 
 **Objetivo:** Interface visual igual Claude Code — alternativas numeradas + input livre.
 
 **Tarefas:**
-- [ ] **F8.6.4** Criar `src/tui/QuestionPrompt.tsx`:
+- [ ] **F1.4** Criar `src/tui/QuestionPrompt.tsx`:
   - Componente Ink que renderiza pergunta + alternativas
   - Layout:
     ```
@@ -904,30 +469,30 @@ Tool configurada. IA principal já pode usar.
     │ [Enter] confirmar  [Esc] cancelar           │
     └─────────────────────────────────────────────┘
     ```
-- [ ] **F8.6.5** Interação:
+- [ ] **F1.5** Interação:
   - Setas ↑↓ ou números 1-6 selecionam alternativa
   - Enter confirma seleção
   - OU usuário digita resposta livre (qualquer texto que não seja número)
   - Esc cancela pergunta → retorna "usuário cancelou"
   - Tab alterna entre "escolher alternativa" e "digitar resposta"
-- [ ] **F8.6.6** Estado de "aguardando resposta":
+- [ ] **F1.6** Estado de "aguardando resposta":
   - Quando `perguntar_usuario` é chamada, App entra em modo "aguardando"
   - Agent loop PAUSA (não continua pra próxima iteração)
   - UI mostra QuestionPrompt
   - Input normal do chat fica desabilitado
   - Status bar mostra "Aguardando resposta..."
   - Após resposta, agent loop CONTINUA
-- [ ] **F8.6.7** Render da pergunta no histórico do chat:
+- [ ] **F1.7** Render da pergunta no histórico do chat:
   - Pergunta aparece como mensagem especial no chat
   - Resposta do usuário também aparece
   - Histórico preserva pergunta+resposta pra contexto futuro
 
-#### 8.6.C — Integração com Agent Loop (2h)
+##### 1.C — Integração com Agent Loop (2h)
 
 **Objetivo:** Agent loop pausa/resume corretamente quando IA pergunta.
 
 **Tarefas:**
-- [ ] **F8.6.8** Modificar `runAgentLoop`:
+- [ ] **F1.8** Modificar `runAgentLoop`:
   ```typescript
   // Quando dispatchToolCall recebe "perguntar_usuario":
   if (toolName === "perguntar_usuario") {
@@ -945,12 +510,12 @@ Tool configurada. IA principal já pode usar.
     };
   }
   ```
-- [ ] **F8.6.9** `waitForUserResponse()`:
+- [ ] **F1.9** `waitForUserResponse()`:
   - Cria Promise que resolve quando usuário responde
   - Renderiza QuestionPrompt via callback
   - Resolve com `{ value: string, cancelled: boolean, fromAlternatives: boolean }`
   - Pode ser cancelado (Esc) → `{ cancelled: true }`
-- [ ] **F8.6.10** System prompt atualizado pra encorajar perguntas:
+- [ ] **F1.10** System prompt atualizado pra encorajar perguntas:
   ```
   REGRAS:
   - Se você NÃO tem certeza do que o usuário quer, USE perguntar_usuario.
@@ -962,17 +527,17 @@ Tool configurada. IA principal já pode usar.
   - Sempre inclua "Outro" implícito (usuário pode digitar resposta livre).
   ```
 
-#### 8.6.D — Disponibilidade Seletiva (0.5h)
+##### 1.D — Disponibilidade Seletiva (0.5h)
 
 **Objetivo:** Nem todo sub-agente pode perguntar (evita spam).
 
 **Tarefas:**
-- [ ] **F8.6.11** Configuração por agente:
+- [ ] **F1.11** Configuração por agente:
   - Chat principal: `allowUserQuestions: true` (sempre)
   - Configurador: `allowUserQuestions: true` (sempre)
   - Sub-agentes paralelos: `allowUserQuestions: false` (default)
   - Sub-agentes podem ter `allowUserQuestions: true` se explicitamente configurado
-- [ ] **F8.6.12** Se IA tenta `perguntar_usuario` sem permissão:
+- [ ] **F1.12** Se IA tenta `perguntar_usuario` sem permissão:
   - Retorna erro: "perguntar_usuario não disponível neste contexto"
   - IA deve continuar sem perguntar (usar melhor juízo)
 
@@ -980,31 +545,633 @@ Tool configurada. IA principal já pode usar.
 
 ---
 
-### Sprint 9: config.json Schema + Migration (4h)
+#### Sprint 2: Limpeza + Migration (12h)
 
-**Objetivo:** Schema rigoroso + migration de usuários existentes.
+**Objetivo:** Remover sistema antigo de busca, criar estrutura de pastas, toolDetector simples, E migrar usuários existentes pro novo formato. Juntamos limpeza + migration porque não dá pra mudar a estrutura de pastas sem migrar o que existe — separar deixaria usuários quebrados entre os dois sprints.
+
+##### 2.A — Limpeza + Estrutura + Tools (8h)
 
 **Tarefas:**
-- [ ] **F9.1** Definir schema JSON completo (TypeScript + json-schema)
-- [ ] **F9.2** Validação na carga:
-  - Se config inválido, modo não ativa + mensagem clara
-- [ ] **F9.3** Migration automático:
+- [ ] **F2.1** Remover `src/aiSearch.ts` (~250 linhas)
+- [ ] **F2.2** Remover funções de busca do `src/toolDetector.ts`:
+  - `smartSearch()`, `findToolchainConfig()`, `getRegistryPathDirs()`
+  - `queryPackageManagers()`, `extremeFilesystemSearch()`
+  - `deepFilesystemSearch()`, `extremeSearchAllTools()`, `aiOnlySearchAllTools()`
+  - `searchAllTools()` (versão antiga)
+  - Manter só `detectTool()` (sem busca profunda) e `getModeToolNames()`
+- [ ] **F2.3** Remover do `ExtensionHub.tsx`:
+  - Estados: `searching`, `extremeSearching`, `aiSearching` + progress
+  - Funções: `triggerToolSearch()`, `triggerExtremeSearch()`, `triggerAiSearch()`
+  - Keybinds: S, A, X
+  - Painéis de busca
+- [ ] **F2.4** Criar estrutura de pastas:
+  - `defaults/modes/roblox/{tools,manifests,skills,hooks,mcps,inbox}/`
+  - `defaults/modes/devops/{tools,manifests,skills,hooks,mcps,inbox}/`
+- [ ] **F2.5** Refatorar `toolDetector.ts`:
+  - Nova função `findToolBinary(toolName, modeName)` — olha só em `modes/<mode>/tools/`
+  - 5 linhas em vez de 1500
+- [ ] **F2.6** Atualizar `externalTools.ts`:
+  - `ToolRegistry` lê tools da pasta do modo ativo
+  - `isInstalled()` verifica se binary existe (sem cache de 5min)
+- [ ] **F2.7** Migrar binaries existentes (opcional, migration tool):
+  - Script que copia `~/.rokit/bin/*.exe` → `~/.claude-killer/modes/roblox/tools/`
+- [ ] **F2.8** Deletar testes antigos de busca:
+  - `hub-manual-search.test.tsx`
+  - `hub-e2e.test.tsx` ( partes de search)
+  - `toolDetector-extended.test.ts` (partes de search)
+  - `aiSearch.test.ts`, `aiSearch-extended.test.ts`
+  - `tool-detection-hub.test.tsx`
+
+**Entregável:** Hub sem S/A/X, tools sendo detectadas só na pasta do modo.
+
+##### 2.B — Migration Automático (4h)
+
+**Objetivo:** Migration de usuários existentes pro novo formato de estrutura + config.
+
+**Tarefas:**
+- [ ] **F2.9** Migration automático de config:
   - Detecta `roblox.json` antigo → converte pra novo formato
   - Detecta tools em `~/.rokit/bin/` → sugere copiar pra `modes/roblox/tools/`
-- [ ] **F9.4** Backup do config antigo antes de migrar
-- [ ] **F9.5** Testar migration com configs reais
+- [ ] **F2.10** Backup do config antigo antes de migrar
+- [ ] **F2.11** Testar migration com configs reais
 
-**Entregável:** Usuário existente atualiza claude-killer → migration automático.
+**Detalhes do migration de config antigo:**
+- Detecta roblox.json antigo (sem "tools" structure)
+- Converte pra novo formato (com tools/manifests/skills/hooks/mcps)
+- Preserva enableTools → tools.items
+- Preserva enableSkills → skills.items
+- Preserva luauValidation → validators
+- Preserva effortLevel, strictMode, readBeforeWrite
+- Cria backup do config antigo (.bak)
+- Não migra se já tá no novo formato
+
+**Detalhes do migration de binaries:**
+- Detecta tools em ~/.rokit/bin/
+- Sugere copiar pra modes/roblox/tools/
+- Copia binaries quando usuário confirma
+- Não deleta originais (só copia)
+- Lida com tools que já existem na pasta do modo
+
+**Detalhes do migration de skills:**
+- Move skills de defaults/skills/ pra defaults/modes/roblox/skills/
+- Skills globais ficam em ~/.claude-killer/skills/
+- Não duplica skills
+
+**Detalhes do migration de MCPs:**
+- Move mcp-config.json pra modes/<mode>/mcps/
+- MCPs globais ficam em ~/.claude-killer/mcps/
+
+**Entregável:** Usuário existente atualiza claude-killer → migration automático → modo roblox ativa sem erro.
 
 ---
 
-### Sprint 10: Tests Completos (8h)
+#### Sprint 3: Manifests + Function Calls Dinâmicas (6h)
 
-**Objetivo:** Cobertura completa do novo sistema com testes unitários, de integração, property-based e E2E.
+**Objetivo:** Tools viram function calls específicas baseadas em manifests.
 
-> **Filosofia:** Cada sprint anterior produz código novo. Este sprint testa TUDO — não só o novo, mas também as integrações entre módulos. Usar a mesma estratégia que funcionou nas sessões anteriores: testes unitários + extended (edge cases) + property-based + integração cross-module + E2E.
+**Tarefas:**
+- [ ] **F3.1** Definir schema do manifest (TypeScript interface)
+- [ ] **F3.2** Criar manifests pré-feitos:
+  - `defaults/modes/roblox/manifests/rojo.json`
+  - `defaults/modes/roblox/manifests/selene.json`
+  - `defaults/modes/roblox/manifests/stylua.json`
+  - `defaults/modes/roblox/manifests/wally.json`
+  - `defaults/modes/roblox/manifests/lune.json`
+  - `defaults/modes/roblox/manifests/rokit.json`
+- [ ] **F3.3** Criar `src/manifestLoader.ts`:
+  - `loadToolManifest(toolName, modeName)` — lê custom ou bundled
+  - `loadAllManifests(modeName)` — carrega todos do modo
+- [ ] **F3.4** Refatorar `getExternalToolDefinitions()` em `agent.ts`:
+  - Em vez de `executar_tool` genérico, gera function calls dos manifests
+  - Cada action vira 1 function call (ex: `rojo_build`, `rojo_serve`)
+- [ ] **F3.5** Refatorar handler de tool calls em `agent.ts`:
+  - Despachar `${toolName}_${actionName}` → `toolExecutor.execute(toolName, actionName, args)`
+- [ ] **F3.6** Refatorar `ToolExecutor.execute()`:
+  - Lê manifest, substitui placeholders nos args
+  - Spawn com args corretos
+  - Retorna output estruturado
 
-#### 10.1 — Tests do Sprint 1: Limpeza + toolDetector (1.5h)
+**Entregável:** IA vê `rojo_build({projectFile, outputPath})` em vez de `executar_tool({tool: "rojo_build"})`.
+
+---
+
+#### Sprint 4: Validators do Config (3h)
+
+**Objetivo:** Validators (selene, stylua) rodam automáticos baseados em config.
+
+**Tarefas:**
+- [ ] **F4.1** Refatorar `luauValidator.ts`:
+  - Lê validators do config.json do modo ativo (em vez de hardcoded)
+  - Cada validator tem: tool, filePattern, blocking
+- [ ] **F4.2** Atualizar `fileEdit.ts`:
+  - `validateLuauBeforeWrite()` lê validators do config
+  - Suporte a qualquer validator (não só selene/stylua)
+- [ ] **F4.3** Generalizar pra outras linguagens:
+  - `validateBeforeWrite()` (não só Luau)
+  - Python mode → validators com black, mypy, ruff
+  - TS mode → validators com tsc, eslint
+
+**Entregável:** Adicionar validator novo = só editar config.json, sem código.
+
+---
+
+### FASE 2 — Sistema Completo
+
+#### Sprint 5: Skills por Modo (3h)
+
+**Objetivo:** Skills moram na pasta do modo, são injetadas no system prompt.
+
+**Tarefas:**
+- [ ] **F5.1** Mover skills existentes:
+  - `defaults/skills/*-cli.md` → `defaults/modes/roblox/skills/`
+- [ ] **F5.2** Refatorar `getActiveSkills()`:
+  - Lê skills da pasta do modo ativo + globais
+  - Modo específico > global
+- [ ] **F5.3** Atualizar `applyMode()`:
+  - Carrega skills e injeta no system prompt
+- [ ] **F5.4** Atualizar `deactivateMode()`:
+  - Remove skills injetadas
+- [ ] **F5.5** Criar pasta global `~/.claude-killer/skills/` (skills compartilhadas)
+
+**Entregável:** Modo Roblox ativo → skills rojo-cli, wally-cli, etc. disponíveis pra IA.
+
+---
+
+#### Sprint 6: Modo Normal + Compartilhamento Entre Modos (5h)
+
+**Objetivo:** Modo "normal" também tem pasta. Tools podem ser compartilhadas entre modos (marcar quais modos usam as mesmas).
+
+##### 6.A — Modo Normal com Pasta (1.5h)
+
+**Objetivo:** Mesmo sem modo ativo, usuário tem pasta `~/.claude-killer/modes/normal/` com tools globais.
+
+**Tarefas:**
+- [ ] **F6.1** Criar modo "normal" built-in:
+  - `defaults/modes/normal/config.json` — config mínimo (sem validators, sem hooks)
+  - `defaults/modes/normal/{tools,manifests,skills,hooks,mcps,inbox}/` — estrutura vazia
+  - Sempre ativo quando nenhum outro modo está ativo
+  - Tools do modo normal são "padrão" — servem pra qualquer projeto
+- [ ] **F6.2** Quando nenhum modo ativo → carrega modo normal:
+  - `getActiveMode()` retorna modo normal em vez de null
+  - Function calls do modo normal ficam disponíveis
+  - Validators do modo normal rodam (se houver)
+- [ ] **F6.3** Modo normal é "base" pra outros modos:
+  - Outros modos HERDAM tools do normal (a menos que sobrescrevam)
+  - Ex: modo roblox tem rojo + herda git do normal
+  - Modo python tem pytest + herda git do normal
+- [ ] **F6.4** Config do modo normal:
+  ```json
+  {
+    "name": "normal",
+    "label": "Padrão",
+    "description": "Modo padrão com ferramentas básicas",
+    "isBase": true,
+    "tools": {
+      "items": ["git"]
+    },
+    "skills": {
+      "items": ["git-cli"]
+    }
+  }
+  ```
+
+##### 6.B — Compartilhamento de Tools Entre Modos (2h)
+
+**Objetivo:** Usuário marca quais modos usam as mesmas tools. Ex: tool X no modo normal → também quero no modo roblox.
+
+**Tarefas:**
+- [ ] **F6.5** Adicionar campo `sharedWith` no manifest:
+  ```json
+  {
+    "name": "darklua",
+    "category": "action",
+    "sharedWith": ["roblox", "devops"],
+    "actions": { ... }
+  }
+  ```
+  - Tool mora em UMA pasta (ex: `modes/normal/tools/darklua.exe`)
+  - Mas é visível nos modos listados em `sharedWith`
+- [ ] **F6.6** UI pra marcar compartilhamento (no Hub):
+  ```
+  ┌─────────────────────────────────────────┐
+  │ Tool: darklua                           │
+  │                                         │
+  │ Compartilhar com:                       │
+  │ [x] normal (origem)                     │
+  │ [x] roblox                              │
+  │ [ ] devops                              │
+  │ [ ] python                              │
+  │                                         │
+  │ [Enter] salvar  [Esc] cancelar          │
+  └─────────────────────────────────────────┘
+  ```
+- [ ] **F6.7** `getExternalToolDefinitions()` respeita `sharedWith`:
+  - Se modo ativo = roblox → mostra tools de roblox + tools compartilhadas COM roblox
+  - Tool compartilhada usa manifest da pasta de origem
+  - Tool compartilhada usa binary da pasta de origem (não duplica)
+- [ ] **F6.8** Comando `/compartilhar <tool> <modo>`:
+  - `/compartilhar darklua roblox` → marca darklua como sharedWith roblox
+  - `/compartilhar darklua roblox devops` → marca pra vários
+  - `/compartilhar darklua --todos` → compartilha com todos os modos
+- [ ] **F6.9** Comando `/descompartilhar <tool> <modo>`:
+  - Remove modo de `sharedWith`
+- [ ] **F6.10** Tecla 'X' no Hub (não é mais extreme search) → abre painel de compartilhamento da tool selecionada
+
+##### 6.C — Lógica de Herança (1.5h)
+
+**Objetivo:** Modo normal é base. Outros modos herdam + adicionam próprias.
+
+**Tarefas:**
+- [ ] **F6.11** Resolução de tools visíveis no modo ativo:
+  ```typescript
+  function getVisibleTools(modeName: string): Tool[] {
+    const modeTools = loadModeTools(modeName);  // tools do próprio modo
+    const normalTools = loadModeTools("normal"); // tools do modo normal
+    const sharedTools = findSharedWith(modeName); // tools de outros modos marcadas
+    
+    // Merge: modo específico > compartilhadas > normal
+    // Sobrescreve por nome (modo específico ganha)
+    return mergeTools(modeTools, sharedTools, normalTools);
+  }
+  ```
+- [ ] **F6.12** Tools padrão (já bundled) NÃO entram no compartilhamento:
+  - git, npm, node, etc. são padrão em todos os modos (hardcoded)
+  - Não aparecem na UI de compartilhamento
+  - Sempre disponíveis
+- [ ] **F6.13** Prioridade de resolução:
+  1. Tool do modo ativo (específica) → prioridade máxima
+  2. Tool compartilhada com o modo ativo → prioridade média
+  3. Tool do modo normal (herdada) → prioridade baixa
+  4. Tool padrão hardcoded → sempre disponível
+
+##### 6.D — Regras Definitivas de Compartilhamento
+
+> Esta seção resolve os edge cases do `sharedWith` que surgiram durante a revisão do plano. São regras definitivas — implementação deve segui-las à risca.
+
+**Regras do sharedWith:**
+
+1. **Tool mora em UMA pasta (modo de origem).** Binary e manifest ficam lá.
+2. **`sharedWith` é opt-in** — usuário marca explicitamente quais modos recebem.
+3. **Modo ativo SEMPRE ganha:** se modo roblox tem tool "darklua" própria, usa a própria (ignora compartilhada de outro modo com mesmo nome).
+4. **Tool compartilhada usa manifest E binary da ORIGEM** (não copia).
+5. **Deletar tool da origem:**
+   - ANTES de deletar, verifica `sharedWith`
+   - Se há modos compartilhados, AVISA: `"darklua é usada por roblox, devops. Remover vai afetar esses modos. Continuar? (s/n)"`
+   - Se confirmar, remove de `sharedWith` de todos os modos + deleta binary
+6. **Atualizar tool na origem:**
+   - Todos os modos compartilhados veem a mudança (mesmo binary/manifest)
+   - Se a atualização quebrar algo, afeta todos os modos (por design)
+7. **Prioridade de resolução (ordem decrescente):**
+   a. Tool do modo ativo (específica) — prioridade MÁXIMA
+   b. Tool compartilhada com o modo ativo (de outro modo)
+   c. Tool do modo normal (herdada, `isBase`)
+   d. Tool padrão hardcoded (git, npm) — sempre disponível
+8. **Conflito de nomes entre compartilhadas:**
+   - Se 2 modos compartilham tool de mesmo nome com o modo ativo: ORDEM alfabética do modo de origem (determinístico)
+   - Ex: devops compartilha "darklua" E normal compartilha "darklua"
+     → devops ganha (vem antes de normal alfabeticamente)
+     → MAS modo ativo própria sempre ganha de qualquer compartilhada
+
+**Entregável:** Modo normal tem tools. Outros modos herdam + adicionam. Usuário pode marcar compartilhamento. Edge cases resolvidos.
+
+---
+
+#### Sprint 7: MCPs por Modo (3h)
+
+**Objetivo:** MCP servers moram na pasta do modo, são iniciados com o modo.
+
+**Tarefas:**
+- [ ] **F7.1** Mover configs MCP:
+  - `~/.claude-killer/mcp-config.json` → `~/.claude-killer/modes/<mode>/mcps/`
+- [ ] **F7.2** Refatorar `loadAllExtensions()`:
+  - Carrega MCPs da pasta do modo ativo + globais
+- [ ] **F7.3** Atualizar `applyMode()`:
+  - Inicia MCP servers do modo
+- [ ] **F7.4** Atualizar `deactivateMode()`:
+  - Para MCP servers do modo
+- [ ] **F7.5** Criar pasta global `~/.claude-killer/mcps/` (MCPs compartilhados)
+
+**Entregável:** Modo Roblox ativo → roblox-api MCP disponível.
+
+---
+
+#### Sprint 8: Hooks por Modo com Sandbox Madura (6h)
+
+**Objetivo:** Hooks customizados rodam em eventos do agent loop, isolados em Worker Threads pra não travar/crashar o processo principal.
+
+> **Custo:** Originalmente 4h. Expandido pra 6h (+2h) por causa da sandbox madura com Worker Threads. Ver seção 8.X abaixo.
+
+##### 8.A — Hooks por Modo (4h)
+
+**Tarefas:**
+- [ ] **F8.1** Definir interface de hooks (TypeScript)
+- [ ] **F8.2** Criar `src/hookRunner.ts`:
+  - `loadHooks(modeName)` — carrega hooks da pasta
+  - `runHooks(trigger, context)` — roda hooks de um trigger
+- [ ] **F8.3** Integrar hooks no `fileEdit.ts`:
+  - Antes de salvar: `runHooks("before_write", { filePath, content })`
+  - Depois de salvar: `runHooks("on_file", { filePath, content })`
+- [ ] **F8.4** Integrar hooks no `agent.ts`:
+  - Após task completa: `runHooks("on_task", { toolExecutor })`
+  - A cada iteração: `runHooks("always", { toolExecutor })`
+- [ ] **F8.5** Criar 2 hooks de exemplo:
+  - `defaults/modes/roblox/hooks/auto-build.js` (on_file)
+  - `defaults/modes/roblox/hooks/validate-config.js` (on_task)
+
+##### 8.X — Sandbox Madura para Hooks (2h)
+
+**Problema:** Hooks rodam JavaScript arbitrário dentro do processo do claude-killer. Em Node.js, não há sandbox real sem isolamento. Riscos:
+- Hook com bug pode travar o agent loop
+- Vazamento de memória
+- Acesso a fs global (deletar arquivos)
+- Chamar `process.exit()`
+
+**Solução:** Worker Threads com API limitada.
+
+**Implementação:**
+- Cada hook roda em uma Worker Thread separada
+- Worker recebe apenas um objeto `context` com APIs permitidas:
+  - `toolExecutor` (proxy que só permite `execute()`)
+  - `filePath` (string)
+  - `content` (string)
+  - `mode` (objeto read-only)
+- Worker NÃO tem acesso a:
+  - `require()` irrestrito
+  - `process.exit()`
+  - `fs` global
+  - `child_process`
+  - `eval`/`Function`
+- Timeout de 5s — se hook não terminar, worker é terminado
+- Memória limitada (`resourceLimits: { maxOldGenerationSizeMb: 64 }`)
+- Comunicação via `postMessage` (serializada, sem shared memory)
+
+**Estrutura:**
+```
+hooks/
+  auto-build.js     ← código do hook (roda na worker)
+  auto-build.json   ← config do hook (trigger, timeout, etc.)
+```
+
+**`hookRunner.ts`:**
+1. Cria Worker Thread para cada hook
+2. Envia context via `postMessage`
+3. Aguarda resposta (com timeout)
+4. Se timeout → `worker.terminate()`, loga warning
+5. Se erro → captura, loga, continua
+6. Se success → retorna resultado
+
+**API do hook (o que ele recebe):**
+```javascript
+const { workerData } = require('worker_threads');
+// workerData = { filePath, content, mode, toolExecutorProxy }
+module.exports = {
+  trigger: "on_file",
+  async run(context) {
+    // context.toolExecutor é um proxy que só permite execute()
+    // context.filePath, context.content, context.mode são read-only
+    return null; // ou { blocking: true, message: "..." }
+  }
+};
+```
+
+**Tarefas:**
+- [ ] **F8.6** Implementar sandbox com Worker Threads (seção 8.X acima):
+  - Cada hook roda em Worker Thread isolada
+  - `resourceLimits` com `maxOldGenerationSizeMb: 64`
+  - Timeout de 5s por hook
+  - `worker.terminate()` em caso de timeout
+  - Proxy de `toolExecutor` que só permite `execute()`
+  - Comunicação via `postMessage` (serializada)
+
+**Entregável:** Editar .luau → auto-build roda automaticamente em sandbox isolada. Hook com bug NÃO trava o agent loop.
+
+---
+
+#### Sprint 9: Busca de Arquivos na Máquina (3h)
+
+**Objetivo:** Usuário pode pedir "tenho darklua.exe em algum lugar, encontre e instale".
+
+> Extraído do antigo Sprint 7 (sub-seção 7.B). Agora é sprint independente pois não depende do mini chat — pode ser usado via CLI ou integração futura.
+
+**Tarefas:**
+- [ ] **F9.1** Criar `src/fileFinder.ts`:
+  - `searchInDefinedFolders(fileName, modeName)` — busca nas pastas padrão:
+    - `~/.claude-killer/modes/<mode>/tools/`
+    - `~/.claude-killer/modes/<mode>/inbox/`
+    - `~/.rokit/bin/` (legacy fallback)
+    - `~/.aftman/bin/` (legacy fallback)
+    - `~/.cargo/bin/` (legacy fallback)
+    - PATH do sistema
+  - `searchEntireMachine(fileName)` — busca em tudo (com permissão):
+    - Windows: `where /R C:\ darklua.exe` (por drive)
+    - Unix: `find / -name darklua -type f 2>/dev/null`
+    - Mostra progresso em tempo real
+    - Pode ser cancelado com Esc
+  - `searchWithProgress(fileName, onProgress, abortSignal)` — busca com callback
+- [ ] **F9.2** Fluxo de busca (pergunta permissão):
+  ```
+  Usuário: "tenho darklua.exe em algum lugar, instala pra mim"
+  ↓
+  Configurador: "Vou procurar darklua.exe. Primeiro nas pastas padrão..."
+  ↓
+  Sistema: searchInDefinedFolders("darklua.exe", "roblox")
+  ↓
+  Se encontrar: "Achei em ~/.rokit/bin/darklua.exe! Posso copiar pra 
+                 modes/roblox/tools/? (s/n)"
+  ↓
+  Se NÃO encontrar: "Não encontrei nas pastas padrão. Quer que eu procure
+                      em toda a máquina? (pode demorar 1-5 min) (s/n)"
+  ↓
+  Se sim: searchEntireMachine com progresso
+  ↓
+  Se encontrar: "Achei em D:\Tools\darklua.exe! Copiar? (s/n)"
+  Se não: "darklua.exe não encontrado em lugar nenhum. TALVEZ você 
+          precise baixar de https://github.com/..."
+  ```
+- [ ] **F9.3** Permissões de busca:
+  - Busca em pastas padrão: automática (sem perguntar)
+  - Busca em toda máquina: PRECISA permissão explícita do usuário
+  - Busca nunca roda automaticamente (sempre perguntada)
+  - Usuário pode cancelar a qualquer momento (Esc)
+- [ ] **F9.4** Resultado da busca:
+  - Pode encontrar múltiplos arquivos → pergunta qual usar
+  - Copia (não move) pra pasta do modo
+  - Cria manifest automaticamente após copiar
+
+**Entregável:** Sistema consegue achar binaries em qualquer lugar da máquina (com permissão) e copiar pra pasta do modo.
+
+---
+
+#### Sprint 10: Inbox + Organizadora (4h)
+
+**Objetivo:** Usuário joga arquivos no inbox, IA organiza.
+
+**Tarefas:**
+- [ ] **F10.1** Criar `src/inboxOrganizer.ts`:
+  - `organizeInbox(modeName)` — entry point
+- [ ] **F10.2** Heurística por extensão:
+  - `.exe` → tool, `.md` → skill, `.js` → hook/mcp, `.json` → manifest/config/mcp
+- [ ] **F10.3** Inspeção de conteúdo:
+  - `.js`: procura `module.exports.run` (hook) vs JSON-RPC (mcp)
+  - `.json`: schema check (manifest vs config vs mcp)
+  - `.exe`: roda `--version`/`--help`
+- [ ] **F10.4** IA organizadora (casos ambíguos):
+  - Usa IA configuradora pra classificar
+- [ ] **F10.5** Move arquivos pros lugares certos
+- [ ] **F10.6** Atualiza config.json com novos itens
+- [ ] **F10.7** Comando `/organize` no App.tsx
+- [ ] **F10.8** Tecla 'O' no Hub
+- [ ] **F10.9** Inbox/README.md explicando uso
+
+**Entregável:** Jogar 4 arquivos no inbox → /organize → tudo configurado.
+
+---
+
+#### Sprint 11: Mini Chat + IA Configuradora (10h)
+
+**Objetivo:** Sub-agente limitado com mini chat interativo para configurar tools e criar manifests.
+
+> Originalmente Sprint 7 (sub-seções 7.A + 7.C). A busca de arquivos (antiga 7.B) foi extraída pro Sprint 9. Este sprint foca no mini chat + configuração interativa.
+>
+> **Pode ser dividido** em 11a (busca+config) e 11b (mini chat) se necessário — decisão fica com quem implementa (avaliar na hora).
+
+##### 11.A — Mini Chat de Configuração (3h)
+
+**Objetivo:** Interface de chat dedicada pra configuração (não é só sim/não).
+
+**Tarefas:**
+- [ ] **F11.1** Criar `src/tui/ConfiguratorChat.tsx`:
+  - Componente Ink que renderiza um mini chat dentro do Hub
+  - Mostra mensagens do configurador + input do usuário
+  - Suporta múltiplos turnos de conversa
+  - Pode ser aberto via tecla 'C' no Hub OU via comando `/configurar`
+- [ ] **F11.2** System prompt do configurador:
+  ```
+  "Você é uma IA configuradora. Sua tarefa é ajudar o usuário a configurar
+  tools, skills, hooks e MCPs para o modo ativo.
+  
+  Você PODE:
+  - Rodar comandos pra entender tools (--help, --version)
+  - Pesquisar na web pra achar documentação
+  - Criar arquivos .json (manifests, configs)
+  - Buscar arquivos na máquina do usuário (com permissão)
+  - Mover/copiar arquivos entre pastas do modo
+  - Fazer perguntas ao usuário quando incerta
+  
+  Você NÃO PODE:
+  - Editar código fonte do projeto
+  - Deletar arquivos do usuário
+  - Rodar comandos arbitrários (só --help, --version, where, find)
+  - Acessar arquivos fora das pastas do claude-killer
+  
+  Sempre explique o que está fazendo antes de fazer."
+  ```
+- [ ] **F11.3** Tools do configurador (limitadas):
+  - `executar_comando` (só --help, --version, where, find, ls)
+  - `pesquisar` (web search)
+  - `criar_arquivo` (só em modes/<mode>/)
+  - `buscar_arquivo` (procura arquivo na máquina — vê Sprint 9)
+  - `mover_arquivo` (só entre pastas do modo)
+  - `perguntar_usuario` (faz pergunta no mini chat — vê Sprint 1)
+- [ ] **F11.4** Render do mini chat no Hub:
+  - Painel dedicado quando configurador ativo
+  - Mostra histórico de mensagens
+  - Input field pra usuário responder
+  - Botões: [Enter] enviar, [Esc] cancelar configuração
+
+##### 11.B — Configuração Interativa via Chat (4h)
+
+**Objetivo:** Usuário conversa com configurador pra configurar tudo.
+
+**Tarefas:**
+- [ ] **F11.5** Criar `src/toolConfigurator.ts`:
+  - `startConfigurationSession(modeName)` — inicia mini chat
+  - Usa `runAgentLoop` com tools limitadas + system prompt do configurador
+  - Session persiste até usuário cancelar (Esc) ou configurador terminar
+- [ ] **F11.6** Fluxo de configuração de tool desconhecida:
+  ```
+  Hub detecta: darklua.exe sem manifest
+  ↓
+  Hub mostra: "darklua.exe encontrado sem config. [C]onfigurar?"
+  ↓
+  Usuário pressiona 'C' → abre mini chat
+  ↓
+  Configurador: "Vou configurar darklua. Primeiro, deixa eu entender 
+                 o que ela faz..."
+  Configurador: [roda darklua --help]
+  Configurador: "Ok, darklua é um minifier/transformer pra Luau. 
+                 Tem 3 comandos: process, transform, minify.
+                 Quer que eu crie o manifest? (s/n)"
+  Usuário: "sim"
+  Configurador: [cria manifests/darklua.json]
+  Configurador: "Manifest criado! darklua agora aparece como 
+                 darklua_process, darklua_transform, darklua_minify 
+                 pra IA. Quer testar? (s/n)"
+  Usuário: "não"
+  Configurador: "Tudo certo! darklua configurada."
+  ↓
+  Mini chat fecha, Hub atualiza, card mostra [OK]
+  ```
+- [ ] **F11.7** Fluxo de busca + instalação via chat:
+  ```
+  Usuário: "tenho uma tool chamada my-linter em algum lugar"
+  ↓
+  Configurador: "Vou procurar my-linter. Primeiro nas pastas padrão..."
+  Configurador: [searchInDefinedFolders]
+  Configurador: "Não encontrei nas pastas padrão. Quer que eu procure 
+                 em toda a máquina? (s/n)"
+  Usuário: "sim"
+  ↓
+  Configurador: [searchEntireMachine com progresso]
+  Configurador: "Achei em C:\Users\kryst\Downloads\my-linter.exe! 
+                 Copiar pra modes/roblox/tools/? (s/n)"
+  Usuário: "sim"
+  ↓
+  Configurador: [copia + roda --help + cria manifest]
+  Configurador: "my-linter instalada e configurada! 
+                 Aparece como my_linter_lint pra IA."
+  ```
+- [ ] **F11.8** Schema validation do manifest criado:
+  - Valida JSON contra schema
+  - Se inválido, configurador corrige automaticamente (loop)
+- [ ] **F11.9** Múltiplas configurações na mesma session:
+  - Usuário pode configurar várias tools na mesma conversa
+  - "agora configura selene também"
+  - "tem mais uma tool chamada X"
+  - Session só termina quando usuário diz "pronto" ou Esc
+
+##### 11.C — Integração com Sprints Anteriores (3h)
+
+**Objetivo:** Integrar mini chat com busca de arquivos (Sprint 9) e AskUser (Sprint 1).
+
+**Tarefas:**
+- [ ] **F11.10** Integrar `buscar_arquivo` tool (do Sprint 9) no configurador
+- [ ] **F11.11** Integrar `perguntar_usuario` tool (do Sprint 1) no configurador
+- [ ] **F11.12** Testar fluxo completo: mini chat → busca → instala → configura → usa
+
+**Entregável:** Abrir mini chat → conversar com IA → tools configuradas automaticamente.
+
+---
+
+### FASE 3 — Robustez
+
+#### Sprint 12: Schema Validation + Tests Completos (11h)
+
+**Objetivo:** Schema rigoroso do config.json + cobertura completa do novo sistema com testes unitários, de integração, property-based e E2E.
+
+> **Filosofia:** Cada sprint anterior produz código novo. Este sprint valida o schema do config E testa TUDO — não só o novo, mas também as integrações entre módulos. Usar a mesma estratégia que funcionou nas sessões anteriores: testes unitários + extended (edge cases) + property-based + integração cross-module + E2E.
+
+##### 12.A — Schema Validation (3h)
+
+**Tarefas:**
+- [ ] **F12.1** Definir schema JSON completo do `config.json` (TypeScript + json-schema)
+- [ ] **F12.2** Validação na carga:
+  - Se config inválido, modo não ativa + mensagem clara
+  - Mensagem de erro indica exatamente qual campo está inválido
+
+##### 12.B — Tests Completos (8h)
+
+##### 12.1 — Tests do Sprint 2: Limpeza + toolDetector (1.5h)
 
 **Arquivo:** `src/__tests__/toolDetector-modes.test.ts` (novo)
 
@@ -1055,7 +1222,7 @@ describe("Estrutura de pastas do modo")
   ✓ inbox/ tem README.md explicando uso
 ```
 
-#### 10.2 — Tests do Sprint 2: Manifests + Function Calls (1.5h)
+##### 12.2 — Tests do Sprint 3: Manifests + Function Calls (1.5h)
 
 **Arquivo:** `src/__tests__/manifestLoader.test.ts` (novo)
 
@@ -1112,7 +1279,7 @@ describe("getExternalToolDefinitions (function calls dinâmicas)")
   ✓ retorna vazio quando modo não tem tools
 ```
 
-#### 10.3 — Tests do Sprint 3: Skills por Modo (0.5h)
+##### 12.3 — Tests do Sprint 5: Skills por Modo (0.5h)
 
 **Arquivo:** `src/__tests__/skills-modes.test.ts` (novo)
 
@@ -1128,7 +1295,7 @@ describe("Skills por modo")
   ✓ múltiplas skills são concatenadas com separador
 ```
 
-#### 10.4 — Tests do Sprint 4: Hooks por Modo (1h)
+##### 12.4 — Tests do Sprint 8: Hooks por Modo + Sandbox (1h)
 
 **Arquivo:** `src/__tests__/hookRunner.test.ts` (novo)
 
@@ -1166,13 +1333,22 @@ describe("Hook timeout")
   ✓ timeout loga warning
   ✓ timeout não trava agent loop
 
-describe("Hook sandbox")
-  ✓ hook tem acesso a toolExecutor
+describe("Hook sandbox (Worker Threads)")
+  ✓ hook tem acesso a toolExecutor (proxy)
   ✓ hook NÃO tem acesso a process.exit
   ✓ hook NÃO tem acesso a fs global (só via toolExecutor)
+  ✓ hook NÃO tem acesso a child_process
+  ✓ hook NÃO tem acesso a require irrestrito
+  ✓ hook NÃO tem acesso a eval/Function
+  ✓ hook roda em Worker Thread separada (memória isolada)
+  ✓ hook com vazamento de memória não afeta processo principal
+  ✓ resourceLimits maxOldGenerationSizeMb: 64 é respeitado
+  ✓ worker.terminate() em caso de timeout mata hook imediatamente
+  ✓ comunicação via postMessage (serializada, sem shared memory)
+  ✓ toolExecutor proxy só permite execute() (não expõe outros métodos)
 ```
 
-#### 10.5 — Tests do Sprint 5: MCPs por Modo (0.5h)
+##### 12.5 — Tests do Sprint 7: MCPs por Modo (0.5h)
 
 **Arquivo:** `src/__tests__/mcps-modes.test.ts` (novo)
 
@@ -1188,7 +1364,7 @@ describe("MCPs por modo")
   ✓ MCP sem "command" é ignorado
 ```
 
-#### 10.6 — Tests do Sprint 6: Validators por Modo (0.5h)
+##### 12.6 — Tests do Sprint 4: Validators do Config (0.5h)
 
 **Arquivo:** `src/__tests__/validators-modes.test.ts` (novo)
 
@@ -1207,7 +1383,7 @@ describe("Validators do config (generalizado)")
   ✓ sem modo ativo → sem validators → escreve sem gate
 ```
 
-#### 10.7 — Tests do Sprint 7: IA Configuradora (1h)
+##### 12.7 — Tests do Sprint 11: Mini Chat + IA Configuradora (1h)
 
 **Arquivo:** `src/__tests__/toolConfigurator.test.ts` (novo)
 
@@ -1245,7 +1421,7 @@ describe("Hook no Hub")
   ✓ após configurar, card mostra [OK]
 ```
 
-#### 10.8 — Tests do Sprint 8: Inbox + Organizadora (1h)
+##### 12.8 — Tests do Sprint 10: Inbox + Organizadora (1h)
 
 **Arquivo:** `src/__tests__/inboxOrganizer.test.ts` (novo)
 
@@ -1313,7 +1489,7 @@ describe("Tecla 'O' no Hub")
   ✓ após organizar, cards atualizam
 ```
 
-#### 10.9 — Tests do Sprint 9: Migration (0.5h)
+##### 12.9 — Tests do Sprint 2: Migration (0.5h)
 
 **Arquivo:** `src/__tests__/modeMigration.test.ts` (novo)
 
@@ -1345,7 +1521,7 @@ describe("Migration de MCPs")
   ✓ MCPs globais ficam em ~/.claude-killer/mcps/
 ```
 
-#### 10.10 — Tests de Integração E2E (1h)
+##### 12.10 — Tests de Integração E2E (1h)
 
 **Arquivo:** `src/__tests__/integration-modes-e2e.test.ts` (novo)
 
@@ -1397,7 +1573,7 @@ describe("E2E: Migration completo")
   ✓ IA consegue usar tools migradas
 ```
 
-#### 10.11 — Property-Based Tests (1h)
+##### 12.11 — Property-Based Tests (1h)
 
 **Arquivo:** `src/__tests__/property-modes.test.ts` (novo)
 
@@ -1426,7 +1602,7 @@ describe("Property: mode lifecycle")
   ✓ modo com config inválido → nunca ativa (sempre rejeita)
 ```
 
-#### 10.12 — Snapshot Tests Visuais (0.5h)
+##### 12.12 — Snapshot Tests Visuais (0.5h)
 
 **Arquivo:** `src/__tests__/snapshots-hub-modes.test.tsx` (novo)
 
@@ -1445,7 +1621,7 @@ describe("Hub visual - modos completos")
   ✓ snapshot: Hub com painel de organize (tecla O)
 ```
 
-#### 10.13 — Tests do Sprint 7: Mini Chat + Busca de Arquivos (1.5h)
+##### 12.13 — Tests do Sprint 11: Mini Chat + Sprint 9: Busca de Arquivos (1.5h)
 
 **Arquivo:** `src/__tests__/configurator-chat.test.tsx` (novo)
 
@@ -1521,7 +1697,7 @@ describe("Cópia de arquivo encontrado")
   ✓ lida com erro de permissão gracefully
 ```
 
-#### 10.14 — Tests do Sprint 8.5: Modo Normal + Compartilhamento (1.5h)
+##### 12.14 — Tests do Sprint 6: Modo Normal + Compartilhamento (1.5h)
 
 **Arquivo:** `src/__tests__/mode-normal.test.ts` (novo)
 
@@ -1592,6 +1768,19 @@ describe("Lógica de merge (getVisibleTools)")
   ✓ sem modo ativo: vê tools do normal + compartilhadas com normal
   ✓ mudar de modo → recarrega tools visíveis
 
+describe("Regras definitivas de compartilhamento (edge cases)")
+  ✓ tool mora em UMA pasta (binary + manifest na origem)
+  ✓ sharedWith é opt-in (default: só origem)
+  ✓ modo ativo sempre ganha sobre compartilhada de mesmo nome
+  ✓ tool compartilhada usa manifest E binary da origem (não copia)
+  ✓ deletar tool da origem com sharedWith → AVISA antes
+  ✓ confirmar delete → remove de sharedWith de todos + deleta binary
+  ✓ cancelar delete → nada acontece
+  ✓ atualizar tool na origem → afeta todos os modos compartilhados
+  ✓ prioridade: ativo > compartilhada > normal (isBase) > padrão hardcoded
+  ✓ conflito de nomes entre compartilhadas → ordem alfabética da origem
+  ✓ modo ativo própria sempre ganha de qualquer compartilhada
+
 describe("Casos edge de compartilhamento")
   ✓ compartilhar com modo que já tem tool de mesmo nome → modo específico ganha
   ✓ tool compartilhada deletada da origem → some de todos os modos compartilhados
@@ -1600,7 +1789,7 @@ describe("Casos edge de compartilhamento")
   ✓ compartilhar com todos os modos → tool aparece em qualquer modo ativo
 ```
 
-#### 10.15 — Tests do Sprint 8.6: Sistema de Perguntas (AskUser) (1.5h)
+##### 12.15 — Tests do Sprint 1: Sistema de Perguntas (AskUser) (1.5h)
 
 **Arquivo:** `src/__tests__/askUser.test.tsx` (novo)
 
@@ -1705,7 +1894,7 @@ describe("E2E: Configurador usa perguntar_usuario")
   ✓ configurador: cria manifest
 ```
 
-#### 10.15 — Tests E2E Adicionais: Configurador + Compartilhamento (1h)
+##### 12.16 — Tests E2E Adicionais: Configurador + Compartilhamento (1h)
 
 **Arquivo:** `src/__tests__/integration-configurator-sharing.test.ts` (novo)
 
@@ -1753,26 +1942,27 @@ describe("E2E: Configurar via chat e compartilhar")
   ✓ ativa python → darklua NÃO visível (não compartilhada)
 ```
 
-#### Resumo de testes do Sprint 10 (atualizado)
+##### Resumo de testes do Sprint 12 (atualizado)
 
 | Categoria | Arquivos | Testes (estimado) |
 |---|---|---|
-| Unitários (Sprint 1) | 2 | ~30 |
-| Manifests + Function calls (Sprint 2) | 2 | ~35 |
-| Skills por modo (Sprint 3) | 1 | ~10 |
-| Hooks por modo (Sprint 4) | 1 | ~25 |
-| MCPs por modo (Sprint 5) | 1 | ~10 |
-| Validators por modo (Sprint 6) | 1 | ~12 |
-| Mini chat + busca arquivos (Sprint 7) | 2 | ~30 |
-| Inbox organizadora (Sprint 8) | 1 | ~30 |
-| Modo normal + compartilhamento (Sprint 8.5) | 2 | ~35 |
-| **Sistema de perguntas AskUser (Sprint 8.6)** | **2** | **~40** |
-| Migration (Sprint 9) | 1 | ~15 |
+| Unitários (Sprint 2) | 2 | ~30 |
+| Manifests + Function calls (Sprint 3) | 2 | ~35 |
+| Skills por modo (Sprint 5) | 1 | ~10 |
+| Hooks por modo + Sandbox (Sprint 8) | 1 | ~35 |
+| MCPs por modo (Sprint 7) | 1 | ~10 |
+| Validators do config (Sprint 4) | 1 | ~12 |
+| Mini chat + IA configuradora (Sprint 11) | 1 | ~30 |
+| Busca de arquivos (Sprint 9) | 1 | ~25 |
+| Inbox organizadora (Sprint 10) | 1 | ~30 |
+| Modo normal + compartilhamento (Sprint 6) | 2 | ~45 |
+| **Sistema de perguntas AskUser (Sprint 1)** | **2** | **~40** |
+| Migration (Sprint 2) | 1 | ~15 |
 | Integração E2E | 1 | ~25 |
 | E2E configurador + compartilhamento | 1 | ~20 |
 | Property-based | 1 | ~12 |
 | Snapshot visual | 1 | ~8 |
-| **Total** | **21 arquivos** | **~347 testes** |
+| **Total** | **21 arquivos** | **~382 testes** |
 
 **Meta:** Cobertura >= 80% do novo código. 0 regressões nos testes existentes.
 
@@ -1782,42 +1972,55 @@ describe("E2E: Configurar via chat e compartilhar")
 
 ```
 src/
-├── toolConfigurator.ts      ← Sprint 7
-├── inboxOrganizer.ts        ← Sprint 8
-├── manifestLoader.ts        ← Sprint 2
-├── hookRunner.ts            ← Sprint 4
-└── modeMigration.ts         ← Sprint 9
+├── toolConfigurator.ts      ← Sprint 11
+├── inboxOrganizer.ts        ← Sprint 10
+├── manifestLoader.ts        ← Sprint 3
+├── hookRunner.ts            ← Sprint 8
+├── modeMigration.ts         ← Sprint 2
+├── fileFinder.ts            ← Sprint 9
+└── tui/
+    ├── QuestionPrompt.tsx   ← Sprint 1
+    └── ConfiguratorChat.tsx ← Sprint 11
 
 defaults/modes/roblox/
-├── config.json              ← Sprint 1
-├── inbox/README.md          ← Sprint 8
+├── config.json              ← Sprint 2
+├── inbox/README.md          ← Sprint 10
 ├── manifests/
-│   ├── rojo.json            ← Sprint 2
+│   ├── rojo.json            ← Sprint 3
 │   ├── selene.json
 │   ├── stylua.json
 │   ├── wally.json
 │   ├── lune.json
 │   └── rokit.json
-├── skills/                  ← Sprint 3 (mover de defaults/skills/)
+├── skills/                  ← Sprint 5 (mover de defaults/skills/)
 │   ├── rojo-cli.md
 │   ├── wally-cli.md
 │   └── ...
-├── hooks/                   ← Sprint 4
+├── hooks/                   ← Sprint 8
 │   ├── auto-build.js
 │   └── validate-config.js
-└── mcps/                    ← Sprint 5 (vazio inicialmente)
+└── mcps/                    ← Sprint 7 (vazio inicialmente)
+
+defaults/modes/normal/       ← Sprint 6
+├── config.json
+├── tools/
+├── manifests/
+├── skills/
+├── hooks/
+├── mcps/
+└── inbox/
 ```
 
 ## Arquivos a serem removidos
 
 ```
 src/
-├── aiSearch.ts              ← Sprint 1
+├── aiSearch.ts              ← Sprint 2
 └── (funções de busca do toolDetector.ts)
 
 defaults/
-├── tools/                   ← Sprint 1 (conteúdo movido pra modes/roblox/manifests/)
-└── skills/                  ← Sprint 3 (conteúdo movido pra modes/roblox/skills/)
+├── tools/                   ← Sprint 2 (conteúdo movido pra modes/roblox/manifests/)
+└── skills/                  ← Sprint 5 (conteúdo movido pra modes/roblox/skills/)
 
 src/__tests__/
 ├── aiSearch.test.ts
@@ -1830,15 +2033,15 @@ src/__tests__/
 
 ```
 src/
-├── toolDetector.ts          ← Sprint 1 (remover busca, deixar só detectTool)
-├── externalTools.ts         ← Sprint 1 (lê tools da pasta do modo)
-├── agent.ts                 ← Sprint 2 (function calls dinâmicas)
-├── luauValidator.ts         ← Sprint 6 (lê validators do config)
-├── fileEdit.ts              ← Sprint 4 (hooks) + Sprint 6 (validators)
-├── modes.ts                 ← Sprint 1 (applyMode carrega tudo)
-├── extensions.ts            ← Sprint 5 (MCPs por modo)
-├── tui/ExtensionHub.tsx     ← Sprint 1 (remove S/A/X) + Sprint 7 (configuradora)
-└── tui/App.tsx              ← Sprint 8 (/organize command)
+├── toolDetector.ts          ← Sprint 2 (remover busca, deixar só detectTool)
+├── externalTools.ts         ← Sprint 2 (lê tools da pasta do modo)
+├── agent.ts                 ← Sprint 1 (perguntar_usuario) + Sprint 3 (function calls dinâmicas) + Sprint 8 (hooks)
+├── luauValidator.ts         ← Sprint 4 (lê validators do config)
+├── fileEdit.ts              ← Sprint 4 (validators) + Sprint 8 (hooks)
+├── modes.ts                 ← Sprint 2 (applyMode carrega tudo)
+├── extensions.ts            ← Sprint 7 (MCPs por modo)
+├── tui/ExtensionHub.tsx     ← Sprint 2 (remove S/A/X) + Sprint 11 (configuradora)
+└── tui/App.tsx              ← Sprint 10 (/organize command) + Sprint 1 (perguntar_usuario UI)
 ```
 
 ---
@@ -1846,37 +2049,85 @@ src/
 ## Riscos e mitigações
 
 ### Risco 1: Usuários existentes com tools em ~/.rokit/bin/
-**Mitigação:** Sprint 9 inclui migration automático que sugere copiar binaries.
+**Mitigação:** Sprint 2 inclui migration automático que sugere copiar binaries.
 
 ### Risco 2: IA configuradora pode errar manifest
-**Mitigação:** Schema validation + usuário pode editar .json na mão.
+**Mitigação:** Schema validation (Sprint 12) + usuário pode editar .json na mão.
 
 ### Risco 3: Hooks podem travar agent loop
-**Mitigação:** Timeout em cada hook (5s default). Se travar, loga e continua.
+**Mitigação:** Sandbox madura com Worker Threads (Sprint 8) — timeout de 5s, `worker.terminate()`, memória isolada. Se travar, loga e continua.
 
 ### Risco 4: Perde conveniência do auto-detect
-**Mitigação:** Inbox + IA organizadora compensa — UX melhor que auto-detect.
+**Mitigação:** Inbox + IA organizadora (Sprint 10) compensa — UX melhor que auto-detect.
 
 ### Risco 5: Migration quebra config de usuários
-**Mitigação:** Backup automático antes de migrar. Modo só ativa se config válido.
+**Mitigação:** Backup automático antes de migrar (Sprint 2). Modo só ativa se config válido (Sprint 12).
+
+### Risco 6: Hook com bug/vazamento de memória crasha processo
+**Mitigação:** Worker Threads isolam (Sprint 8). `resourceLimits: { maxOldGenerationSizeMb: 64 }`. Worker com problema é terminada sem afetar processo principal.
+
+### Risco 7: Conflito de nomes entre tools compartilhadas
+**Mitigação:** Regras definitivas de compartilhamento (Sprint 6) — ordem alfabética da origem é determinística. Modo ativo sempre ganha.
 
 ---
 
 ## Decisões finais
 
-1. **Hooks incluídos desde o início** (Sprint 4) — usuário pediu pra adiantar
-2. **Inbox + organizadora** (Sprint 8) — UX zero-friction
-3. **IA configuradora** (Sprint 7) — tools novas sem trabalho manual
-4. **Migration automático** (Sprint 9) — usuários existentes não quebram
-5. **Globals + específico** — skills/MCPs podem ser globais OU por modo
+1. **AskUser primeiro (Sprint 1)** — independente do sistema de modos, alto impacto individual
+2. **Limpeza + Migration juntos (Sprint 2)** — não dá pra mudar estrutura sem migrar
+3. **Hooks com sandbox madura (Sprint 8)** — Worker Threads essenciais pra segurança
+4. **Inbox + organizadora (Sprint 10)** — UX zero-friction
+5. **IA configuradora (Sprint 11)** — tools novas sem trabalho manual
+6. **Migration automático (Sprint 2)** — usuários existentes não quebram
+7. **Globals + específico** — skills/MCPs podem ser globais OU por modo
+8. **Regras definitivas de compartilhamento (Sprint 6)** — edge cases resolvidos
+
+---
+
+## Observações e Decisões
+
+### Por que AskUser primeiro?
+- É independente do sistema de modos (não precisa de pastas, manifests, etc.)
+- Reduz erros desde cedo no chat normal
+- É a feature de maior impacto individual
+- Pode ser implementada e testada isoladamente
+
+### Por que Migration junto com Limpeza?
+- Não dá pra mudar a estrutura de pastas sem migrar o que existe
+- Separar deixaria usuários quebrados entre Sprint 1 e Sprint 9
+- Migration é parte integral da mudança de estrutura
+
+### Por que Hooks com Sandbox Madura?
+- Hooks rodam código arbitrário (JavaScript)
+- Sem sandbox, hook com bug pode travar/crashar o claude-killer
+- Worker Threads isolam: memória separada, timeout, APIs limitadas
+- Custo: +2h de implementação (4h → 6h), mas segurança essencial
+
+### Por que Mini Chat pode ser dividido?
+- São 3 features complexas juntas: UI interativa + busca + configuração
+- Se a primeira (busca de arquivos) já for útil sozinha, fazer commit
+- Mini chat e configuração interativa podem vir depois
+- Decisão fica com quem implementa (avaliar na hora)
+
+### Sobre custo de API da IA Configuradora
+- Cada configuração faz 5-10 chamadas de API
+- Configurar 10 tools = 50-100 chamadas (~$0.50)
+- Adicionar warning antes de começar: "Isso pode custar ~$X. Continuar?"
+- É a forma mais rápida e eficiente do sistema funcionar
+
+### Sobre pausa do agent loop no AskUser
+- `perguntar_usuario` é uma tool call
+- O agent loop naturalmente pausa entre tool calls (await resultado)
+- Não precisa de mecanismo especial de pausa
+- Só fazer `await waitForUserResponse()` no handler da tool
 
 ---
 
 ## Próximos passos
 
 1. Revisar este plano
-2. Confirmar scope (10 sprints, ~37h)
-3. Começar Sprint 1 (limpeza + estrutura + tools)
+2. Confirmar scope (12 sprints em 3 fases, ~64h)
+3. Começar Sprint 1 (AskUser — sistema de perguntas interativas)
 4. Testar após cada sprint
 5. Ajustar plano conforme necessário
 
@@ -1893,4 +2144,5 @@ src/
 - **2026-06-19:** Sprint 10 expandido com testes das novidades (+5 arquivos, +65 testes) → total 19 arquivos, ~297 testes
 - **2026-06-19:** Sprint 8.6 novo: sistema de perguntas interativas AskUser (7h) — IA pergunta, agent pausa, usuário responde
 - **2026-06-19:** Sprint 10 expandido com testes do AskUser (+2 arquivos, +50 testes) → total 21 arquivos, ~347 testes
-- **Total atual:** ~64h, 12 sprints, ~347 testes
+- **2026-06-20:** Reordenação de sprints (AskUser primeiro, migration com limpeza), sandbox madura para hooks detalhada (worker threads), edge cases do sharedWith resolvidos, dividido em 3 fases. Total mantido em ~64h.
+- **Total atual:** ~64h, 12 sprints em 3 fases, ~382 testes
