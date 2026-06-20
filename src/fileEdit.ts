@@ -166,61 +166,62 @@ export async function editFile(
     log.debug(`fileEdit: impact analysis skipped: ${(err as Error).message}`);
   }
 
-  // --- Luau pre-write validation ---
-  // If the file is .luau/.lua and the active mode has validation rules,
+  // --- Pre-write validation (Sprint 4: generalized for any language) ---
+  // If the active mode has validation rules that match this file's pattern,
   // run them on the proposed new content BEFORE writing.
-  const ext = path.extname(resolved).toLowerCase();
-  if (ext === ".luau" || ext === ".lua") {
-    try {
-      const { shouldValidateFile, validateLuauBeforeWrite, getActiveValidationRules } =
-        await import("./luauValidator.js");
-      if (await shouldValidateFile(resolved)) {
-        const rules = await getActiveValidationRules();
-        const projectRoot = process.cwd();
-        const validation = await validateLuauBeforeWrite(
-          resolved,
-          result.content,
-          rules,
-          projectRoot
-        );
+  // Previously this was hardcoded to .luau/.lua only. Now it works for
+  // ANY language (.py, .ts, .rs, .go, etc) as long as the mode has
+  // validators with matching filePattern.
+  try {
+    const { shouldValidateFile, validateLuauBeforeWrite, getActiveValidationRules } =
+      await import("./luauValidator.js");
+    if (await shouldValidateFile(resolved)) {
+      const rules = await getActiveValidationRules();
+      const projectRoot = process.cwd();
+      const validation = await validateLuauBeforeWrite(
+        resolved,
+        result.content,
+        rules,
+        projectRoot
+      );
 
-        if (!validation.ok && validation.blockingError) {
-          log.toolResult("editar_arquivo", false, "validation blocked");
-          return `[ERRO] Validação bloqueou a edição. Corrija os erros abaixo e tente novamente:\n\n${validation.blockingError}`;
-        }
+      if (!validation.ok && validation.blockingError) {
+        log.toolResult("editar_arquivo", false, "validation blocked");
+        return `[ERRO] Validação bloqueou a edição. Corrija os erros abaixo e tente novamente:\n\n${validation.blockingError}`;
+      }
 
-        // Log non-blocking warnings but proceed with the write
-        for (const w of validation.warnings) {
-          log.warn(`[luauValidator] ${w}`);
-        }
+      // Log non-blocking warnings but proceed with the write
+      for (const w of validation.warnings) {
+        log.warn(`[validator] ${w}`);
+      }
 
-        // Append validation summary to the result so the AI (and user) can see
-        // what was validated and what was skipped. This makes the validation
-        // process VISIBLE instead of silent.
-        if (validation.rulesApplied.length > 0 || validation.rulesSkipped.length > 0) {
-          const applied = validation.rulesApplied.length > 0
-            ? `validado por: ${validation.rulesApplied.join(", ")}`
-            : "";
-          const skipped = validation.rulesSkipped.length > 0
-            ? `pulado: ${validation.rulesSkipped.join(", ")}`
-            : "";
-          const summary = [applied, skipped].filter(Boolean).join(" | ");
-          if (summary) {
-            result.content += `\n\n[VALIDAÇÃO LUAU] ${summary}`;
-          }
+      // Append validation summary to the result so the AI (and user) can see
+      // what was validated and what was skipped. This makes the validation
+      // process VISIBLE instead of silent.
+      if (validation.rulesApplied.length > 0 || validation.rulesSkipped.length > 0) {
+        const applied = validation.rulesApplied.length > 0
+          ? `validado por: ${validation.rulesApplied.join(", ")}`
+          : "";
+        const skipped = validation.rulesSkipped.length > 0
+          ? `pulado: ${validation.rulesSkipped.join(", ")}`
+          : "";
+        const summary = [applied, skipped].filter(Boolean).join(" | ");
+        if (summary) {
+          result.content += `\n\n[VALIDAÇÃO] ${summary}`;
         }
       }
-    } catch (err) {
-      // Don't block writes if validator crashes - just log
-      log.warn(`fileEdit: validator error (skipping): ${(err as Error).message}`);
     }
+  } catch (err) {
+    // Don't block writes if validator crashes - just log
+    log.warn(`fileEdit: validator error (skipping): ${(err as Error).message}`);
   }
 
   // --- Safety review (NEW) ---
   // If the active mode has safetyReview=true, run LLM-based review on .luau/.lua
   // files. Heuristics first (regex for dangerous patterns), LLM only if patterns
   // match. High-risk writes are BLOCKED.
-  if (ext === ".luau" || ext === ".lua") {
+  const fileExt = path.extname(resolved).toLowerCase();
+  if (fileExt === ".luau" || fileExt === ".lua") {
     try {
       const { getActiveMode } = await import("./modes.js");
       const mode = getActiveMode();

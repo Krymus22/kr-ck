@@ -140,11 +140,18 @@ export async function getActiveValidationRules(): Promise<ModeValidationRule[]> 
   if (!mode) return [];
 
   const rules: ModeValidationRule[] = [];
+  // Legacy field (roblox.json format)
   if (mode.luauValidation && mode.luauValidation.length > 0) {
     rules.push(...mode.luauValidation);
   }
+  // New generic field (config.json format)
   if (mode.validation && mode.validation.length > 0) {
     rules.push(...mode.validation);
+  }
+  // Sprint 4: "validators" field from new config.json format
+  const anyMode = mode as any;
+  if (anyMode.validators && Array.isArray(anyMode.validators) && anyMode.validators.length > 0) {
+    rules.push(...anyMode.validators);
   }
   return rules;
 }
