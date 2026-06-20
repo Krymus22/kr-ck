@@ -385,11 +385,56 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
 // --- Public API -------------------------------------------------------------
 
 /**
+ * Sprint 7: Load MCP configs from a mode's mcps/ directory.
+ * Each .json file is an MCP config: { name, command, args, env }
+ * or a plugin.json-style { mcpServers: { name: { command, args, env } } }
+ */
+function loadMCPsFromModeDir(modeName: string): Record<string, MCPConfig> {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+  const result: Record<string, MCPConfig> = {};
+
+  // Try user's mode dir first
+  const dirs = [
+    path.join(home, ".claude-killer", "modes", modeName, "mcps"),
+    path.join(process.cwd(), "defaults", "modes", modeName, "mcps"),
+    path.join(__dirname, "..", "defaults", "modes", modeName, "mcps"),
+  ];
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.endsWith(".json")) continue;
+        const filePath = path.join(dir, file);
+        try {
+          const content = JSON.parse(fs.readFileSync(filePath, "utf8"));
+          if (content.command) {
+            // Simple format: { command, args, env }
+            const name = file.replace(/\.json$/, "");
+            if (!result[name]) result[name] = content;
+          } else if (content.mcpServers) {
+            // Plugin format: { mcpServers: { name: { command, args, env } } }
+            for (const [name, cfg] of Object.entries(content.mcpServers)) {
+              if (!result[name]) result[name] = cfg as MCPConfig;
+            }
+          } else if (content.name && content.command) {
+            // Named format: { name, command, args, env }
+            if (!result[content.name]) result[content.name] = content;
+          }
+        } catch { /* skip invalid JSON */ }
+      }
+    } catch { /* skip dir */ }
+  }
+
+  return result;
+}
+
+/**
  * Scans, loads, and initializes all plugins, skills, and MCP servers.
  *
  * Sprint 5: Now also loads skills from the active mode's skills/ folder.
- * Priority: mode-specific > global > local. Mode-specific skills override
- * global skills with the same name.
+ * Sprint 7: Now also loads MCPs from the active mode's mcps/ folder.
+ * Priority: mode-specific > global > local.
  */
 export async function loadAllExtensions() {
   initExtensionDirs();
@@ -439,6 +484,20 @@ export async function loadAllExtensions() {
   activeSkills = [...activeSkills, ...globalPlugins.skills, ...localPlugins.skills];
 
   const mcpConfigs = { ...globalPlugins.mcps, ...localPlugins.mcps };
+
+  // Sprint 7: Load MCPs from the active mode's mcps/ folder
+  try {
+    const { getActiveMode } = await import("./modes.js");
+    const mode = getActiveMode();
+    if (mode) {
+      const modeMCPs = loadMCPsFromModeDir(mode.name);
+      // Mode-specific MCPs override global/local with same name
+      Object.assign(mcpConfigs, modeMCPs);
+    }
+  } catch {
+    // modes.js not available — skip mode MCPs
+  }
+
   for (const [name, cfg] of Object.entries(mcpConfigs)) {
     try {
       await startAndInitMCPServer(name, cfg);
