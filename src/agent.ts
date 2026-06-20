@@ -65,6 +65,13 @@ import {
   clearAskUserCallback,
   type AskUserCallback,
 } from "./askUser.js";
+import {
+  loadActiveManifests,
+  generateFunctionCallsFromManifests,
+  executeFromManifest,
+  isManifestTool,
+  type ToolManifest,
+} from "./manifestLoader.js";
 import { pushActivity, withActivity, clearActivity } from "./activityTracker.js";
 import {
   shouldBlockForFalsePromise,
@@ -75,6 +82,7 @@ import { validateToolCall, formatValidationErrors } from "./toolSchemaValidation
 import { desfazerEdicao, listarBackups, aplicarDiff, executarComando, lerArquivo } from "./tools.js";
 import { pokaYokeCheck, EXPANDED_TOOL_DESCRIPTIONS } from "./pokaYoke.js";
 import { runQualityGate, resetGateState, isStrictModeEnabled } from "./strictQualityGate.js";
+import { getActiveMode as getActiveModeFromModes } from "./modes.js";
 import { getContextInjection, resetContextInjection } from "./contextInjector.js";
 import { shouldSelfValidate, injectSelfValidationPrompt, resetSelfValidation } from "./selfValidation.js";
 import { getEffortLevel, setEffortLevel } from "./effortLevels.js";
@@ -118,6 +126,10 @@ const MAX_STOPS_PER_TURN = 12;
  */
 let currentOnToolCall: ((toolName: string, args: Record<string, unknown>) => void) | undefined;
 let currentOnToolResult: ((toolName: string, ok: boolean, resultStr: string) => void) | undefined;
+
+// Sprint 3: Cache of manifests for the active mode.
+// Refreshed on each runAgentLoop call.
+let activeManifests: ToolManifest[] = [];
 
 /**
  * Sub-agent concurrency limiter (semaphore).
@@ -239,16 +251,27 @@ export async function dispatchToolCallPublic(
 }
 
 function getExternalToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionTool[] {
-  return [
+  const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+
+  // Sprint 3: Generate specific function calls from manifests (rojo_build, wally_install, etc.)
+  // These replace the old generic `executar_tool` for tools that have manifests.
+  const manifestTools = generateFunctionCallsFromManifests(
+    activeManifests,
+    getActiveModeFromModes()?.name ?? null,
+  );
+  tools.push(...manifestTools);
+
+  // Keep old generic tools as fallback (for tools without manifests)
+  tools.push(
     {
       type: "function",
       function: {
         name: "executar_tool",
-        description: "Execute an external tool (Rojo, Wally, pytest, cargo, npm, etc). Use this to run external CLI tools for building, testing, linting, or any other development task.",
+        description: "Execute an external tool that doesn't have a manifest. Use this for tools like pytest, cargo, npm, etc. For Roblox tools (rojo, selene, stylua, wally, lune, rokit), prefer the specific function calls instead.",
         parameters: {
           type: "object",
           properties: {
-            tool: { type: "string", description: "Tool name (e.g., 'rojo_build', 'pytest_run', 'cargo_test')" },
+            tool: { type: "string", description: "Tool name (e.g., 'pytest', 'cargo', 'npm')" },
             args: { type: "object", description: "Tool arguments" },
             dir: { type: "string", description: "Working directory" }
           },
@@ -269,56 +292,9 @@ function getExternalToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionToo
         }
       }
     },
-    {
-      type: "function",
-      function: {
-        name: "adicionar_tool",
-        description: "Add a new external tool to the system. Use this to extend Claude-Killer with new CLI tools.",
-        parameters: {
-          type: "object",
-          properties: {
-            name: { type: "string", description: "Tool name" },
-            description: { type: "string", description: "Tool description" },
-            command: { type: "string", description: "CLI command to execute" },
-            args: { type: "array", items: { type: "string" }, description: "Default arguments" },
-            flags: { type: "array", items: { type: "object" }, description: "Tool flags" },
-            check_command: { type: "string", description: "Command to check if tool is installed" },
-            when_to_use: { type: "array", items: { type: "string" }, description: "Intent patterns" },
-            examples: { type: "array", items: { type: "string" }, description: "Example commands" }
-          },
-          required: ["name", "description", "command"]
-        }
-      }
-    },
-    {
-      type: "function",
-      function: {
-        name: "sugerir_tool",
-        description: "Suggest which tool to use based on a message or intent",
-        parameters: {
-          type: "object",
-          properties: {
-            message: { type: "string", description: "Message or intent to analyze" }
-          },
-          required: ["message"]
-        }
-      }
-    },
-    {
-      type: "function",
-      function: {
-        name: "detectar_tools",
-        description: "Detect which tools are available based on intent and project context",
-        parameters: {
-          type: "object",
-          properties: {
-            message: { type: "string", description: "User message to analyze" },
-            dir: { type: "string", description: "Project directory" }
-          }
-        }
-      }
-    }
-  ];
+  );
+
+  return tools;
 }
 
 function alreadyInHistory(toolCallId: string): boolean {
@@ -1124,12 +1100,26 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
     try {
       return await handler(args, toolCall, healRetry);
     } catch (err) {
-      // BUGFIX: Se o tool handler lançar uma exceção síncrona/assíncrona
-      // (em vez de retornar uma string [ERRO]), o erro não deve propagar
-      // para o caller (UI) e derrubar o turn. Capturamos aqui e convertemos
-      // em um tool result [ERRO] para que a IA veja o erro e possa continuar.
       const errMsg = `[ERRO] ${(err as Error).message ?? String(err)}`;
       log.error(`Handler "${name}" lançou exceção: ${(err as Error).message ?? String(err)}`);
+      return { resultStr: errMsg, usedHeal: false };
+    }
+  }
+  // Sprint 3: Check if this is a manifest-based tool (rojo_build, wally_install, etc.)
+  if (isManifestTool(name, activeManifests)) {
+    try {
+      const modeName = getActiveModeFromModes()?.name ?? null;
+      const result = await executeFromManifest(name, args, activeManifests, modeName);
+      const output = [
+        result.ok ? "OK Sucesso" : "X Falha",
+        result.output,
+        result.errors.length ? `Erros:\n${result.errors.join("\n")}` : "",
+        result.duration ? `Duração: ${result.duration}ms` : "",
+      ].filter(Boolean).join("\n");
+      return { resultStr: output, usedHeal: false };
+    } catch (err) {
+      const errMsg = `[ERRO] Manifest tool "${name}" falhou: ${(err as Error).message ?? String(err)}`;
+      log.error(errMsg);
       return { resultStr: errMsg, usedHeal: false };
     }
   }
@@ -1711,6 +1701,12 @@ export async function runAgentLoop(
 
   // Initialize external tools system
   await initializeTools();
+
+  // Sprint 3: Load manifests for the active mode.
+  // These are used to generate specific function calls (rojo_build, wally_install, etc.)
+  // and to dispatch tool calls to the correct binary + args.
+  activeManifests = loadActiveManifests();
+  log.debug(`[AGENT] Loaded ${activeManifests.length} manifests for active mode`);
   
   // Detect tools from project context
   const detector = getDetector();
