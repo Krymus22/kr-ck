@@ -257,12 +257,68 @@ export async function editFile(
     fs.writeFileSync(backupPath, original, "utf8");
   }
 
+  // --- Sprint 8: before_write hooks (Worker-Thread sandbox) ---
+  // Runs user-provided JS snippets in isolated Worker Threads before the
+  // write happens. Hooks may BLOCK the write, MODIFY the content, or just
+  // emit a warning. Best-effort — never breaks the write on hook errors.
+  try {
+    const { runHooks } = await import("./hookRunner.js");
+    const { getActiveMode } = await import("./modes.js");
+    const mode = getActiveMode();
+    const hookResults = await runHooks(
+      "before_write",
+      {
+        filePath: resolved,
+        content: result.content,
+        mode: mode?.name,
+      },
+      mode?.name ?? null,
+    );
+
+    for (const hr of hookResults) {
+      if (hr.blocking) {
+        log.toolResult("editar_arquivo", false, "hook blocked");
+        return `[ERRO] Hook bloqueou: ${hr.message ?? "(no message)"}`;
+      }
+      if (hr.modifiedContent) {
+        result.content = hr.modifiedContent;
+      }
+      if (hr.warning) {
+        log.warn(`[HOOK] ${hr.warning}`);
+      }
+    }
+  } catch (err) {
+    log.warn(`fileEdit: before_write hook error: ${(err as Error).message}`);
+  }
+
   // Write
   const dir = path.dirname(resolved);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(resolved, result.content, "utf8");
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
+
+  // --- Sprint 8: on_file hooks (Worker-Thread sandbox) ---
+  // Runs after the file has been written to disk. Best-effort — failures
+  // are logged but never block the result. Typical use: auto-build,
+  // auto-format, file-indexer refresh, etc.
+  try {
+    const { runHooks } = await import("./hookRunner.js");
+    const { getActiveMode } = await import("./modes.js");
+    const mode = getActiveMode();
+    await runHooks(
+      "on_file",
+      {
+        filePath: resolved,
+        content: result.content,
+        mode: mode?.name,
+      },
+      mode?.name ?? null,
+    );
+  } catch (err) {
+    /* hooks are best-effort */
+    log.debug(`fileEdit: on_file hook error: ${(err as Error).message}`);
+  }
 
   // -- IDEIA 12 Honesty: Mark file as edited (for Read-Back Verification) --
   try {

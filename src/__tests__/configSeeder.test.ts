@@ -34,8 +34,9 @@ describe("configSeeder", () => {
     // We're running in the project root which DOES have defaults/, so this test
     // verifies the positive path: when defaults exist, files are copied.
     const copied = seedUserConfig();
-    // 54 files (52 from Sprint 2 + 2 from Sprint 6 normal mode: config.json + inbox/README.md)
-    expect(copied === 0 || copied === 54).toBe(true);
+    // 56 files (52 from Sprint 2 + 2 from Sprint 6 normal mode + 2 from Sprint 8
+    // roblox hooks: auto-build.json + auto-build.js)
+    expect(copied === 0 || copied === 56).toBe(true);
     // After seeding, marker should exist
     expect(isSeeded()).toBe(true);
   });

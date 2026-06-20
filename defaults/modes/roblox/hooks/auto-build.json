@@ -1,0 +1,6 @@
+{
+  "name": "auto-build",
+  "file": "auto-build.js",
+  "trigger": "on_file",
+  "timeout": 30000
+}

@@ -1405,6 +1405,24 @@ async function handleChatResponse(
   turnStopHits = 0;
 
   fireTrigger("on_task");
+
+  // --- Sprint 8: on_task hooks (Worker-Thread sandbox) ---
+  // Runs user-provided JS snippets in isolated Worker Threads after the
+  // agent finishes a task (finish_reason=stop, no further recursion).
+  // Best-effort — failures are logged but never break the agent loop.
+  try {
+    const { runHooks } = await import("./hookRunner.js");
+    const mode = getActiveModeFromModes();
+    await runHooks(
+      "on_task",
+      { mode: mode?.name },
+      mode?.name ?? null,
+    );
+  } catch (err) {
+    /* best-effort */
+    log.debug(`agent: on_task hook error: ${(err as Error).message}`);
+  }
+
   return message.content ?? "(resposta vazia)";
 }
 
