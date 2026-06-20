@@ -386,16 +386,57 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
 
 /**
  * Scans, loads, and initializes all plugins, skills, and MCP servers.
+ *
+ * Sprint 5: Now also loads skills from the active mode's skills/ folder.
+ * Priority: mode-specific > global > local. Mode-specific skills override
+ * global skills with the same name.
  */
 export async function loadAllExtensions() {
   initExtensionDirs();
 
   const globalSkills = loadSkillsFromDir(path.join(GLOBAL_DIR, "skills"));
   const localSkills = loadSkillsFromDir(path.join(LOCAL_DIR, "skills"));
+
+  // Sprint 5: Load skills from the active mode's folder
+  let modeSkills: Skill[] = [];
+  try {
+    const { getActiveMode } = await import("./modes.js");
+    const mode = getActiveMode();
+    if (mode) {
+      // User's mode skills (highest priority)
+      const userModeSkillsDir = path.join(GLOBAL_DIR, "modes", mode.name, "skills");
+      modeSkills = loadSkillsFromDir(userModeSkillsDir);
+
+      // If user dir is empty, try bundled defaults
+      if (modeSkills.length === 0) {
+        const bundledDir = path.join(process.cwd(), "defaults", "modes", mode.name, "skills");
+        if (fs.existsSync(bundledDir)) {
+          modeSkills = loadSkillsFromDir(bundledDir);
+        }
+        // Also try relative to __dirname (when running from dist/)
+        if (modeSkills.length === 0) {
+          const distDir = path.join(__dirname, "..", "defaults", "modes", mode.name, "skills");
+          if (fs.existsSync(distDir)) {
+            modeSkills = loadSkillsFromDir(distDir);
+          }
+        }
+      }
+    }
+  } catch {
+    // modes.js not available — skip mode skills
+  }
+
+  // Merge: mode-specific skills override global/local by name
+  const allSkills = [...globalSkills, ...localSkills];
+  const skillMap = new Map(allSkills.map((s) => [s.name, s]));
+  for (const ms of modeSkills) {
+    skillMap.set(ms.name, ms); // mode-specific wins
+  }
+  activeSkills = Array.from(skillMap.values());
+
   const globalPlugins = loadPluginsFromDir(path.join(GLOBAL_DIR, "plugins"));
   const localPlugins = loadPluginsFromDir(path.join(LOCAL_DIR, "plugins"));
-
-  activeSkills = [...globalSkills, ...localSkills, ...globalPlugins.skills, ...localPlugins.skills];
+  activeSkills = [...activeSkills, ...globalPlugins.skills, ...localPlugins.skills];
 
   const mcpConfigs = { ...globalPlugins.mcps, ...localPlugins.mcps };
   for (const [name, cfg] of Object.entries(mcpConfigs)) {
