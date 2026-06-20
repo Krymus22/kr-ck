@@ -69,6 +69,16 @@ async function main(): Promise<void> {
   // Seed bundled defaults (Roblox CLI tools, library skills, modes) on first run.
   seedUserConfig();
 
+  // Sprint 2: Migrate old config format to new mode-based structure if needed.
+  // This runs ONCE — after migration, the new structure is in place.
+  try {
+    const { runMigrationIfNeeded } = await import("./modeMigration.js");
+    runMigrationIfNeeded();
+  } catch (err) {
+    // Migration is best-effort — don't crash on failure
+    console.error(`[claude-killer] Migration check failed: ${(err as Error).message}`);
+  }
+
   // Get provider config (NVIDIA or ZenMux)
   const providerConfig = getProviderConfig();
   console.log(`[claude-killer] API provider: ${providerConfig.name} | model: ${process.env.MODEL ?? "default"}`);

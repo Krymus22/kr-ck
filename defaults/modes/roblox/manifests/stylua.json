@@ -1,0 +1,20 @@
+[
+  {
+    "name": "stylua_format",
+    "description": "Format Luau code with StyLua (auto-fix style)",
+    "category": "roblox",
+    "command": "stylua",
+    "args": [],
+    "flags": [
+      { "name": "--check", "type": "boolean", "description": "Check only - exit non-zero if files would be reformatted (use in CI/quality gates)" },
+      { "name": "--verify", "type": "boolean", "description": "Verify output after formatting (run luau parser on result)" },
+      { "name": "path", "type": "string", "description": "File or directory to format" }
+    ],
+    "detection": { "method": "binary", "check": "stylua --version" },
+    "context": {
+      "whenToUse": ["format luau", "format lua", "stylua", "code style", "prettier for luau"],
+      "examples": ["stylua src/", "stylua --check src/", "stylua --verify script.luau"]
+    },
+    "outputParser": "raw"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "name": "rokit_install",
+    "description": "Install all tools declared in rokit.toml",
+    "category": "roblox",
+    "command": "rokit",
+    "args": ["install"],
+    "flags": [],
+    "detection": { "method": "binary", "check": "rokit --version" },
+    "context": {
+      "whenToUse": ["install toolchain", "rokit install", "install rokit tools"],
+      "requiresProject": ["rokit.toml"],
+      "examples": ["rokit install"]
+    },
+    "outputParser": "raw"
+  },
+  {
+    "name": "rokit_add",
+    "description": "Add a new tool to rokit.toml and install it",
+    "category": "roblox",
+    "command": "rokit",
+    "args": ["add"],
+    "flags": [
+      { "name": "tool", "type": "string", "required": true, "description": "Tool spec (e.g. rojo/rojo@7.6.1)" }
+    ],
+    "detection": { "method": "binary", "check": "rokit --version" },
+    "context": {
+      "whenToUse": ["add tool", "rokit add", "install specific tool version"],
+      "requiresProject": ["rokit.toml"],
+      "examples": ["rokit add rojo/rojo@7.6.1"]
+    },
+    "outputParser": "raw"
+  }
+]

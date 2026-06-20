@@ -1,0 +1,55 @@
+[
+  {
+    "name": "rojo_build",
+    "description": "Build .rbxl place file from Rojo project",
+    "category": "roblox",
+    "command": "rojo",
+    "args": ["build"],
+    "flags": [
+      { "name": "--output", "type": "string", "description": "Output file path (.rbxl or .rbxmx)" },
+      { "name": "--watch", "type": "boolean", "description": "Watch for changes and rebuild" }
+    ],
+    "detection": { "method": "binary", "check": "rojo --version" },
+    "context": {
+      "whenToUse": ["build roblox project", "generate rbxl", "create place file", "build game", "rojo build"],
+      "requiresProject": [".project.json"],
+      "examples": ["rojo build default.project.json -o game.rbxl"]
+    },
+    "outputParser": "raw"
+  },
+  {
+    "name": "rojo_serve",
+    "description": "Start Rojo live sync with Roblox Studio (long-running)",
+    "category": "roblox",
+    "command": "rojo",
+    "args": ["serve"],
+    "flags": [
+      { "name": "--port", "type": "number", "default": 34872, "description": "Port number for Studio plugin" }
+    ],
+    "detection": { "method": "binary", "check": "rojo --version" },
+    "context": {
+      "whenToUse": ["start live sync", "sync with studio", "rojo serve", "connect to studio"],
+      "requiresProject": [".project.json"],
+      "examples": ["rojo serve default.project.json"]
+    },
+    "outputParser": "raw"
+  },
+  {
+    "name": "rojo_sourcemap",
+    "description": "Generate sourcemap / dependency graph for the project",
+    "category": "roblox",
+    "command": "rojo",
+    "args": ["sourcemap"],
+    "flags": [
+      { "name": "--output", "type": "string", "description": "Output .json path" },
+      { "name": "--watch", "type": "boolean", "description": "Watch for changes" }
+    ],
+    "detection": { "method": "binary", "check": "rojo --version" },
+    "context": {
+      "whenToUse": ["generate sourcemap", "dependency graph", "rojo sourcemap"],
+      "requiresProject": [".project.json"],
+      "examples": ["rojo sourcemap default.project.json -o sourcemap.json"]
+    },
+    "outputParser": "raw"
+  }
+]

@@ -1,0 +1,48 @@
+[
+  {
+    "name": "wally_install",
+    "description": "Install Wally packages declared in wally.toml",
+    "category": "roblox",
+    "command": "wally",
+    "args": ["install"],
+    "flags": [],
+    "detection": { "method": "binary", "check": "wally --version" },
+    "context": {
+      "whenToUse": ["install packages", "wally install", "install dependencies"],
+      "requiresProject": ["wally.toml"],
+      "examples": ["wally install"]
+    },
+    "outputParser": "raw"
+  },
+  {
+    "name": "wally_search",
+    "description": "Search the Wally registry for packages",
+    "category": "roblox",
+    "command": "wally",
+    "args": ["search"],
+    "flags": [
+      { "name": "query", "type": "string", "required": true, "description": "Search query" }
+    ],
+    "detection": { "method": "binary", "check": "wally --version" },
+    "context": {
+      "whenToUse": ["search packages", "find package", "wally search"],
+      "examples": ["wally search react"]
+    },
+    "outputParser": "raw"
+  },
+  {
+    "name": "wally_publish",
+    "description": "Publish current package to Wally registry",
+    "category": "roblox",
+    "command": "wally",
+    "args": ["publish"],
+    "flags": [],
+    "detection": { "method": "binary", "check": "wally --version" },
+    "context": {
+      "whenToUse": ["publish package", "wally publish", "release package"],
+      "requiresProject": ["wally.toml"],
+      "examples": ["wally publish"]
+    },
+    "outputParser": "raw"
+  }
+]

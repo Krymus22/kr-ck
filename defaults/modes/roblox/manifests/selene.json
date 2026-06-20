@@ -1,0 +1,19 @@
+[
+  {
+    "name": "selene_lint",
+    "description": "Lint Luau code with Selene",
+    "category": "roblox",
+    "command": "selene",
+    "args": [],
+    "flags": [
+      { "name": "--fix", "type": "boolean", "description": "Auto-fix issues where possible" },
+      { "name": "path", "type": "string", "description": "File or directory to lint" }
+    ],
+    "detection": { "method": "binary", "check": "selene --version" },
+    "context": {
+      "whenToUse": ["lint luau", "lint roblox code", "selene lint", "check luau style"],
+      "examples": ["selene src/", "selene --fix src/"]
+    },
+    "outputParser": "raw"
+  }
+]

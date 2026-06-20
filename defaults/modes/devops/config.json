@@ -1,0 +1,33 @@
+{
+  "name": "devops",
+  "label": "DevOps (Terraform + K8s)",
+  "description": "DevOps development with Terraform, Kubernetes, and Helm. Demonstrates the externalization features: custom safety patterns for destructive ops (terraform destroy, kubectl delete namespace), custom validators (terraform fmt/validate), custom research sources, custom symbol patterns for HCL, and post-edit hooks (auto-format .tf files).",
+  "icon": "D",
+  "builtIn": true,
+  "effortLevel": "high",
+  "strictMode": true,
+  "readBeforeWrite": true,
+  "advancedThinking": true,
+  "toolsDir": "tools",
+  "manifestsDir": "manifests",
+  "skillsDir": "skills",
+  "hooksDir": "hooks",
+  "mcpsDir": "mcps",
+  "tools": [],
+  "skills": [],
+  "enableFeatures": [
+    "feature:think_tool",
+    "feature:read_before_write",
+    "feature:rollback",
+    "feature:strict_gate",
+    "feature:poka_yoke",
+    "feature:task_state",
+    "feature:self_validation",
+    "feature:context_injection",
+    "feature:sub_agents",
+    "feature:model_compaction",
+    "feature:multi_key_pool"
+  ],
+  "validators": [],
+  "systemPrompt": ""
+}

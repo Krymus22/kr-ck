@@ -1,0 +1,19 @@
+[
+  {
+    "name": "lune_run",
+    "description": "Run a Luau script via Lune runtime",
+    "category": "roblox",
+    "command": "lune",
+    "args": ["run"],
+    "flags": [
+      { "name": "script", "type": "string", "required": true, "description": "Path to .luau script" },
+      { "name": "args", "type": "string", "description": "Arguments to pass to the script" }
+    ],
+    "detection": { "method": "binary", "check": "lune --version" },
+    "context": {
+      "whenToUse": ["run luau script", "lune run", "execute luau", "run offline luau"],
+      "examples": ["lune run script.luau", "lune run build.luau -- --output game.rbxl"]
+    },
+    "outputParser": "raw"
+  }
+]

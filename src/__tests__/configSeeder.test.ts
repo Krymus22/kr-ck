@@ -34,9 +34,10 @@ describe("configSeeder", () => {
     // We're running in the project root which DOES have defaults/, so this test
     // verifies the positive path: when defaults exist, files are copied.
     const copied = seedUserConfig();
-    // 7 tool JSON + 16 skill MD + 2 mode JSON = 25 (or 0 if already seeded)
-    // (was 26 before darklua removal)
-    expect(copied === 0 || copied === 25).toBe(true);
+    // 7 tool JSON + 16 skill MD + 2 mode JSON + 2 config.json + 2 inbox/README +
+    // 16 skill copies + 7 manifest copies = 52 (or 0 if already seeded)
+    // (was 25 before Sprint 2 mode folder structure)
+    expect(copied === 0 || copied === 52).toBe(true);
     // After seeding, marker should exist
     expect(isSeeded()).toBe(true);
   });

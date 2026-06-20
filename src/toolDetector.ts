@@ -16,6 +16,7 @@
  *   - isAutoDetectEnabled()    — checks AUTO_DETECT_TOOLS env var
  *   - extractToolBinaryName()  — "tool:rojo_build" → "rojo"
  *   - getModeToolNames()       — dedupes tool binary names
+ *   - findToolBinary()         — NEW: looks in modes/<mode>/tools/ first
  *   - types: ToolStatus, ToolDetectionResult
  *
  * Privacy: auto-detection is OFF by default. The user must opt in via
@@ -31,6 +32,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import * as log from "./logger.js";
 
 // --- Types -------------------------------------------------------------------
 
@@ -506,4 +508,89 @@ export function getModeToolNames(modeToolIds: string[]): string[] {
   const names = modeToolIds.map(extractToolBinaryName);
   // Deduplicate (rojo_build and rojo_serve both map to "rojo")
   return [...new Set(names)];
+}
+
+// --- Mode-based tool binary finder (Sprint 2) --------------------------------
+
+/**
+ * Find a tool binary in the mode's tools/ folder.
+ *
+ * Sprint 2: replaces the old 1500-line search system.
+ * Instead of scanning 15+ locations, we look in ONE place:
+ *   ~/.claude-killer/modes/<mode>/tools/<name>.exe (Windows)
+ *   ~/.claude-killer/modes/<mode>/tools/<name>     (Unix)
+ *
+ * If not found there, falls back to detectTool() (PATH + common locations)
+ * for backward compatibility.
+ *
+ * @param toolName  Binary name (e.g., "rojo", "selene")
+ * @param modeName  Active mode name (e.g., "roblox"). If null, skips mode folder.
+ * @returns Full path to binary, or null if not found.
+ */
+export function findToolBinary(toolName: string, modeName: string | null): string | null {
+  if (!toolName) return null;
+
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+  const exeName = process.platform === "win32" ? `${toolName}.exe` : toolName;
+
+  // 1. Look in mode's tools/ folder first (new system)
+  if (modeName) {
+    const modeToolPath = path.join(home, ".claude-killer", "modes", modeName, "tools", exeName);
+    if (fs.existsSync(modeToolPath)) {
+      log.debug(`[TOOL_FINDER] Found ${toolName} in mode ${modeName}: ${modeToolPath}`);
+      return modeToolPath;
+    }
+  }
+
+  // 2. Look in "normal" mode's tools/ folder (base mode — always inherited)
+  const normalToolPath = path.join(home, ".claude-killer", "modes", "normal", "tools", exeName);
+  if (fs.existsSync(normalToolPath)) {
+    log.debug(`[TOOL_FINDER] Found ${toolName} in normal mode: ${normalToolPath}`);
+    return normalToolPath;
+  }
+
+  // 3. Fallback: old detectTool() (PATH + common locations)
+  // This is kept for backward compatibility during migration.
+  // Will be removed in a future sprint once all users migrate.
+  const detection = detectTool(toolName, { forceDeepSearch: true });
+  if (detection.binaryPath) {
+    log.debug(`[TOOL_FINDER] Found ${toolName} via legacy detectTool: ${detection.binaryPath}`);
+    return detection.binaryPath;
+  }
+
+  log.debug(`[TOOL_FINDER] ${toolName} not found (mode: ${modeName ?? "none"})`);
+  return null;
+}
+
+/**
+ * Get the path to a mode's tools/ directory.
+ * Returns the user's ~/.claude-killer/modes/<mode>/tools/ path.
+ */
+export function getModeToolsDir(modeName: string): string {
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+  return path.join(home, ".claude-killer", "modes", modeName, "tools");
+}
+
+/**
+ * List all tools (binaries) in a mode's tools/ folder.
+ * Returns array of { name, path } for each file found.
+ */
+export function listModeTools(modeName: string): Array<{ name: string; path: string }> {
+  const toolsDir = getModeToolsDir(modeName);
+  if (!fs.existsSync(toolsDir)) return [];
+
+  const results: Array<{ name: string; path: string }> = [];
+  for (const file of fs.readdirSync(toolsDir)) {
+    const filePath = path.join(toolsDir, file);
+    try {
+      if (fs.statSync(filePath).isFile()) {
+        // Strip .exe extension on Windows for the name
+        const name = process.platform === "win32" ? file.replace(/\.exe$/i, "") : file;
+        results.push({ name, path: filePath });
+      }
+    } catch {
+      // skip files that can't be stat'd
+    }
+  }
+  return results;
 }
