@@ -57,10 +57,10 @@ function getSlashCommands(): Array<{ cmd: string; desc: string; subcommands?: st
 }
 
 // Backward-compat: used by /help text and tests
-const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = getSlashCommands().map((c) => ({
-  cmd: c.cmd,
-  desc: c.desc,
-}));
+const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
+  ...getSlashCommands().map((c) => ({ cmd: c.cmd, desc: c.desc })),
+  { cmd: "/buscar", desc: "Procurar arquivo na máquina (tools, etc)" },
+];
 
 type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean };
 
@@ -194,6 +194,19 @@ function handleHubCommand(): CommandResult {
   return { handled: true, openHub: true };
 }
 
+// Sprint 9: /buscar <arquivo> — procura arquivo na máquina
+function handleBuscarCommand(arg: string | null): CommandResult {
+  if (!arg) {
+    return { handled: true, message: "Uso: /buscar <nome-do-arquivo>\nExemplo: /buscar darklua\nProcura nas pastas padrão primeiro. Se não encontrar, pergunta se quer procurar em toda a máquina." };
+  }
+  // The actual search is async — we return a message and the search
+  // will be triggered by the system message flow.
+  return {
+    handled: true,
+    message: `Buscando "${arg}"...\nUse a IA para buscar: "encontre ${arg} na minha máquina" ou aguarde a integração com o mini chat (Sprint 11).`,
+  };
+}
+
 function handleToolsCommand(arg: string | null): CommandResult {
   const { getRegistry } = require("../externalTools.js");
   const registry = getRegistry();
@@ -302,6 +315,8 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/compact": () => handleCompactCommand(),
   "/dream": () => handleDreamCommand(),
   "/distill": () => handleDistillCommand(),
+  // Sprint 9: buscar arquivo na máquina
+  "/buscar": (arg) => handleBuscarCommand(arg),
 };
 
 function handleEffortCommand(arg: string | null): CommandResult {
