@@ -43,6 +43,7 @@ import { TodoPanel, TodoItem } from "./TodoPanel.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { ExtensionHub } from "./ExtensionHub.js";
 import { QuestionPrompt } from "./QuestionPrompt.js";
+import { ConfiguratorChat } from "./ConfiguratorChat.js";
 import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 
@@ -65,7 +66,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/buscar", desc: "Procurar arquivo na máquina (tools, etc)" },
 ];
 
-type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean };
+type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null };
 
 
 
@@ -226,6 +227,19 @@ function handleOrganizeCommand(): CommandResult {
   return { handled: true, message: formatOrganizeResult(result) };
 }
 
+// Sprint 11: /configurar [tool-name] — abre mini chat do configurador
+function handleConfigurarCommand(arg: string | null): CommandResult {
+  // The actual UI is opened via state — this just triggers it
+  return {
+    handled: true,
+    message: arg
+      ? `Abrindo configurador para "${arg}"...`
+      : "Abrindo configurador... (use /configurar <tool-name> para configurar uma tool específica)",
+    openConfigurator: true,
+    configuratorTool: arg,
+  };
+}
+
 function handleToolsCommand(arg: string | null): CommandResult {
   const { getRegistry } = require("../externalTools.js");
   const registry = getRegistry();
@@ -338,6 +352,8 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/buscar": (arg) => handleBuscarCommand(arg),
   // Sprint 10: organizar inbox do modo ativo
   "/organize": () => handleOrganizeCommand(),
+  // Sprint 11: configurar tools via mini chat
+  "/configurar": (arg) => handleConfigurarCommand(arg),
 };
 
 function handleEffortCommand(arg: string | null): CommandResult {
@@ -678,6 +694,10 @@ export function App() {
   const [pendingQuestion, setPendingQuestion] = useState<AskUserQuestion | null>(null);
   const questionResolverRef = useRef<((response: AskUserResponse) => void) | null>(null);
 
+  // Sprint 11: Configurator chat state
+  const [showConfigurator, setShowConfigurator] = useState(false);
+  const [configuratorTool, setConfiguratorTool] = useState<string | null>(null);
+
   const isProcessing = useRef(false);
 
   // -- Autocomplete state -------------------------------------------------
@@ -887,6 +907,10 @@ export function App() {
       if (result.openHub) {
         setShowHub(true);
       }
+      if (result.openConfigurator) {
+        setConfiguratorTool(result.configuratorTool ?? null);
+        setShowConfigurator(true);
+      }
       if (result.resetChat) {
         setMessages([]);
       }
@@ -1030,6 +1054,11 @@ export function App() {
           <ExtensionHub
             onClose={() => setShowHub(false)}
             onMessage={(msg) => setSystemMessages((prev) => [...prev, msg])}
+            onConfigure={(toolName) => {
+              setShowHub(false);
+              setConfiguratorTool(toolName ?? null);
+              setShowConfigurator(true);
+            }}
           />
         </Box>
       )}
@@ -1045,6 +1074,18 @@ export function App() {
               questionResolverRef.current = null;
             }
           }}
+        />
+      )}
+
+      {/* Sprint 11: Configurator chat — mini chat pra configurar tools */}
+      {showConfigurator && (
+        <ConfiguratorChat
+          toolName={configuratorTool}
+          onClose={() => {
+            setShowConfigurator(false);
+            setConfiguratorTool(null);
+          }}
+          onMessage={(msg) => setSystemMessages((prev) => [...prev, msg])}
         />
       )}
 

@@ -91,11 +91,16 @@ export interface ExtensionHubProps {
    * Sprint 10.
    */
   onMessage?: (msg: string) => void;
+  /**
+   * Sprint 11: Optional callback to open the configurator chat.
+   * Called when user presses 'C' in the Hub.
+   */
+  onConfigure?: (toolName?: string | null) => void;
 }
 
 // --- Component --------------------------------------------------------------
 
-export function ExtensionHub({ onClose, onMessage }: Readonly<ExtensionHubProps>) {
+export function ExtensionHub({ onClose, onMessage, onConfigure }: Readonly<ExtensionHubProps>) {
   const [tabIndex, setTabIndex] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -184,6 +189,15 @@ export function ExtensionHub({ onClose, onMessage }: Readonly<ExtensionHubProps>
       const summary = formatOrganizeResult(result);
       if (onMessage) {
         onMessage(summary);
+      }
+      return;
+    }
+    // Sprint 11: 'C' opens configurator chat
+    if (inputChar === "c" || inputChar === "C") {
+      if (!isModesTab && onConfigure) {
+        const item = visibleItems[cursorIndex];
+        const toolName = item ? item.id.replace(/^tool:/, "").replace(/_\w+$/, "") : null;
+        onConfigure(toolName);
       }
       return;
     }
@@ -423,7 +437,7 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
         <Text color={colors.muted} dimColor>
           {isModesTab
             ? "  <-> select  ^v scroll  Enter activate  D deactivate  O organize  Tab switch  Esc close"
-            : "  <- sel  ^v scr  Enter tog  T 1-4 trigger  I install  M filter  O organize  Tab Esc"}
+            : "  <- sel  ^v scr  Enter tog  T 1-4 trigger  I install  M filter  O organize  C configure  Tab Esc"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab
