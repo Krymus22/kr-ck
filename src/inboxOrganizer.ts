@@ -144,13 +144,18 @@ export function listInboxFiles(modeName: string | null): string[] {
 
 /**
  * Move a file from inbox to the correct destination folder.
- * Returns the destination path. Does NOT overwrite existing files.
+ *
+ * Sprint B (BUG-E fix): retorna status explicitamente. Se o arquivo já existe
+ * no destino, retorna "skipped" (não "moved"). Antes, retornava o destPath
+ * mesmo quando não moveu, e organizeInbox colocava em `organized[]` — bug.
+ *
+ * @returns objeto com status, destination path e reason (se skipped)
  */
 function moveFile(
   fileName: string,
   fileType: FileType,
   modeName: string,
-): string {
+): { status: "moved" | "skipped"; destination: string; reason?: string } {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
   const modeDir = path.join(home, ".claude-killer", "modes", modeName);
   const inboxDir = path.join(modeDir, "inbox");
@@ -179,13 +184,13 @@ function moveFile(
   // Don't overwrite if already exists
   if (fs.existsSync(destPath)) {
     log.warn(`[INBOX] ${fileName} already exists in ${destFolder}/ — skipping`);
-    return destPath;
+    return { status: "skipped", destination: destPath, reason: `already exists in ${destFolder}/` };
   }
 
   // Move (rename)
   fs.renameSync(sourcePath, destPath);
   log.info(`[INBOX] Moved ${fileName} → ${destFolder}/`);
-  return destPath;
+  return { status: "moved", destination: destPath };
 }
 
 /**
@@ -241,13 +246,22 @@ export function organizeInbox(modeName: string | null): OrganizeResult {
         continue;
       }
 
-      const destPath = moveFile(fileName, fileType, modeName);
-      result.organized.push({
-        fileName,
-        fileType,
-        destination: destPath,
-        createdManifest: false, // manifest creation is Sprint 11 (configurator)
-      });
+      const moveResult = moveFile(fileName, fileType, modeName);
+      if (moveResult.status === "moved") {
+        result.organized.push({
+          fileName,
+          fileType,
+          destination: moveResult.destination,
+          createdManifest: false, // manifest creation is Sprint 11 (configurator)
+        });
+      } else {
+        // Sprint B (BUG-E fix): skipped (already exists) vai pra ignored,
+        // não pra organized.
+        result.ignored.push({
+          fileName,
+          reason: moveResult.reason ?? "skipped (already exists at destination)",
+        });
+      }
     } catch (err) {
       result.errors.push({
         fileName,

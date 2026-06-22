@@ -203,12 +203,14 @@ describe("organizeInbox - cenários complexos", () => {
     expect(content).toBe("ORIGINAL BINARY");
     // Arquivo também continua no inbox (não foi movido)
     expect(fs.existsSync(path.join(tmpInbox, "rojo.exe"))).toBe(true);
-    // Resultado: organized contém o item mas o arquivo NÃO foi efetivamente movido
-    // (moveFile retorna destPath mas não chama renameSync quando já existe)
-    expect(result.organized.length).toBe(1);
-    expect(result.organized[0].fileName).toBe("rojo.exe");
-    // Logger warn foi chamado (mockado, mas verificamos via mock)
-    // Como logger está mockado, só verificamos que não houve erro.
+    // Sprint B (BUG-E fix): quando o arquivo já existe no destino, organizeInbox
+    // agora coloca em `ignored[]` (não em `organized[]`). Antes do fix, ia pra
+    // organized mesmo sem ter movido — bug.
+    expect(result.organized.length).toBe(0);
+    expect(result.ignored.length).toBe(1);
+    expect(result.ignored[0].fileName).toBe("rojo.exe");
+    expect(result.ignored[0].reason).toContain("already exists");
+    // Não houve erro
     expect(result.errors.length).toBe(0);
   });
 

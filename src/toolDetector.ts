@@ -329,11 +329,13 @@ export async function verifyToolWorks(toolName: string, binaryPath: string): Pro
   try {
     switch (toolName) {
       case "selene": {
-        // Write a valid .luau file and run selene on it
+        // Write a valid .luau file and run selene on it.
+        // Sprint B (BUG-B fix): --no-global-check não existe em selene 0.28.0+.
+        // Usar apenas --quiet (que existe em todas as versões suportadas).
         const testFile = path.join(tmpDir, "test.luau");
         fs.writeFileSync(testFile, "local x = 1\nprint(x)\n", "utf8");
         try {
-          execSync(`"${binaryPath}" --no-global-check --quiet "${testFile}"`, {
+          execSync(`"${binaryPath}" --quiet "${testFile}"`, {
             encoding: "utf8",
             timeout: 5000,
             stdio: ["pipe", "pipe", "ignore"],

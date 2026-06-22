@@ -31,6 +31,9 @@
 
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import fc from "fast-check";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 
 // Mockamos o logger para evitar poluição visual e potenciais side-effects
 // (logger.ts importa config.ts que pode ler arquivos de configuração).
@@ -95,6 +98,12 @@ beforeAll(async () => {
   // Garante ambiente determinístico para shouldValidateFile: sem modo ativo,
   // getActiveValidationRules() retorna [] e shouldValidateFile() retorna false
   // para qualquer path. Isso documentamos na propriedade #12 (que falharia).
+  // Sprint A: também setar HOME para um dir vazio, porque getActiveMode()
+  // faz fallback para "normal" mode que pode carregar legacy .json files
+  // do HOME real (que podem ter luauValidation regras).
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "ck-prop-validators-"));
+  process.env.HOME = tmpHome;
+  process.env.USERPROFILE = tmpHome;
   try {
     const { deactivateMode } = await import("../modes.js");
     deactivateMode();

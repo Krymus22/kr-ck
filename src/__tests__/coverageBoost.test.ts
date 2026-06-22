@@ -42,10 +42,22 @@ vi.mock("./../apiClient.js", () => ({
 
 describe("luauValidator - coverage boost", () => {
   let tmpDir: string;
+  let origHome: string | undefined;
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "luau-boost-"));
+    // Sprint A: use empty HOME so no real mode config is loaded
+    origHome = process.env.HOME;
+    process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), "luau-boost-home-"));
+    process.env.USERPROFILE = process.env.HOME;
   });
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    if (process.env.HOME && process.env.HOME !== origHome) {
+      try { fs.rmSync(process.env.HOME, { recursive: true, force: true }); } catch {}
+    }
+    process.env.HOME = origHome;
+    process.env.USERPROFILE = origHome;
+  });
 
   it("should return ok=true with empty rules", async () => {
     const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
@@ -77,8 +89,11 @@ describe("luauValidator - coverage boost", () => {
     const result = await validateLuauBeforeWrite("/test.luau", "local x = 1", [
       { tool: "echo_test", filePattern: "*.luau", blocking: false, command: "echo hello" },
     ], tmpDir);
-    // echo_test is not installed as a binary, so it'll be skipped
-    expect(result.rulesSkipped.length).toBeGreaterThan(0);
+    // Sprint A: fileValidator with rule.command tries to run the command directly.
+    // `echo hello` succeeds (exit 0), so the rule is APPLIED (not skipped).
+    // The rule is non-blocking and exit 0 → no warnings, no errors.
+    expect(result.rulesApplied).toContain("echo_test");
+    expect(result.ok).toBe(true);
   });
 
   it("should handle unknown tool names gracefully", async () => {

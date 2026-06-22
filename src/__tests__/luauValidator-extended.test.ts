@@ -56,6 +56,12 @@ vi.mock("./../toolDetector.js", () => ({
     searchedPaths: [],
     verified: toolDetectorState.statuses[toolName] === "working",
   })),
+  // Sprint A: fileValidator uses findToolBinary (mode-aware) instead of detectTool.
+  // Mock so it returns the fake binary path when the tool is "installed".
+  findToolBinary: vi.fn((toolName: string, _modeName: string | null) => {
+    const status = toolDetectorState.statuses[toolName] ?? "missing";
+    return status === "missing" ? null : `/fake/bin/${toolName}`;
+  }),
 }));
 
 // --- Mock node:child_process spawn para controlar output de cada tool ---
@@ -85,9 +91,20 @@ vi.mock("node:child_process", () => ({
     child.stderr = new EventEmitter();
     child.kill = vi.fn();
 
-    // Lookup: chave = "cmd firstArg" (ex: "selene /tmp/...")
-    // Para simplificar, usamos só o cmd como chave
-    const resp = spawnState.responses[cmd] ?? spawnState.defaultResponse;
+    // Sprint A: fileValidator passes binaryPath (e.g. "/fake/bin/selene")
+    // as cmd, not just "selene". Match by checking if cmd ENDS WITH the
+    // registered tool name (so "/fake/bin/selene" matches "selene").
+    let resp = spawnState.responses[cmd];
+    if (!resp) {
+      // Try matching by suffix: find a key whose value matches the end of cmd
+      for (const key of Object.keys(spawnState.responses)) {
+        if (cmd === key || cmd.endsWith("/" + key) || cmd.endsWith("\\" + key)) {
+          resp = spawnState.responses[key];
+          break;
+        }
+      }
+    }
+    if (!resp) resp = spawnState.defaultResponse;
 
     setImmediate(() => {
       if (resp.stdout) child.stdout.emit("data", resp.stdout);
@@ -281,7 +298,8 @@ describe("luauValidator (extended)", () => {
       );
       expect(result.ok).toBe(false);
       expect(result.blockingError).toBeTruthy();
-      expect(result.blockingError).toContain("Selene lint failed");
+      // Sprint A: fileValidator uses generic "${rule.tool} failed for ..." format
+      expect(result.blockingError).toContain("selene_lint failed");
     });
 
     it("regra blocking (selene) retorna ok=false quando há erro", async () => {
@@ -312,7 +330,8 @@ describe("luauValidator (extended)", () => {
       );
       expect(result.ok).toBe(true); // non-blocking => não bloqueia
       expect(result.warnings.length).toBeGreaterThan(0);
-      expect(result.warnings[0]).toContain("StyLua format check failed");
+      // Sprint A: fileValidator uses generic "${rule.tool} failed for ..." format
+      expect(result.warnings[0]).toContain("stylua_format failed");
     });
 
     it("lida com arquivo vazio (sem erros)", async () => {
@@ -458,15 +477,13 @@ describe("luauValidator (extended)", () => {
   // ─── luau-lsp (BUG 5 — coverage gap) ────────────────────────────────────
 
   describe("luau-lsp tool path", () => {
-    // NOTE: luauValidator.ts line 184 calls detectTool(rule.tool.replace("_lint/_format/_run", ""))
-    // For rule "luau_lsp", the suffixes "_lint"/"_format"/"_run" don't match, so the
-    // detectTool call gets "luau_lsp" → that's NOT a known tool name. But the tool name
-    // used in runCommand() is "luau-lsp" (line 281 of luauValidator.ts). So we need to
-    // mock detectTool to return "working" for "luau_lsp" (the lookup key), AND mock
-    // spawn to respond to "luau-lsp" (the actual command name).
+    // Sprint A: fileValidator uses findToolBinary("luau_lsp") (no suffix strip
+    // for "_lsp"), which returns "/fake/bin/luau_lsp". The spawn mock matches
+    // by suffix, so we register the response under "luau_lsp" (the binary
+    // name findToolBinary returns).
     it("regra blocking com luau-lsp retorna ok=false quando há erro", async () => {
       toolDetectorState.set("luau_lsp", "working");
-      spawnState.set("luau-lsp", { code: 1, stdout: "TypeError: foo" });
+      spawnState.set("luau_lsp", { code: 1, stdout: "TypeError: foo" });
 
       const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
       const tmpFile = path.join(os.tmpdir(), `test-luau-lsp-${Date.now()}.luau`);
@@ -479,7 +496,7 @@ describe("luauValidator (extended)", () => {
           tmpProject,
         );
         expect(result.ok).toBe(false);
-        expect(result.blockingError).toMatch(/luau-lsp/);
+        expect(result.blockingError).toMatch(/luau_lsp/);
       } finally {
         fs.unlinkSync(tmpFile);
       }
@@ -487,7 +504,7 @@ describe("luauValidator (extended)", () => {
 
     it("regra non-blocking com luau-lsp adiciona warning mas não bloqueia", async () => {
       toolDetectorState.set("luau_lsp", "working");
-      spawnState.set("luau-lsp", { code: 1, stdout: "warning: unused variable" });
+      spawnState.set("luau_lsp", { code: 1, stdout: "warning: unused variable" });
 
       const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
       const tmpFile = path.join(os.tmpdir(), `test-luau-lsp-warn-${Date.now()}.luau`);
@@ -501,7 +518,7 @@ describe("luauValidator (extended)", () => {
         );
         expect(result.ok).toBe(true);
         expect(result.warnings.length).toBeGreaterThan(0);
-        expect(result.warnings[0]).toMatch(/luau-lsp/);
+        expect(result.warnings[0]).toMatch(/luau_lsp/);
       } finally {
         fs.unlinkSync(tmpFile);
       }

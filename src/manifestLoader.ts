@@ -56,6 +56,19 @@ export interface ToolManifest {
     examples?: string[];
   };
   outputParser?: string;
+  /**
+   * Sprint A (Sistema de Modos v2): args específicas para invocar a tool como
+   * validator (em vez de quando invocada pela IA). {file} é substituído pelo
+   * path do arquivo sendo validado.
+   *
+   * Exemplo (selene): ["--no-global-check", "--quiet", "{file}"]
+   * Exemplo (stylua): ["--check", "{file}"]
+   * Exemplo (ruff): ["check", "--quiet", "{file}"]
+   *
+   * Se não setado, validator usa args (base) + {file}. Se args também é
+   * vazio, validator usa só [{file}].
+   */
+  validatorArgs?: string[];
 }
 
 // --- Manifest Loading --------------------------------------------------------

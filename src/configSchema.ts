@@ -4,6 +4,12 @@
  * Sprint 12: Validates that mode config.json has all required fields
  * and that values are of the correct type. Returns a list of errors
  * (empty if valid).
+ *
+ * Sprint B (BUG-A prevention): rejeita config que mistura formato
+ * legacy (enableTools/luauValidation) com formato novo (toolsDir/tools/
+ * validators). Essa mistura era a causa do BUG-A onde o legacy sobrescrevia
+ * o novo formato em getAllModes(). Rejeitar cedo impede que novos modos
+ * sejam criados nesse estado inconsistente.
  */
 
 export interface ConfigValidationError {
@@ -40,6 +46,37 @@ export function validateModeConfig(config: any): ConfigValidationError[] {
   }
   if (config.hooks && !Array.isArray(config.hooks)) {
     errors.push({ field: "hooks", message: "hooks must be an array" });
+  }
+
+  // Sprint B (BUG-A prevention): rejeitar formato misto.
+  // Se tem toolsDir (novo formato), NÃO pode ter enableTools/enableSkills/
+  // enableFeatures/luauValidation (legacy). Isso força o autor do modo a
+  // escolher UM formato, evitando o bug onde legacy sobrescrevia novo.
+  const hasNewFormat = !!config.toolsDir;
+  const hasLegacyFields =
+    !!config.enableTools ||
+    !!config.enableSkills ||
+    !!config.enableFeatures ||
+    !!config.luauValidation;
+
+  if (hasNewFormat && hasLegacyFields) {
+    errors.push({
+      field: "format",
+      message:
+        "Config mistura formato novo (toolsDir/tools/validators) com legacy " +
+        "(enableTools/enableSkills/enableFeatures/luauValidation). Use APENAS um. " +
+        "Modos novos devem usar o formato: toolsDir + tools[] + validators[]. " +
+        "Modos legados (sem toolsDir) podem manter enableTools[] + luauValidation[]. " +
+        "Misturar causa BUG-A: legacy sobrescreve novo em getAllModes().",
+    });
+  }
+
+  // Sprint B (BUG-A prevention): se tem toolsDir, deve ter tools[] (não enableTools)
+  if (hasNewFormat && !Array.isArray(config.tools)) {
+    errors.push({
+      field: "tools",
+      message: "Modos com toolsDir (novo formato) DEVEM ter tools[] (não enableTools[]).",
+    });
   }
 
   // Validate validators structure

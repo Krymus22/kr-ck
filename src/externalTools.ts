@@ -176,15 +176,24 @@ export class ToolRegistry {
       }
     }
 
-    // Try deep detection first (searches multiple paths when AUTO_DETECT_TOOLS=1)
+    // Sprint A: use findToolBinary (mode-aware) for installation check.
+    // NEVER use detectTool() directly outside toolDetector.ts — it's not
+    // mode-aware and would miss tools in modes/<mode>/tools/ (BUG-D).
     try {
-      const { detectTool } = require("./toolDetector.js");
-      const result = detectTool(tool.command);
-      const installed = result.status !== "missing";
+      const { findToolBinary } = require("./toolDetector.js");
+      let modeName: string | null = null;
+      try {
+        const { getActiveModeName } = require("./modes.js");
+        modeName = getActiveModeName();
+      } catch {
+        // ignore
+      }
+      const binaryPath = findToolBinary(tool.command, modeName);
+      const installed = !!binaryPath;
       tool.detection.installed = installed;
       tool.detection.lastChecked = Date.now();
-      tool.detection.binaryPath = result.binaryPath;
-      tool.detection.version = result.version;
+      tool.detection.binaryPath = binaryPath;
+      tool.detection.version = null; // version detection is expensive, skip here
       return installed;
     } catch {
       // Fall back to simple check

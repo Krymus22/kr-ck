@@ -369,7 +369,25 @@ export function getAllModes(): ModeDefinition[] {
   // User modes with same name as built-in override
   const map = new Map<string, ModeDefinition>();
   for (const m of builtIns) map.set(m.name, m);
-  for (const m of users) map.set(m.name, m);
+  for (const m of users) {
+    // Sprint B (BUG-A prevention): warn se user mode está em formato legacy
+    // (enableTools sem toolsDir) e o built-in correspondente está em formato
+    // novo (toolsDir). Isso indica que o legacy deveria ter sido removido
+    // pela migration. O built-in (novo formato) deveria ganhar.
+    const builtIn = map.get(m.name);
+    const userIsLegacy = (m as any).enableTools && !(m as any).toolsDir;
+    const builtInIsNew = builtIn && (builtIn as any).toolsDir;
+    if (userIsLegacy && builtInIsNew) {
+      log.warn(
+        `modes: user mode "${m.name}" is in legacy format (enableTools) but ` +
+        `built-in is in new format (toolsDir). Preferring built-in. ` +
+        `Run /migrate or delete ~/.claude-killer/modes/${m.name}.json to fix.`
+      );
+      // NÃO sobrescreve — deixa o built-in (novo formato) ganhar
+      continue;
+    }
+    map.set(m.name, m);
+  }
   return Array.from(map.values());
 }
 

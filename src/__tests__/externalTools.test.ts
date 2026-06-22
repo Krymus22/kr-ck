@@ -765,20 +765,25 @@ describe("Singletons", () => {
 
 describe("ToolRegistry - coverage gaps", () => {
   it("should load user tools from disk when file exists", () => {
-    const registry = new ToolRegistry();
-    const toolsPath = registry.getUserToolsPath();
-
-    const userTools = [{
-      name: "disk_tool",
-      description: "Loaded from disk",
-      command: "echo",
-      args: [],
-      detection: { method: "manual", check: "", installed: true },
-      context: { whenToUse: [], examples: [] },
-      outputParser: "raw"
-    }];
-
+    // Sprint A: use tmp HOME so loadToolsFromDir() doesn't pick up real tools
+    const origHome = process.env.HOME;
+    const tmpHome = fs.mkdtempSync(path.join(require("node:os").tmpdir(), "ck-ext-tools-"));
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
     try {
+      const registry = new ToolRegistry();
+      const toolsPath = registry.getUserToolsPath();
+
+      const userTools = [{
+        name: "disk_tool",
+        description: "Loaded from disk",
+        command: "echo",
+        args: [],
+        detection: { method: "manual", check: "", installed: true },
+        context: { whenToUse: [], examples: [] },
+        outputParser: "raw"
+      }];
+
       const dir = path.dirname(toolsPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(toolsPath, JSON.stringify(userTools), "utf-8");
@@ -787,7 +792,9 @@ describe("ToolRegistry - coverage gaps", () => {
       expect(registry.get("disk_tool")).toBeDefined();
       expect(registry.get("disk_tool")?.category).toBe("custom");
     } finally {
-      try { fs.unlinkSync(toolsPath); } catch {}
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origHome;
+      try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {}
     }
   });
 

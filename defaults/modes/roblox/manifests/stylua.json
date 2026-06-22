@@ -15,6 +15,7 @@
       "whenToUse": ["format luau", "format lua", "stylua", "code style", "prettier for luau"],
       "examples": ["stylua src/", "stylua --check src/", "stylua --verify script.luau"]
     },
-    "outputParser": "raw"
+    "outputParser": "raw",
+    "validatorArgs": ["--check", "{file}"]
   }
 ]

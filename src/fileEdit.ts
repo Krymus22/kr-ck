@@ -178,11 +178,20 @@ export async function editFile(
     if (await shouldValidateFile(resolved)) {
       const rules = await getActiveValidationRules();
       const projectRoot = process.cwd();
+      // Sprint A: pass modeName so validator can use findToolBinary() (mode-aware)
+      let modeName: string | null = null;
+      try {
+        const { getActiveModeName } = await import("./modes.js");
+        modeName = getActiveModeName();
+      } catch {
+        // ignore
+      }
       const validation = await validateLuauBeforeWrite(
         resolved,
         result.content,
         rules,
-        projectRoot
+        projectRoot,
+        modeName
       );
 
       if (!validation.ok && validation.blockingError) {

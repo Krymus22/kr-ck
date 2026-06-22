@@ -14,6 +14,7 @@
       "whenToUse": ["lint luau", "lint roblox code", "selene lint", "check luau style"],
       "examples": ["selene src/", "selene --fix src/"]
     },
-    "outputParser": "raw"
+    "outputParser": "raw",
+    "validatorArgs": ["--quiet", "{file}"]
   }
 ]
