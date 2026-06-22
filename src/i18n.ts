@@ -159,6 +159,10 @@ export const COMMAND_I18N: Record<string, Record<Language, CommandI18n>> = {
     en: { desc: "Exit" },
     "pt-BR": { desc: "Sair" },
   },
+  "/organize": {
+    en: { desc: "Organize files in the active mode's inbox" },
+    "pt-BR": { desc: "Organizar arquivos do inbox do modo ativo" },
+  },
 };
 
 /** Get the localized description + subcommands for a slash command. */

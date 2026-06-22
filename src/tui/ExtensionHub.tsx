@@ -16,6 +16,7 @@
  *   1-4     Quick-set trigger mode (1=OFF, 2=FILE, 3=TASK, 4=EVERY)
  *   I       Install selected missing tool
  *   M       Toggle mode filter (only show extensions from active mode)
+ *   O       Organize active mode's inbox (Sprint 10)
  *   Tab     Switch category tab
  *   Esc     Close panel
  *
@@ -52,6 +53,8 @@ import {
   deactivateMode,
   type ModeDefinition,
 } from "../modes.js";
+// Sprint 10: inbox organizer — 'O' key triggers organizeInbox
+import { organizeInbox, formatOrganizeResult } from "../inboxOrganizer.js";
 
 // --- Constants --------------------------------------------------------------
 
@@ -82,11 +85,17 @@ const TRIGGER_COLORS: Record<TriggerMode, string> = {
 
 export interface ExtensionHubProps {
   onClose: () => void;
+  /**
+   * Optional callback to push a message into the parent App's systemMessages
+   * area (used by the 'O' organize shortcut to show its summary).
+   * Sprint 10.
+   */
+  onMessage?: (msg: string) => void;
 }
 
 // --- Component --------------------------------------------------------------
 
-export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
+export function ExtensionHub({ onClose, onMessage }: Readonly<ExtensionHubProps>) {
   const [tabIndex, setTabIndex] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
@@ -165,6 +174,16 @@ export function ExtensionHub({ onClose }: Readonly<ExtensionHubProps>) {
         setModeFilter((prev) => !prev);
         setCursorIndex(0);
         setScrollTop(0);
+      }
+      return;
+    }
+    // Sprint 10: 'O' organizes the active mode's inbox
+    if (inputChar === "o" || inputChar === "O") {
+      const mode = getActiveMode();
+      const result = organizeInbox(mode?.name ?? null);
+      const summary = formatOrganizeResult(result);
+      if (onMessage) {
+        onMessage(summary);
       }
       return;
     }
@@ -403,8 +422,8 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
       <Box justifyContent="space-between" marginTop={1} borderTop borderTopColor={colors.muted}>
         <Text color={colors.muted} dimColor>
           {isModesTab
-            ? "  <-> select  ^v scroll  Enter activate  D deactivate  Tab switch  Esc close"
-            : "  <- sel  ^v scr  Enter tog  T 1-4 trigger  I install  M filter  Tab Esc"}
+            ? "  <-> select  ^v scroll  Enter activate  D deactivate  O organize  Tab switch  Esc close"
+            : "  <- sel  ^v scr  Enter tog  T 1-4 trigger  I install  M filter  O organize  Tab Esc"}
         </Text>
         <Text color={colors.primary}>
           {isModesTab

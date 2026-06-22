@@ -26,6 +26,7 @@ import { getPoolSize } from "../apiKeyPool.js";
 import {
   getAllModes,
   getActiveModeName,
+  getActiveMode,
   getMode,
   applyMode,
   deactivateMode,
@@ -33,6 +34,8 @@ import {
   confirmAndSaveMode,
 } from "../modes.js";
 import { getLocalizedSlashCommands, getCommandI18n } from "../i18n.js";
+// Sprint 10: Inbox organizer — /organize slash command + 'O' key in Hub
+import { organizeInbox, formatOrganizeResult } from "../inboxOrganizer.js";
 import { colors } from "./theme.js";
 import { ChatDisplay, ChatMessage } from "./ChatDisplay.js";
 import { StatusBar } from "./StatusBar.js";
@@ -207,6 +210,22 @@ function handleBuscarCommand(arg: string | null): CommandResult {
   };
 }
 
+// Sprint 10: /organize — classifica e move arquivos do inbox/ do modo ativo
+function handleOrganizeCommand(): CommandResult {
+  const mode = getActiveMode();
+  const modeName = mode?.name ?? null;
+
+  if (!modeName) {
+    return {
+      handled: true,
+      message: "Nenhum modo ativo. Ative um modo primeiro com /mode <nome>.",
+    };
+  }
+
+  const result = organizeInbox(modeName);
+  return { handled: true, message: formatOrganizeResult(result) };
+}
+
 function handleToolsCommand(arg: string | null): CommandResult {
   const { getRegistry } = require("../externalTools.js");
   const registry = getRegistry();
@@ -317,6 +336,8 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/distill": () => handleDistillCommand(),
   // Sprint 9: buscar arquivo na máquina
   "/buscar": (arg) => handleBuscarCommand(arg),
+  // Sprint 10: organizar inbox do modo ativo
+  "/organize": () => handleOrganizeCommand(),
 };
 
 function handleEffortCommand(arg: string | null): CommandResult {
@@ -1006,7 +1027,10 @@ export function App() {
       {/* Extension Hub overlay */}
       {showHub && (
         <Box marginBottom={1}>
-          <ExtensionHub onClose={() => setShowHub(false)} />
+          <ExtensionHub
+            onClose={() => setShowHub(false)}
+            onMessage={(msg) => setSystemMessages((prev) => [...prev, msg])}
+          />
         </Box>
       )}
 
