@@ -282,9 +282,10 @@ describe("honestySystem.ts coverage boost", () => {
 });
 
 // ─── apiResearcher.ts coverage ────────────────────────────────────────────
-// NOTE: apiResearcher makes real network calls — skipping to avoid hangs
+// NOTE: the tests below only check that functions exist (toBeDefined),
+// they do NOT make real network calls. Safe to run.
 
-describe.skip("apiResearcher.ts coverage boost (skipped — needs network)", () => {
+describe("apiResearcher.ts coverage boost", () => {
   it("module exports functions", async () => {
     const mod = await import("../apiResearcher.js");
     expect(mod.researchApi).toBeDefined();
