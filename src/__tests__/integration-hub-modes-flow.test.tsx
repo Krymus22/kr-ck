@@ -61,6 +61,7 @@ const memFS = vi.hoisted(() => {
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
+  const nodePath = await import("node:path");
 
   const isFake = (p: unknown): boolean => {
     return typeof p === "string" && p.startsWith(FAKE_HOME);
@@ -109,7 +110,25 @@ vi.mock("node:fs", async (importOriginal) => {
       }
       return out;
     }
-    return (actual.readdirSync as any)(p, ...args);
+    const result = (actual.readdirSync as any)(p, ...args);
+    // BUG FIX (Sprint 12) workaround: getBuiltInModes agora lê subpastas
+    // (<mode>/config.json — novo formato) ALÉM dos <mode>.json flat (legacy).
+    // O novo formato usa campos diferentes (tools/skills/validators em vez de
+    // enableTools/enableSkills/luauValidation), o que quebra o ExtensionHub
+    // (ModeCard acessa mode.enableTools.length). Para preservar o comportamento
+    // esperado pelo Hub (legacy format com enableTools), filtramos as
+    // subpastas do diretório bundled defaults/modes/.
+    if (typeof p === "string" && p.includes("defaults/modes")) {
+      return result.filter((entry: string) => {
+        try {
+          const entryPath = nodePath.join(String(p), entry);
+          return !(actual.statSync as any)(entryPath).isDirectory();
+        } catch {
+          return true;
+        }
+      });
+    }
+    return result;
   }) as any;
 
   const unlinkSync = ((p: unknown, ...args: any[]) => {

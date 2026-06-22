@@ -204,12 +204,17 @@ describe("luauValidator (extended)", () => {
       expect(should).toBe(false);
     });
 
-    it("retorna false quando não há modo ativo (sem regras)", async () => {
-      const { deactivateMode } = await import("./../modes.js");
-      deactivateMode();
+    it("retorna false quando modo ativo é o 'normal' (sem regras)", async () => {
+      // BUG FIX (Sprint 12): getActiveMode NUNCA retorna null — quando nenhum
+      // modo está setado, retorna o modo "normal" (built-in). Esse modo não
+      // tem regras de validação, então shouldValidateFile retorna false.
+      // Usamos setActiveMode(null) para garantir estado limpo (deactivateMode
+      // chamaria getActiveMode que pode falhar com o modo "normal" novo formato).
+      const { setActiveMode } = await import("./../modes.js");
+      setActiveMode(null);
 
       const { shouldValidateFile } = await import("./../luauValidator.js");
-      // Mesmo um .luau não é validado quando não há regra ativa
+      // Mesmo um .luau não é validado quando o modo ativo não tem regra
       const should = await shouldValidateFile("/proj/inexistente.luau");
       expect(should).toBe(false);
     });
@@ -437,9 +442,12 @@ describe("luauValidator (extended)", () => {
       expect(tools).toContain("terraform_validate");
     });
 
-    it("retorna vazio quando nenhum modo está ativo", async () => {
-      const { deactivateMode } = await import("./../modes.js");
-      deactivateMode();
+    it("retorna vazio quando modo ativo é o 'normal' (sem regras)", async () => {
+      // BUG FIX (Sprint 12): getActiveMode nunca retorna null. Quando nenhum
+      // modo está setado, retorna o modo "normal" (que não tem regras).
+      // Usamos setActiveMode(null) para garantir estado limpo.
+      const { setActiveMode } = await import("./../modes.js");
+      setActiveMode(null);
 
       const { getActiveValidationRules } = await import("./../luauValidator.js");
       const rules = await getActiveValidationRules();

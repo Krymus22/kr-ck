@@ -95,51 +95,57 @@ describe("toolConfigurator — extended (edge cases)", () => {
     expect(isSafeCommand("\t\t")).toBe(false);
   });
 
-  it("permite 'where' + path com espaços", () => {
-    // Padrão: /^where\s+/i — apenas verifica que começa com "where ".
-    expect(isSafeCommand('where "C:\\Program Files\\rojo"')).toBe(true);
+  it("permite 'where' + path simples (sem espaços/aspas)", () => {
+    // BUG FIX (Sprint 12): novo regex /^where\s+[\w./\\-]+$/i aceita apenas
+    // paths sem espaços/aspas (chars: word, dot, slash, backslash, dash).
     expect(isSafeCommand("where rojo")).toBe(true);
+    expect(isSafeCommand("where /usr/bin/rojo")).toBe(true);
+    // Paths com aspas ou espaços são REJEITADOS (não batem no regex estrito).
+    expect(isSafeCommand('where "C:\\Program Files\\rojo"')).toBe(false);
   });
 
-  it("permite 'find' + argumentos complexos (regex)", () => {
-    // Padrão: /^find\s+/i — só verifica início.
-    expect(isSafeCommand("find . -name 'rojo*' -type f")).toBe(true);
+  it("permite 'find' + argumentos alfanuméricos (sem aspas/asteriscos)", () => {
+    // BUG FIX (Sprint 12): novo regex /^find\s+[\w./\\\-: ]+$/i aceita
+    // args com word, dot, slash, backslash, dash, colon, space.
+    // Aspas e asteriscos NÃO são permitidos (seriam rejeitados).
     expect(isSafeCommand("find / -name darklua")).toBe(true);
+    expect(isSafeCommand("find . -name rojo -type f")).toBe(true);
+    // Args com aspas ou asteriscos são REJEITADOS.
+    expect(isSafeCommand("find . -name 'rojo*' -type f")).toBe(false);
   });
 
-  // --- Limitações do regex (documentação do comportamento atual) -------------
-  // O regex ALLOWED_COMMAND_PATTERNS usa âncora `^` mas sem `$`, então casa
-  // apenas o INÍCIO do comando. Pipes / redirects / separadores NÃO são
-  // rejeitados — essa é uma limitação conhecida da implementação atual.
-  // Os testes abaixo documentam esse comportamento para regressão futura.
+  // --- BUG FIX (Sprint 12): regexes agora rejeitam pipes/redirects/chaining ---
+  // O regex ALLOWED_COMMAND_PATTERNS agora tem âncora `$` e há um check
+  // DANGEROUS_CHARS que rejeita `|`, `>`, `<`, `&`, `;`, `` ` ``, `$`.
+  // Os testes abaixo documentam o comportamento CORRIGIDO (rejeita) — antes,
+  // esses comandos eram aceitos pela falta de âncora `$` no regex.
 
-  it("comando com pipe | é aceito (limitação do regex — não valida meio)", () => {
-    // Regex casa com `rojo --help` (início), ignora o `| cat` restante.
-    expect(isSafeCommand("rojo --help | cat")).toBe(true);
-    expect(isSafeCommand("darklua --version | grep 1.0")).toBe(true);
+  it("comando com pipe | é REJEITADO (BUG FIX: âncora $ + DANGEROUS_CHARS)", () => {
+    expect(isSafeCommand("rojo --help | cat")).toBe(false);
+    expect(isSafeCommand("darklua --version | grep 1.0")).toBe(false);
   });
 
-  it("comando com && é aceito (limitação do regex)", () => {
-    expect(isSafeCommand("ls -la && rm -rf /")).toBe(true);
-    expect(isSafeCommand("darklua --help && echo hacked")).toBe(true);
+  it("comando com && é REJEITADO (BUG FIX)", () => {
+    expect(isSafeCommand("ls -la && rm -rf /")).toBe(false);
+    expect(isSafeCommand("darklua --help && echo hacked")).toBe(false);
   });
 
-  it("comando com ; é aceito (limitação do regex)", () => {
-    expect(isSafeCommand("ls -la; rm -rf /")).toBe(true);
-    expect(isSafeCommand("rojo --help; curl bad")).toBe(true);
+  it("comando com ; é REJEITADO (BUG FIX)", () => {
+    expect(isSafeCommand("ls -la; rm -rf /")).toBe(false);
+    expect(isSafeCommand("rojo --help; curl bad")).toBe(false);
   });
 
-  it("comando com redirect > é aceito (limitação do regex)", () => {
-    expect(isSafeCommand("rojo --help > /etc/passwd")).toBe(true);
-    expect(isSafeCommand("ls -la > /tmp/out")).toBe(true);
+  it("comando com redirect > é REJEITADO (BUG FIX)", () => {
+    expect(isSafeCommand("rojo --help > /etc/passwd")).toBe(false);
+    expect(isSafeCommand("ls -la > /tmp/out")).toBe(false);
   });
 
-  it("comando com redirect < é aceito (limitação do regex)", () => {
-    expect(isSafeCommand("rojo --help < /etc/passwd")).toBe(true);
+  it("comando com redirect < é REJEITADO (BUG FIX)", () => {
+    expect(isSafeCommand("rojo --help < /etc/passwd")).toBe(false);
   });
 
-  it("comando com redirect >> é aceito (limitação do regex)", () => {
-    expect(isSafeCommand("rojo --help >> /etc/passwd")).toBe(true);
+  it("comando com redirect >> é REJEITADO (BUG FIX)", () => {
+    expect(isSafeCommand("rojo --help >> /etc/passwd")).toBe(false);
   });
 
   // --- Comandos realmente rejeitados (não começam com padrão seguro) ---------

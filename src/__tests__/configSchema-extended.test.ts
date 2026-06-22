@@ -11,8 +11,8 @@
  *   - config com hooks vazio [] → válido
  *   - config com tools contendo string não-tool → sem erro (não valida conteúdo)
  *   - config com type errado em name (number) → erro
- *   - config null → múltiplos erros
- *   - config undefined → múltiplos erros
+ *   - config null → erro 'non-null object' (guarda Sprint 12)
+ *   - config undefined → erro 'non-null object' (guarda Sprint 12)
  */
 
 import { describe, it, expect } from "vitest";
@@ -77,14 +77,22 @@ describe("configSchema — extended (edge cases)", () => {
     expect(isValidModeConfig({ ...validConfig, name: 123 })).toBe(false);
   });
 
-  it("config null lança TypeError (não há guarda para null — chamada inválida)", () => {
-    // O schema não valida null explicitamente — ao tentar acessar .name, lança.
-    // Comportamento esperado: throw graceful (caller deve passar objeto).
-    expect(() => validateModeConfig(null)).toThrow(TypeError);
+  it("config null retorna erro de 'non-null object' (guarda contra null)", () => {
+    // BUG FIX (Sprint 12): agora há guarda para null/undefined — retorna um
+    // array com erro em vez de lançar TypeError.
+    const errors = validateModeConfig(null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.field).toBe("root");
+    expect(errors[0]!.message).toMatch(/non-null object/i);
+    expect(isValidModeConfig(null)).toBe(false);
   });
 
-  it("config undefined lança TypeError (não há guarda para undefined)", () => {
-    expect(() => validateModeConfig(undefined)).toThrow(TypeError);
+  it("config undefined retorna erro de 'non-null object' (guarda contra undefined)", () => {
+    const errors = validateModeConfig(undefined);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.field).toBe("root");
+    expect(errors[0]!.message).toMatch(/non-null object/i);
+    expect(isValidModeConfig(undefined)).toBe(false);
   });
 
   it("config {} (objeto vazio) gera múltiplos erros sem throw", () => {

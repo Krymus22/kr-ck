@@ -298,14 +298,17 @@ describe("safetyReviewer - mode integration", () => {
 
   it("roblox built-in mode should have safetyReview=true", async () => {
     const { getBuiltInModes } = await import("./../modes.js");
-    const roblox = getBuiltInModes().find((m) => m.name === "roblox");
+    // BUG FIX (Sprint 12): getBuiltInModes agora lê AMBOS os formatos
+    // (<mode>/config.json novo + <mode>.json legacy). safetyReview só existe
+    // no legacy roblox.json — filtramos para pegar esse.
+    const roblox = getBuiltInModes().filter((m) => m.name === "roblox" && m.safetyReview === true).pop();
     expect(roblox).toBeDefined();
     expect(roblox!.safetyReview).toBe(true);
   });
 
   it("roblox mode should have autoResearch enabled (default true) and safetyReview=true (combined safety)", async () => {
     const { getBuiltInModes } = await import("./../modes.js");
-    const roblox = getBuiltInModes().find((m) => m.name === "roblox");
+    const roblox = getBuiltInModes().filter((m) => m.name === "roblox" && m.safetyReview === true).pop()!;
     expect(roblox!.safetyReview).toBe(true);
     expect(roblox!.autoResearch).not.toBe(false);
   });

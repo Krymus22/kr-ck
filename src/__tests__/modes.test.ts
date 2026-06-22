@@ -34,8 +34,10 @@ describe("modes", () => {
     it("should find bundled roblox mode from defaults/modes/", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
       const modes = getBuiltInModes();
-      // The bundled mode is at defaults/modes/roblox.json
-      const robloxMode = modes.find((m) => m.name === "roblox");
+      // BUG FIX (Sprint 12): getBuiltInModes agora lê AMBOS os formatos:
+      // <mode>/config.json (novo) E <mode>.json (legacy flat). Para o roblox,
+      // ambos existem — pegamos o legacy (com enableTools/luauValidation).
+      const robloxMode = modes.filter((m) => m.name === "roblox" && m.enableTools).pop();
       expect(robloxMode).toBeDefined();
       expect(robloxMode!.builtIn).toBe(true);
       expect(robloxMode!.label).toContain("Roblox");
@@ -48,7 +50,7 @@ describe("modes", () => {
     it("roblox mode should include selene as blocking validation rule", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
       const modes = getBuiltInModes();
-      const roblox = modes.find((m) => m.name === "roblox")!;
+      const roblox = modes.filter((m) => m.name === "roblox" && m.luauValidation).pop()!;
       const seleneRule = roblox.luauValidation!.find(
         (r) => r.tool === "selene_lint" && r.blocking
       );
@@ -58,7 +60,7 @@ describe("modes", () => {
 
     it("roblox mode should activate all Roblox CLI tools", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
-      const roblox = getBuiltInModes().find((m) => m.name === "roblox")!;
+      const roblox = getBuiltInModes().filter((m) => m.name === "roblox" && m.enableTools).pop()!;
       // Should include rojo, wally, lune, selene, rokit, wally-package-types, stylua
       expect(roblox.enableTools).toContain("tool:rojo_build");
       expect(roblox.enableTools).toContain("tool:wally_install");
@@ -132,10 +134,15 @@ describe("modes", () => {
   });
 
   describe("active mode", () => {
-    it("should return null when no active mode set", async () => {
+    it("should never return null when no active mode set (BUG FIX Sprint 12)", async () => {
       const { getActiveModeName, getActiveMode } = await import("./../modes.js");
+      // getActiveModeName ainda retorna null quando nenhum modo está setado.
       expect(getActiveModeName()).toBeNull();
-      expect(getActiveMode()).toBeNull();
+      // BUG FIX (Sprint 12): getActiveMode NUNCA retorna null — retorna o
+      // modo "normal" (built-in) ou um minimal default ModeDefinition.
+      const active = getActiveMode();
+      expect(active).not.toBeNull();
+      expect(active!.name).toBe("normal");
     });
 
     it("should persist active mode across calls", async () => {

@@ -139,21 +139,34 @@ function getConfiguratorTools() {
 
 // --- Command Safety Check ----------------------------------------------------
 
+// BUG FIX (Sprint 12): added $ anchor and dangerous char rejection.
+// Previously, 'rojo --help > /etc/passwd' would pass as "safe" because
+// the regex only checked the prefix without anchoring the end.
 const ALLOWED_COMMAND_PATTERNS = [
-  /^[\w./\\-]+\s+--help/i,
-  /^[\w./\\-]+\s+--version/i,
-  /^where\s+/i,
-  /^find\s+/i,
-  /^ls\s+/i,
-  /^dir\s+/i,
+  /^[\w./\\-]+\s+--help$/i,
+  /^[\w./\\-]+\s+--version$/i,
+  /^where\s+[\w./\\-]+$/i,
+  /^find\s+[\w./\\\-: ]+$/i,
+  /^ls\s+[\w./\\-]+$/i,
+  /^dir\s+[\w./\\-]+$/i,
 ];
+
+// Characters that indicate shell metacharacters (pipes, redirects, chaining).
+// If ANY of these appear in the command, it's rejected immediately.
+const DANGEROUS_CHARS = /[|;&<>`$]/;
 
 /**
  * Verifica se um comando é seguro (apenas --help, --version, where, find, ls, dir).
  * Exportado no Sprint 12 para permitir testes diretos.
+ *
+ * BUG FIX: agora rejeita comandos com pipes (|), redirects (>, <), chaining (&&, ;),
+ * backticks (`), e variable expansion ($). Antes, 'rojo --help > /etc/passwd' passava.
  */
 export function isSafeCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
+  if (!trimmed) return false;
+  // Reject any command with shell metacharacters
+  if (DANGEROUS_CHARS.test(trimmed)) return false;
   return ALLOWED_COMMAND_PATTERNS.some((p) => p.test(trimmed));
 }
 

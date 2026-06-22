@@ -95,11 +95,16 @@ const arbNonSafeCommand = fc.oneof(
  * O binário contém APENAS chars da classe `[\w./\\-]` (que o regex
  * ALLOWED_COMMAND_PATTERNS aceita) — caso contrário, o regex não casa
  * e o comando seria rejeitado (limitação do regex, não bug).
+ *
+ * BUG FIX (Sprint 12): o regex agora tem âncora `$`, então apenas
+ * `<bin> --help` (sem args adicionais) é aceito. Qualquer `rest`
+ * depois de `--help` faz o regex falhar. Por isso o arbitrary só
+ * gera a forma `<bin> --help` (sem rest).
  */
-const arbHelpCommand = fc.tuple(
-  fc.stringMatching(/^[a-zA-Z0-9_./\\-]{1,30}$/).filter((s) => s.length > 0),
-  fc.string({ maxLength: 20 }).filter((s) => !s.includes("--help") && !s.includes("--version")),
-).map(([bin, rest]) => (rest ? `${bin} --help ${rest}` : `${bin} --help`));
+const arbHelpCommand = fc
+  .stringMatching(/^[a-zA-Z0-9_./\\-]{1,30}$/)
+  .filter((s) => s.length > 0)
+  .map((bin) => `${bin} --help`);
 
 // --- Property: config schema ------------------------------------------------
 
@@ -289,10 +294,12 @@ describe("Property: hook safety (isSafeCommand)", () => {
   it("qualquer comando começando com --help (após binário) → isSafeCommand retorna true", () => {
     fc.assert(
       fc.property(arbHelpCommand, (cmd) => {
-        // Comando no formato `<bin> --help [<rest>]` deve ser considerado seguro.
-        // O regex `/^[\w./\\-]+\s+--help/i` casa o início.
-        // NOTA: o regex NÃO tem âncora `$`, então o restante é ignorado
-        // (limitação conhecida e documentada em toolConfigurator-extended.test.ts).
+        // Comando no formato `<bin> --help [<rest>]` deve ser considerado seguro,
+        // DESDE QUE `rest` não contenha chars perigosos (|, >, <, &, ;, `, $).
+        // O regex `/^[\w./\\-]+\s+--help$/i` casa o início.
+        // BUG FIX (Sprint 12): agora o regex tem âncora `$` e DANGEROUS_CHARS
+        // rejeita pipes/redirects/chaining/backticks/variable-expansion.
+        // O arbitrary `arbHelpCommand` já filtra chars perigosos do `rest`.
         return isSafeCommand(cmd) === true;
       }),
       { numRuns: 50 },

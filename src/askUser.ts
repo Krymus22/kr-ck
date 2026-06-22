@@ -123,6 +123,10 @@ export function clearAskUserCallback(): void {
  * The agent loop naturally pauses here (async/await).
  */
 export async function handleAskUser(args: Record<string, unknown>): Promise<{ resultStr: string; usedHeal: boolean }> {
+  // BUG FIX: guard against null/undefined args
+  if (!args || typeof args !== "object") {
+    return { resultStr: "[ERRO] args inválidos (esperado objeto)", usedHeal: false };
+  }
   const pergunta = String(args.pergunta ?? "");
   const alternativas = Array.isArray(args.alternativas) ? (args.alternativas as string[]) : [];
   const contexto = args.contexto ? String(args.contexto) : undefined;

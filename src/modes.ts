@@ -262,17 +262,40 @@ export function getBuiltInModes(): ModeDefinition[] {
 
   const result: ModeDefinition[] = [];
   try {
-    const files = fs.readdirSync(modesDir).filter((f) => f.endsWith(".json"));
-    for (const file of files) {
-      try {
-        const content = fs.readFileSync(path.join(modesDir, file), "utf8");
-        const mode = JSON.parse(content) as ModeDefinition;
-        if (mode && mode.name && typeof mode.name === "string") {
-          mode.builtIn = true;
-          result.push(mode);
+    const entries = fs.readdirSync(modesDir);
+    for (const entry of entries) {
+      const entryPath = path.join(modesDir, entry);
+
+      // BUG FIX (Sprint 12): try new format: <mode>/config.json
+      if (fs.statSync(entryPath).isDirectory()) {
+        const configPath = path.join(entryPath, "config.json");
+        if (fs.existsSync(configPath)) {
+          try {
+            const content = fs.readFileSync(configPath, "utf8");
+            const mode = JSON.parse(content) as ModeDefinition;
+            if (mode && mode.name && typeof mode.name === "string") {
+              mode.builtIn = true;
+              result.push(mode);
+            }
+          } catch (err) {
+            log.warn(`modes: failed to parse ${entry}/config.json: ${(err as Error).message}`);
+          }
         }
-      } catch (err) {
-        log.warn(`modes: failed to parse ${file}: ${(err as Error).message}`);
+        continue;
+      }
+
+      // Legacy format: <mode>.json (flat file)
+      if (entry.endsWith(".json") && entry !== "active.json") {
+        try {
+          const content = fs.readFileSync(entryPath, "utf8");
+          const mode = JSON.parse(content) as ModeDefinition;
+          if (mode && mode.name && typeof mode.name === "string") {
+            mode.builtIn = true;
+            result.push(mode);
+          }
+        } catch (err) {
+          log.warn(`modes: failed to parse ${entry}: ${(err as Error).message}`);
+        }
       }
     }
   } catch {
@@ -295,21 +318,42 @@ export function getUserModes(): ModeDefinition[] {
 
   const result: ModeDefinition[] = [];
   try {
-    const files = fs.readdirSync(dir).filter(
-      (f) => f.endsWith(".json") && f !== "active.json"
-    );
-    for (const file of files) {
-      try {
-        const content = fs.readFileSync(path.join(dir, file), "utf8");
-        const mode = JSON.parse(content) as ModeDefinition;
-        if (mode && mode.name && typeof mode.name === "string") {
-          // Check if it's actually a built-in (user might have a copy)
-          const builtIn = getBuiltInModes().find((m) => m.name === mode.name);
-          mode.builtIn = !!builtIn;
-          result.push(mode);
+    const entries = fs.readdirSync(dir);
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry);
+
+      // BUG FIX (Sprint 12): try new format: <mode>/config.json
+      if (fs.statSync(entryPath).isDirectory()) {
+        const configPath = path.join(entryPath, "config.json");
+        if (fs.existsSync(configPath)) {
+          try {
+            const content = fs.readFileSync(configPath, "utf8");
+            const mode = JSON.parse(content) as ModeDefinition;
+            if (mode && mode.name && typeof mode.name === "string") {
+              const builtIn = getBuiltInModes().find((m) => m.name === mode.name);
+              mode.builtIn = !!builtIn;
+              result.push(mode);
+            }
+          } catch {
+            // skip invalid
+          }
         }
-      } catch {
-        // skip invalid
+        continue;
+      }
+
+      // Legacy format: <mode>.json (flat file)
+      if (entry.endsWith(".json") && entry !== "active.json") {
+        try {
+          const content = fs.readFileSync(entryPath, "utf8");
+          const mode = JSON.parse(content) as ModeDefinition;
+          if (mode && mode.name && typeof mode.name === "string") {
+            const builtIn = getBuiltInModes().find((m) => m.name === mode.name);
+            mode.builtIn = !!builtIn;
+            result.push(mode);
+          }
+        } catch {
+          // skip invalid
+        }
       }
     }
   } catch {
@@ -398,7 +442,18 @@ export function getActiveMode(): ModeDefinition | null {
     // Sprint 6: Fall back to "normal" base mode
     const normalMode = getMode("normal");
     if (normalMode) return normalMode;
-    return null;
+    // BUG FIX (Sprint 12): if "normal" mode not found in files, create a
+    // minimal default so getActiveMode() NEVER returns null. This ensures
+    // the system always has a base mode to work with.
+    return {
+      name: "normal",
+      label: "Padrão",
+      description: "Modo padrão",
+      builtIn: true,
+      enableTools: [],
+      enableSkills: [],
+      enableFeatures: [],
+    } as ModeDefinition;
   }
   return getMode(name);
 }

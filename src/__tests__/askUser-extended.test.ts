@@ -192,14 +192,21 @@ describe("AskUser — extended (edge cases)", () => {
 
   // --- args null/undefined ---------------------------------------------------
 
-  it("handleAskUser com args undefined lança TypeError (não há guarda para null/undefined)", async () => {
+  it("handleAskUser com args undefined retorna erro graceful (guarda contra null/undefined)", async () => {
+    // BUG FIX (Sprint 12): agora há guarda para null/undefined — retorna erro em
+    // vez de lançar TypeError ao tentar acessar args.pergunta.
     // @ts-expect-error chamada propositalmente inválida
-    await expect(handleAskUser(undefined)).rejects.toThrow(TypeError);
+    const result = await handleAskUser(undefined);
+    expect(result.resultStr).toMatch(/args inválidos/i);
+    expect(result.usedHeal).toBe(false);
   });
 
-  it("handleAskUser com args null lança TypeError (não há guarda para null/undefined)", async () => {
+  it("handleAskUser com args null retorna erro graceful (guarda contra null/undefined)", async () => {
+    // BUG FIX (Sprint 12): agora há guarda para null/undefined.
     // @ts-expect-error chamada propositalmente inválida
-    await expect(handleAskUser(null)).rejects.toThrow(TypeError);
+    const result = await handleAskUser(null);
+    expect(result.resultStr).toMatch(/args inválidos/i);
+    expect(result.usedHeal).toBe(false);
   });
 
   it("handleAskUser com args={} retorna erro de pergunta obrigatória", async () => {

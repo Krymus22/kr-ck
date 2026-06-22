@@ -34,11 +34,14 @@ describe("luauValidator", () => {
   });
 
   describe("matchesPattern (via shouldValidateFile)", () => {
-    it("should not validate when no active mode (no rules)", async () => {
+    it("should not validate when active mode is 'normal' (no rules)", async () => {
+      // BUG FIX (Sprint 12): getActiveMode NUNCA retorna null — quando nenhum
+      // modo está setado, retorna o modo "normal" (built-in, sem regras).
+      // Usamos setActiveMode(null) para garantir estado limpo (deactivateMode
+      // chamaria getActiveMode que pode falhar com o modo "normal" novo formato).
       const { shouldValidateFile, getActiveValidationRules } = await import("./../luauValidator.js");
-      // First ensure no mode is active
-      const { deactivateMode } = await import("./../modes.js");
-      deactivateMode();
+      const { setActiveMode } = await import("./../modes.js");
+      setActiveMode(null);
 
       const rules = await getActiveValidationRules();
       expect(rules).toEqual([]);
@@ -144,9 +147,12 @@ describe("luauValidator", () => {
       expect(shouldTs).toBe(false);
     });
 
-    it("should return no rules when no mode is active", async () => {
-      const { deactivateMode } = await import("./../modes.js");
-      deactivateMode();
+    it("should return no rules when active mode is 'normal'", async () => {
+      // BUG FIX (Sprint 12): getActiveMode nunca retorna null. Quando nenhum
+      // modo está setado, retorna o modo "normal" (sem regras).
+      // Usamos setActiveMode(null) para garantir estado limpo.
+      const { setActiveMode } = await import("./../modes.js");
+      setActiveMode(null);
 
       const { getActiveValidationRules } = await import("./../luauValidator.js");
       const rules = await getActiveValidationRules();

@@ -14,6 +14,12 @@ export interface ConfigValidationError {
 export function validateModeConfig(config: any): ConfigValidationError[] {
   const errors: ConfigValidationError[] = [];
 
+  // BUG FIX: guard against null/undefined input
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    errors.push({ field: "root", message: "config must be a non-null object" });
+    return errors;
+  }
+
   if (!config.name || typeof config.name !== "string") {
     errors.push({ field: "name", message: "name is required and must be a string" });
   }
