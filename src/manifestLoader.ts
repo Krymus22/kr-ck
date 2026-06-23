@@ -354,7 +354,16 @@ export async function executeFromManifest(
           cmdArgs.push(flag.name);
         }
       } else {
-        cmdArgs.push(flag.name, String(value));
+        // Sprint A fix: flags sem prefixo "--" são POSITIONAL (ex: "script",
+        // "path", "args"). Para essas, NÃO prefixar com o flag name — só
+        // adicionar o valor direto. Antes, "lune run script /tmp/x.luau"
+        // era gerado em vez de "lune run /tmp/x.luau".
+        const isPositional = !flag.name.startsWith("-");
+        if (isPositional) {
+          cmdArgs.push(String(value));
+        } else {
+          cmdArgs.push(flag.name, String(value));
+        }
       }
     }
   }
