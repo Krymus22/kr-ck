@@ -224,3 +224,92 @@ Quando o Claude-Killer tenta editar um arquivo:
 - **Node.js** ≥ 18.0.0
 - **NVIDIA NIM API Key** (modelo: `moonshotai/kimi-k2.6`)
 - Opcional: `python3`, `javac` para validação das respectivas extensões
+
+---
+
+## 🧪 Testes
+
+### Testes Unitários (vitest)
+
+```bash
+npm test                # roda todos os 4355 testes
+npm run test:coverage   # com cobertura
+```
+
+### Testes E2E (branch `e2e-tests`)
+
+Os testes E2E com API real (NVIDIA NIM / kimi k2.6) estão em uma **branch separada** chamada `e2e-tests`. Eles não estão no `master` porque:
+
+1. **Consomem quota da API** — cada execução faz 50-100 chamadas à NVIDIA NIM
+2. **Precisam de chaves API configuradas** — não rodam em CI sem custos
+3. **Incluem o modo DevOps de demonstração** — que é só um exemplo, não produção
+4. **Contêm artefatos de teste** — scripts temporários, configs de teste, etc.
+
+#### Como usar os testes E2E
+
+```bash
+# Fazer checkout da branch de testes
+git fetch origin
+git checkout e2e-tests
+
+# Configurar .env com suas chaves NVIDIA
+# NVIDIA_API_KEYS=key1,key2,key3,key4
+# MODEL=moonshotai/kimi-k2.6
+
+# Rodar todos os testes E2E
+node e2e/test-modes-real.mjs           # 126 testes — sistema de modos
+node e2e/test-new-mode-creation.mjs    # 30 testes  — bug prevention
+node e2e/test-advanced-flows.mjs       # 80 testes  — think, safety, git, lune
+node e2e/test-hooks-devops-agent.mjs   # 64 testes  — hooks, devops, agent loop
+node e2e/test-internal-modules.mjs     # 109 testes — read-before-write, memory, etc
+node e2e/test-real-edit-and-debug.mjs  # 66 testes  — edição real, modo python custom
+node e2e/test-integration-flows.mjs    # 54 testes  — honesty, failure memory, extensions
+node e2e/test-critical-flows.mjs       # 46 testes  — streaming, effort levels, sub-agent
+node e2e/test-native-tools.mjs         # 57 testes  — todas as tools nativas via dispatch
+node e2e/test-advanced-api.mjs         # 18 seções  — desfazer, spec, TDD, snapshots
+node e2e/test-complex-agent-flows.mjs  # 10 seções  — fluxos complexos do agent loop
+
+# Ou rodar todos de uma vez
+for f in e2e/test-*.mjs; do echo "=== $f ==="; node "$f"; done
+```
+
+#### O que os testes E2E cobrem
+
+- ✅ Sistema de modos (inbox, manifests, validators, hooks, AskUser)
+- ✅ Agent loop (streaming, thinking, tool calls, multi-turn)
+- ✅ Sub-agentes (read-only e powerful)
+- ✅ Todas as tools nativas (ler, editar, buscar, pensar, todo, plan, session, git, etc)
+- ✅ Tools de manifest (rojo, selene, stylua, lune)
+- ✅ Safety reviewer (DataStore:RemoveAsync, terraform destroy, os.system)
+- ✅ Honesty system (devil's advocate, hallucination, contradictions, prove-it)
+- ✅ Failure memory, context injection, extension center
+- ✅ Criação de modo custom do zero (python)
+- ✅ Modo DevOps de demonstração (Terraform + K8s)
+
+#### Bugs encontrados pelos testes E2E
+
+Os testes E2E com API real encontraram **19 bugs** (BUG-A a BUG-S) que os testes unitários não pegaram. Todos estão corrigidos no `master`. Os mais críticos:
+
+| Bug | Impacto |
+|-----|---------|
+| BUG-H | Manifest tools não apareciam para sub-agentes |
+| BUG-M | Read-before-write hardcoded true (IA ficava em loop) |
+| BUG-N | setActiveMode não aplicava env vars |
+| BUG-Q | Flat file skipado incorretamente (modo sumia) |
+| BUG-R | desfazer_edicao não salvava backup |
+| BUG-S | todo_write sem handler (tool invisível) |
+
+#### Branch `e2e-tests` — conteúdo
+
+```
+e2e/                         → 11 scripts de teste E2E (735+ testes)
+defaults/modes/devops/       → modo DevOps de demonstração
+defaults/modes/devops.json   → legacy devops
+scratch/                     → scripts de teste avulsos
+__test_aplicardir__/         → artefatos de teste
+__test_lerdir__/             → artefatos de teste
+.claude-killer/              → config local de teste
+```
+
+> **Nota:** A branch `e2e-tests` é atualizada quando novos testes E2E são criados.
+> O `master` só recebe as **correções de bugs** encontradas pelos testes.
