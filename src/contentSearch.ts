@@ -66,7 +66,11 @@ function searchFileForMatches(
   if (content.includes("\0")) return;
 
   const lines = content.split(/\r?\n/);
-  const relFile = path.relative(process.cwd(), file).replaceAll("\\", "/");
+  // Sprint C bug fix (BUG-X): usar path absoluto em vez de relativo.
+  // Paths relativos como "../../../../tmp/ck-test/app.ts" são longos e
+  // confundem a IA, que fica em loop chamando buscar_texto repetidamente
+  // porque não consegue interpretar o resultado. Path absoluto é mais claro.
+  const relFile = file.replaceAll("\\", "/");
 
   for (let i = 0; i < lines.length; i++) {
     if (results.length >= maxResults) break;
