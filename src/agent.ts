@@ -944,6 +944,19 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   // --- Multi-key pool status (IDEIA Fase 1) ------------------------------
+  // Sprint C bug fix (BUG-S): todo_write estava definido em TOOL_DEFINITIONS
+  // mas NÃO tinha handler. IA via a tool, chamava, e recebia "Ferramenta
+  // desconhecida". Agora delega para todo.todoWrite().
+  "todo_write": async (args) => {
+    const { todoWrite } = await import("./todo.js");
+    const items = args.items;
+    if (!Array.isArray(items)) {
+      return { resultStr: "[ERRO] 'items' deve ser um array.", usedHeal: false };
+    }
+    const result = todoWrite(items as any);
+    return { resultStr: result, usedHeal: false };
+  },
+
   "status_pool": async () => {
     if (getPoolSize() === 0) {
       return {
