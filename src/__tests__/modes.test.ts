@@ -34,25 +34,30 @@ describe("modes", () => {
     it("should find bundled roblox mode from defaults/modes/", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
       const modes = getBuiltInModes();
-      // BUG FIX (Sprint 12): getBuiltInModes agora lê AMBOS os formatos:
-      // <mode>/config.json (novo) E <mode>.json (legacy flat). Para o roblox,
-      // ambos existem — pegamos o legacy (com enableTools/luauValidation).
-      const robloxMode = modes.filter((m) => m.name === "roblox" && m.enableTools).pop();
+      // Sprint B: getBuiltInModes carrega SÓ <mode>/config.json quando o dir
+      // existe (não carrega <mode>.json legacy para evitar duplicata).
+      // O config.json novo usa 'tools'/'validators' (não enableTools/luauValidation).
+      const robloxMode = modes.find((m) => m.name === "roblox");
       expect(robloxMode).toBeDefined();
       expect(robloxMode!.builtIn).toBe(true);
       expect(robloxMode!.label).toContain("Roblox");
-      expect(robloxMode!.enableTools.length).toBeGreaterThan(0);
-      expect(robloxMode!.enableSkills.length).toBeGreaterThan(0);
-      expect(robloxMode!.luauValidation).toBeDefined();
-      expect(robloxMode!.luauValidation!.length).toBeGreaterThan(0);
+      // Novo formato usa 'tools' (ou legacy 'enableTools' se for legacy)
+      const toolsArr = (robloxMode as any).tools ?? robloxMode!.enableTools;
+      expect(toolsArr?.length).toBeGreaterThan(0);
+      const skillsArr = (robloxMode as any).skills ?? robloxMode!.enableSkills;
+      expect(skillsArr?.length).toBeGreaterThan(0);
+      const validatorsArr = (robloxMode as any).validators ?? robloxMode!.luauValidation;
+      expect(validatorsArr).toBeDefined();
+      expect(validatorsArr?.length).toBeGreaterThan(0);
     });
 
     it("roblox mode should include selene as blocking validation rule", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
       const modes = getBuiltInModes();
-      const roblox = modes.filter((m) => m.name === "roblox" && m.luauValidation).pop()!;
-      const seleneRule = roblox.luauValidation!.find(
-        (r) => r.tool === "selene_lint" && r.blocking
+      const roblox = modes.find((m) => m.name === "roblox")!;
+      const validators = (roblox as any).validators ?? roblox.luauValidation ?? [];
+      const seleneRule = validators.find(
+        (r: any) => r.tool === "selene_lint" && r.blocking
       );
       expect(seleneRule).toBeDefined();
       expect(seleneRule!.filePattern).toBe("*.luau");
@@ -60,15 +65,16 @@ describe("modes", () => {
 
     it("roblox mode should activate all Roblox CLI tools", async () => {
       const { getBuiltInModes } = await import("./../modes.js");
-      const roblox = getBuiltInModes().filter((m) => m.name === "roblox" && m.enableTools).pop()!;
+      const roblox = getBuiltInModes().find((m) => m.name === "roblox")!;
+      const tools = (roblox as any).tools ?? roblox.enableTools;
       // Should include rojo, wally, lune, selene, rokit, wally-package-types, stylua
-      expect(roblox.enableTools).toContain("tool:rojo_build");
-      expect(roblox.enableTools).toContain("tool:wally_install");
-      expect(roblox.enableTools).toContain("tool:lune_run");
-      expect(roblox.enableTools).toContain("tool:selene_lint");
-      expect(roblox.enableTools).toContain("tool:rokit_install");
-      expect(roblox.enableTools).toContain("tool:stylua_format");
-      expect(roblox.enableTools).not.toContain("tool:darklua_process");
+      expect(tools).toContain("tool:rojo_build");
+      expect(tools).toContain("tool:wally_install");
+      expect(tools).toContain("tool:lune_run");
+      expect(tools).toContain("tool:selene_lint");
+      expect(tools).toContain("tool:rokit_install");
+      expect(tools).toContain("tool:stylua_format");
+      expect(tools).not.toContain("tool:darklua_process");
     });
 
     it("roblox mode should enable strict mode + advanced thinking + high effort", async () => {

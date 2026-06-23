@@ -226,8 +226,23 @@ function getMergedTools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
  * Public accessor for the merged tool list (used by sub-agents).
  * Includes TOOL_DEFINITIONS + external tools + think tool + MCP tools,
  * all with poka-yoke expanded descriptions.
+ *
+ * Sprint A bug fix: recarrega activeManifests se estiver vazio. Antes,
+ * chamar getMergedToolsPublic() ANTES de runAgentLoop() retornava lista
+ * sem manifest tools (rojo_build, selene_lint, etc) porque
+ * activeManifests só era setado dentro de runAgentLoop. Isso causava
+ * bug onde sub-agentes não viam as tools de manifest.
  */
 export function getMergedToolsPublic(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  // Sprint A: ensure activeManifests is loaded
+  if (activeManifests.length === 0) {
+    try {
+      activeManifests = loadActiveManifests();
+      log.debug(`[AGENT] getMergedToolsPublic: loaded ${activeManifests.length} manifests (lazy)`);
+    } catch (err) {
+      log.debug(`[AGENT] getMergedToolsPublic: failed to load manifests: ${(err as Error).message}`);
+    }
+  }
   return getMergedTools();
 }
 
@@ -247,6 +262,16 @@ export async function dispatchToolCallPublic(
   toolCall: ToolCall,
   healRetry: number = 0
 ): Promise<ToolResult> {
+  // Sprint A: ensure activeManifests is loaded (otherwise manifest tools
+  // like rojo_build/selene_lint would be unknown to dispatchToolCall)
+  if (activeManifests.length === 0) {
+    try {
+      activeManifests = loadActiveManifests();
+      log.debug(`[AGENT] dispatchToolCallPublic: loaded ${activeManifests.length} manifests (lazy)`);
+    } catch (err) {
+      log.debug(`[AGENT] dispatchToolCallPublic: failed to load manifests: ${(err as Error).message}`);
+    }
+  }
   return dispatchToolCall(toolCall, healRetry);
 }
 

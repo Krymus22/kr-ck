@@ -8,6 +8,7 @@
   "strictMode": true,
   "readBeforeWrite": true,
   "advancedThinking": true,
+  "safetyReview": true,
   "toolsDir": "tools",
   "manifestsDir": "manifests",
   "skillsDir": "skills",
@@ -28,6 +29,138 @@
     "feature:model_compaction",
     "feature:multi_key_pool"
   ],
-  "validators": [],
-  "systemPrompt": ""
+  "validators": [
+    {
+      "tool": "terraform_fmt",
+      "filePattern": "*.tf",
+      "blocking": false,
+      "command": "terraform fmt -check {file}"
+    },
+    {
+      "tool": "terraform_validate",
+      "filePattern": "*.tf",
+      "blocking": true,
+      "command": "terraform validate {file}"
+    },
+    {
+      "tool": "yamllint",
+      "filePattern": "*.yaml",
+      "blocking": false,
+      "command": "yamllint {file}"
+    },
+    {
+      "tool": "yamllint",
+      "filePattern": "*.yml",
+      "blocking": false,
+      "command": "yamllint {file}"
+    }
+  ],
+  "systemPrompt": "",
+  "safetyPatterns": [
+    {
+      "regex": "terraform\\s+destroy",
+      "description": "terraform destroy (deletes infrastructure resources)",
+      "severity": "high"
+    },
+    {
+      "regex": "kubectl\\s+delete\\s+namespace",
+      "description": "kubectl delete namespace (deletes entire K8s namespace and all resources)",
+      "severity": "high"
+    },
+    {
+      "regex": "kubectl\\s+delete\\s+--all",
+      "description": "kubectl delete --all (deletes all resources of a kind)",
+      "severity": "high"
+    },
+    {
+      "regex": "helm\\s+uninstall",
+      "description": "helm uninstall (removes a Helm release)",
+      "severity": "medium"
+    },
+    {
+      "regex": "git\\s+push\\s+--force",
+      "description": "git push --force (overwrites remote history)",
+      "severity": "medium"
+    },
+    {
+      "regex": "rm\\s+-rf\\s+/",
+      "description": "rm -rf / (catastrophic deletion)",
+      "severity": "high"
+    },
+    {
+      "regex": "docker\\s+system\\s+prune",
+      "description": "docker system prune (removes unused docker data)",
+      "severity": "medium"
+    }
+  ],
+  "researchSources": {
+    "terraform": [
+      "terraform.io/docs",
+      "registry.terraform.io",
+      "developer.hashicorp.com/terraform"
+    ],
+    "kubernetes": [
+      "kubernetes.io/docs",
+      "kubernetes.io/blog",
+      "artifacthub.io"
+    ],
+    "helm": [
+      "helm.sh/docs",
+      "artifacthub.io"
+    ]
+  },
+  "symbolPatterns": [
+    {
+      "language": "hcl",
+      "extensions": [
+        ".tf",
+        ".hcl"
+      ],
+      "patterns": [
+        "^\\s*resource\\s+\"([\\w_-]+)\"",
+        "^\\s*module\\s+\"([\\w_-]+)\"",
+        "^\\s*variable\\s+\"([\\w_-]+)\"",
+        "^\\s*output\\s+\"([\\w_-]+)\"",
+        "^\\s*provider\\s+\"([\\w_-]+)\"",
+        "^\\s*data\\s+\"([\\w_-]+)\""
+      ]
+    },
+    {
+      "language": "yaml",
+      "extensions": [
+        ".yaml",
+        ".yml"
+      ],
+      "patterns": [
+        "^([a-zA-Z_][\\w-]*):",
+        "^\\s+([a-zA-Z_][\\w-]*):"
+      ]
+    }
+  ],
+  "hooks": {
+    "postEdit": [
+      {
+        "filePattern": "*.tf",
+        "command": "terraform fmt {file}",
+        "blocking": false
+      },
+      {
+        "filePattern": "*.py",
+        "command": "black --line-length 100 {file}",
+        "blocking": false
+      }
+    ],
+    "preCommit": [
+      {
+        "filePattern": "*.tf",
+        "command": "tflint",
+        "blocking": true
+      },
+      {
+        "filePattern": "*.yaml",
+        "command": "yamllint -d relaxed",
+        "blocking": false
+      }
+    ]
+  }
 }

@@ -263,6 +263,18 @@ export function getBuiltInModes(): ModeDefinition[] {
   const result: ModeDefinition[] = [];
   try {
     const entries = fs.readdirSync(modesDir);
+    // Sprint B bug fix: se existe <mode>/ (dir) E <mode>.json (flat legacy),
+    // carregar SÓ o dir (novo formato) e ignorar o flat. Antes, ambos eram
+    // carregados, causando 2 entradas duplicadas em getBuiltInModes() —
+    // uma do config.json (novo, vazio) e outra do .json legacy (com dados).
+    // Como getAllModes() faz map.set(name, mode), o último ganha, e a ordem
+    // do readdirSync é indefinida — podia sair o legacy ou o novo.
+    const dirNames = new Set(
+      entries.filter((e) => {
+        try { return fs.statSync(path.join(modesDir, e)).isDirectory(); } catch { return false; }
+      })
+    );
+
     for (const entry of entries) {
       const entryPath = path.join(modesDir, entry);
 
@@ -285,7 +297,14 @@ export function getBuiltInModes(): ModeDefinition[] {
       }
 
       // Legacy format: <mode>.json (flat file)
+      // Sprint B: SKIP se existe <mode>/ directory correspondente (novo formato).
+      // Isso evita carregar 2 versões do mesmo modo.
       if (entry.endsWith(".json") && entry !== "active.json") {
+        const modeNameFromFlat = entry.slice(0, -5); // remove .json
+        if (dirNames.has(modeNameFromFlat)) {
+          log.debug(`modes: skipping legacy ${entry} (superseded by ${modeNameFromFlat}/ directory)`);
+          continue;
+        }
         try {
           const content = fs.readFileSync(entryPath, "utf8");
           const mode = JSON.parse(content) as ModeDefinition;
@@ -319,6 +338,14 @@ export function getUserModes(): ModeDefinition[] {
   const result: ModeDefinition[] = [];
   try {
     const entries = fs.readdirSync(dir);
+    // Sprint B bug fix: mesmo padrão do getBuiltInModes — se <mode>/ dir
+    // existe, NÃO carregar <mode>.json legacy (evita duplicata).
+    const dirNames = new Set(
+      entries.filter((e) => {
+        try { return fs.statSync(path.join(dir, e)).isDirectory(); } catch { return false; }
+      })
+    );
+
     for (const entry of entries) {
       const entryPath = path.join(dir, entry);
 
@@ -342,7 +369,13 @@ export function getUserModes(): ModeDefinition[] {
       }
 
       // Legacy format: <mode>.json (flat file)
+      // Sprint B: SKIP se existe <mode>/ directory correspondente.
       if (entry.endsWith(".json") && entry !== "active.json") {
+        const modeNameFromFlat = entry.slice(0, -5);
+        if (dirNames.has(modeNameFromFlat)) {
+          log.debug(`modes: skipping user legacy ${entry} (superseded by ${modeNameFromFlat}/ directory)`);
+          continue;
+        }
         try {
           const content = fs.readFileSync(entryPath, "utf8");
           const mode = JSON.parse(content) as ModeDefinition;
@@ -373,19 +406,19 @@ export function getAllModes(): ModeDefinition[] {
     // Sprint B (BUG-A prevention): warn se user mode está em formato legacy
     // (enableTools sem toolsDir) e o built-in correspondente está em formato
     // novo (toolsDir). Isso indica que o legacy deveria ter sido removido
-    // pela migration. O built-in (novo formato) deveria ganhar.
+    // pela migration. MAS ainda respeita o override do user — só warn.
     const builtIn = map.get(m.name);
     const userIsLegacy = (m as any).enableTools && !(m as any).toolsDir;
     const builtInIsNew = builtIn && (builtIn as any).toolsDir;
     if (userIsLegacy && builtInIsNew) {
       log.warn(
         `modes: user mode "${m.name}" is in legacy format (enableTools) but ` +
-        `built-in is in new format (toolsDir). Preferring built-in. ` +
-        `Run /migrate or delete ~/.claude-killer/modes/${m.name}.json to fix.`
+        `built-in is in new format (toolsDir). User override still wins. ` +
+        `For consistency, consider migrating ~/.claude-killer/modes/${m.name}.json ` +
+        `to the new directory format (run /migrate or delete the file).`
       );
-      // NÃO sobrescreve — deixa o built-in (novo formato) ganhar
-      continue;
     }
+    // User mode sempre override built-in (comportamento original).
     map.set(m.name, m);
   }
   return Array.from(map.values());
@@ -544,9 +577,13 @@ export async function applyMode(name: string): Promise<ModeApplyResult> {
     const all = getAllExtensions();
 
     // Build a set of ids that should be enabled
+    // Sprint B bug fix: support both new format ('tools'/'skills'/'enableFeatures')
+    // and legacy format ('enableTools'/'enableSkills'/'enableFeatures').
+    const modeTools = (mode as any).tools ?? mode.enableTools;
+    const modeSkills = (mode as any).skills ?? mode.enableSkills;
     const shouldEnable = new Set<string>([
-      ...mode.enableTools,
-      ...mode.enableSkills,
+      ...modeTools,
+      ...modeSkills,
       ...mode.enableFeatures,
     ]);
 
@@ -616,7 +653,10 @@ export async function applyMode(name: string): Promise<ModeApplyResult> {
 export function deactivateMode(): void {
   // ANTES de limpar o ponteiro, lê o modo ativo para saber quais tools reverter.
   const mode = getActiveMode();
-  if (mode && mode.enableTools.length > 0) {
+  // Sprint B bug fix: enableTools pode ser undefined no novo formato (que usa 'tools').
+  // Usar optional chaining + fallback pra array vazia.
+  const modeTools = (mode as any)?.tools ?? mode?.enableTools ?? [];
+  if (mode && modeTools.length > 0) {
     try {
       // Lazy-import para evitar dependência circular (mesmo padrão do applyMode).
       // Como o dynamic import é async, usamos um wrapper fire-and-forget —
@@ -626,7 +666,7 @@ export function deactivateMode(): void {
       void (async () => {
         const { toggleExtension, getAllExtensions } = await import("./extensionCenter.js");
         const all = getAllExtensions();
-        for (const toolId of mode.enableTools) {
+        for (const toolId of modeTools) {
           const ext = all.find((e) => e.id === toolId);
           // Só desliga se estiver ON (enabled && triggerMode !== "disabled").
           // Não desliga skills/features — usuário pode ter habilitado manualmente.
