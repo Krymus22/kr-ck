@@ -459,12 +459,18 @@ export function injectMemory(
   const globalMemory = readGlobalMemory(config);
 
   // Estimate tokens
+  // Sprint C bug fix: checkpoint?.contextSummary pode ser undefined.
   let totalChars =
-    projectMemory.length + globalMemory.length + (checkpoint?.contextSummary.length ?? 0);
+    projectMemory.length + globalMemory.length + ((checkpoint?.contextSummary ?? "").length);
 
   // Add relevant skills (limited by budget)
+  // Sprint C bug fix: s.steps pode ser undefined quando skill vem de JSON
+  // incompleto. Usar optional chaining + fallback pra array vazia.
   const relevantSkills = findMatchingSkills(config, projectMemory.slice(0, 500));
-  const skillsChars = relevantSkills.reduce((sum, s) => sum + s.description.length + s.steps.join("").length, 0);
+  const skillsChars = relevantSkills.reduce(
+    (sum, s) => sum + (s.description ?? "").length + ((s.steps ?? []).join("").length),
+    0,
+  );
   totalChars += skillsChars;
 
   // Add recent history (limited by budget)

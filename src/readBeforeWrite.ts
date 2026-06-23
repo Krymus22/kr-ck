@@ -34,14 +34,25 @@ const WRITE_TOOLS = new Set([
 ]);
 
 const readPaths = new Set<string>();
-let enabled = true;
+// Sprint C bug fix: inicializar `enabled` a partir da env var READ_BEFORE_WRITE
+// (setada por applyMode quando o modo ativo tem readBeforeWrite: true/false).
+// Antes, era hardcoded como `true` e nunca lia a env var — modo normal
+// (readBeforeWrite: false) ainda bloqueava edições sem ler primeiro.
+let enabled = process.env.READ_BEFORE_WRITE === "false" ? false : true;
 
 export function setReadBeforeWriteEnabled(on: boolean): void {
   enabled = on;
+  // Sprint C: também atualizar a env var pra consistência
+  process.env.READ_BEFORE_WRITE = on ? "true" : "false";
 }
 
 export function isReadBeforeWriteEnabled(): boolean {
-  return enabled;
+  // Sprint C bug fix: ler a env var dinamicamente (applyMode seta ela quando
+  // modo muda). Antes, só lia na inicialização do módulo — mudar de modo
+  // roblox (readBeforeWrite: true) pra normal (false) não desativava.
+  if (process.env.READ_BEFORE_WRITE === "false") return false;
+  if (process.env.READ_BEFORE_WRITE === "true") return true;
+  return enabled;  // fallback pra valor setado por setReadBeforeWriteEnabled
 }
 
 export function recordRead(toolName: string, filePath: string): void {
@@ -64,7 +75,9 @@ export function hasBeenRead(filePath: string): boolean {
 }
 
 export function checkReadBeforeWrite(toolName: string, args: Record<string, unknown>): { allowed: boolean; message?: string } {
-  if (!enabled) return { allowed: true };
+  // Sprint C bug fix: usar isReadBeforeWriteEnabled() (lê env var dinamicamente)
+  // em vez da variável `enabled` (só lida na inicialização).
+  if (!isReadBeforeWriteEnabled()) return { allowed: true };
   if (!WRITE_TOOLS.has(toolName)) return { allowed: true };
 
   if (toolName === "editar_multi_arquivos") {

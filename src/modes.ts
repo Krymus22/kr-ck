@@ -513,6 +513,11 @@ export function getActiveMode(): ModeDefinition | null {
  * Set the active mode. Persists to ~/.claude-killer/modes/active.json.
  * Does NOT actually apply the mode's settings - that's done by applyMode().
  * Pass null to clear (deactivate).
+ *
+ * Sprint C bug fix: também aplicar readBeforeWrite env var quando setActiveMode
+ * é chamado (não só applyMode). Muitos testes e fluxos usam setActiveMode
+ * diretamente sem chamar applyMode — antes, o readBeforeWrite ficava stuck
+ * no valor anterior.
  */
 export function setActiveMode(name: string | null): void {
   ensureModesDir();
@@ -523,8 +528,25 @@ export function setActiveMode(name: string | null): void {
   fs.writeFileSync(getActiveModeFile(), JSON.stringify(state, null, 2), "utf8");
   if (name) {
     log.info(`modes: active mode set to "${name}"`);
+    // Sprint C: aplicar settings críticas imediatamente
+    const mode = getMode(name);
+    if (mode) {
+      if (mode.readBeforeWrite !== undefined) {
+        process.env.READ_BEFORE_WRITE = mode.readBeforeWrite ? "true" : "false";
+      }
+      if (mode.strictMode !== undefined) {
+        process.env.STRICT_MODE = mode.strictMode ? "true" : "false";
+      }
+      if (mode.advancedThinking !== undefined) {
+        process.env.ADVANCED_THINKING = mode.advancedThinking ? "true" : "false";
+      }
+    }
   } else {
     log.info(`modes: active mode cleared`);
+    // Reset env vars to defaults
+    process.env.READ_BEFORE_WRITE = "false";
+    process.env.STRICT_MODE = "false";
+    process.env.ADVANCED_THINKING = "false";
   }
   emitModesChange();
 }
