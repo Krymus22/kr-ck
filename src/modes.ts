@@ -297,13 +297,17 @@ export function getBuiltInModes(): ModeDefinition[] {
       }
 
       // Legacy format: <mode>.json (flat file)
-      // Sprint B: SKIP se existe <mode>/ directory correspondente (novo formato).
-      // Isso evita carregar 2 versões do mesmo modo.
+      // Sprint B: SKIP se existe <mode>/ directory correspondente (novo formato)
+      // E esse directory tem config.json. Se o dir existe mas NÃO tem config.json,
+      // ainda carrega o flat file (não há novo formato pra substituir).
       if (entry.endsWith(".json") && entry !== "active.json") {
         const modeNameFromFlat = entry.slice(0, -5); // remove .json
         if (dirNames.has(modeNameFromFlat)) {
-          log.debug(`modes: skipping legacy ${entry} (superseded by ${modeNameFromFlat}/ directory)`);
-          continue;
+          const dirConfigPath = path.join(modesDir, modeNameFromFlat, "config.json");
+          if (fs.existsSync(dirConfigPath)) {
+            log.debug(`modes: skipping legacy ${entry} (superseded by ${modeNameFromFlat}/config.json)`);
+            continue;
+          }
         }
         try {
           const content = fs.readFileSync(entryPath, "utf8");
@@ -369,12 +373,16 @@ export function getUserModes(): ModeDefinition[] {
       }
 
       // Legacy format: <mode>.json (flat file)
-      // Sprint B: SKIP se existe <mode>/ directory correspondente.
+      // Sprint B: SKIP se existe <mode>/ directory correspondente COM config.json.
+      // Se dir existe mas sem config.json, ainda carrega flat file.
       if (entry.endsWith(".json") && entry !== "active.json") {
         const modeNameFromFlat = entry.slice(0, -5);
         if (dirNames.has(modeNameFromFlat)) {
-          log.debug(`modes: skipping user legacy ${entry} (superseded by ${modeNameFromFlat}/ directory)`);
-          continue;
+          const dirConfigPath = path.join(dir, modeNameFromFlat, "config.json");
+          if (fs.existsSync(dirConfigPath)) {
+            log.debug(`modes: skipping user legacy ${entry} (superseded by ${modeNameFromFlat}/config.json)`);
+            continue;
+          }
         }
         try {
           const content = fs.readFileSync(entryPath, "utf8");
