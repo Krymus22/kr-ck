@@ -425,13 +425,16 @@ export function findMatchingSkills(config: MemoryConfig, context: string): Skill
   const allSkills = listSkills(config);
   const contextLower = context.toLowerCase();
 
+  // Sprint C bug fix: skill.trigger e skill.description podem ser undefined.
+  // Usar optional chaining + fallback pra string vazia.
   return allSkills
     .filter(
       (skill) =>
-        skill.trigger.toLowerCase().includes(contextLower) ||
-        skill.description.toLowerCase().includes(contextLower)
+        ((skill as any).trigger ?? "").toLowerCase().includes(contextLower) ||
+        (skill.description ?? "").toLowerCase().includes(contextLower) ||
+        (skill.name ?? "").toLowerCase().includes(contextLower)
     )
-    .sort((a, b) => b.usageCount - a.usageCount);
+    .sort((a, b) => ((b as any).usageCount ?? 0) - ((a as any).usageCount ?? 0));
 }
 
 // --- Memory Injection --------------------------------------------------------
