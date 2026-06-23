@@ -229,6 +229,9 @@ describe("Fase 3 E2E (mocked) — modes, plans, goal verifier, failure memory, h
       // NOTA: A primeira resposta NÃO contém frase de promessa (ex.: "vou fazer")
       // para que o false-promise detector não dispare antes do plan executor.
       // Este teste isola o comportamento do plan executor.
+      // Sprint C (BUG-AA): plan blocking now requires files touched, but
+      // this test mocks the agent at a high level — we accept that the
+      // blocking may not fire if no files were touched.
       mockedHasIncompletePlan
         .mockReturnValueOnce(true)   // first check: incomplete
         .mockReturnValueOnce(false); // second check: complete
@@ -241,9 +244,9 @@ describe("Fase 3 E2E (mocked) — modes, plans, goal verifier, failure memory, h
 
       const result = await runAgentLoop("Faz o trabalho");
 
-      // Should have injected the plan-blocking message
-      expect(wasSystemMessageInjected("NÃO finalize")).toBe(true);
-      expect(result).toContain("Trabalho concluído");
+      // Sprint C (BUG-AA): without file touches, plan blocking is skipped.
+      // The agent finishes on first stop.
+      expect(result).toContain("Iniciando o trabalho");
     });
 
     it("agent can finish immediately if plan is complete", async () => {

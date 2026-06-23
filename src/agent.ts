@@ -1212,7 +1212,27 @@ function trackFileAccess(name: string, args: Record<string, unknown>): void {
 }
 
 async function executeHandler(name: string, args: Record<string, unknown>, toolCall: ToolCall, healRetry: number): Promise<ToolResult> {
-  const handler = toolHandlers[name];
+  // Sprint C bug fix (BUG-Z): algumas IAs (deepseek, mistral) inventam nomes
+  // de tools diferentes dos definidos no schema. Mapear aliases comuns.
+  const TOOL_ALIASES: Record<string, string> = {
+    "buscar_conteudo": "buscar_texto",
+    "buscar_texto_no_projeto": "buscar_texto",
+    "grep": "buscar_texto",
+    "search": "buscar_texto",
+    "find_files": "buscar_arquivos",
+    "glob": "buscar_arquivos",
+    "list_files": "buscar_arquivos",
+    "read_file": "ler_arquivo",
+    "read": "ler_arquivo",
+    "write_file": "editar_arquivo",
+    "write": "editar_arquivo",
+    "edit": "editar_arquivo",
+    "run_command": "executar_comando",
+    "shell": "executar_comando",
+    "think": "pensar",
+  };
+  const resolvedName = TOOL_ALIASES[name] ?? name;
+  const handler = toolHandlers[resolvedName];
   if (handler) {
     try {
       return await handler(args, toolCall, healRetry);
@@ -1583,6 +1603,14 @@ async function checkPlanCompletion(): Promise<boolean> {
   try {
     const { hasIncompletePlan, formatPlan } = await import("./planExecutor.js");
     if (hasIncompletePlan()) {
+      // Sprint C bug fix (BUG-AA): só bloquear finish se a IA realmente
+      // tocou arquivos (fez trabalho). Se a IA só foi pedida pra CRIAR
+      // o plano (sem executar), não faz sentido bloquear — a tarefa era
+      // criar o plano, não completá-lo.
+      if (turnTouchedFiles.size === 0) {
+        log.debug(`[PLAN] Plan has incomplete steps but no files touched — allowing finish (plan creation task)`);
+        return false;
+      }
       log.warn(`[PLAN] Blocking finish - plan has incomplete steps`);
       history.addSystemMessage(`${formatPlan()}\n\nNÃO finalize até completar TODOS os passos do plano. Continue trabalhando.`);
       return true;
@@ -1675,9 +1703,10 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   if (gateBlocked) return true;
 
   // IDEIA 11: Plan-then-execute - block finish if plan has incomplete steps
+  // Sprint C (BUG-AA): só bloquear se IA tocou arquivos (fez trabalho real).
   try {
     const { hasIncompletePlan, formatPlan } = await import("./planExecutor.js");
-    if (hasIncompletePlan()) {
+    if (hasIncompletePlan() && turnTouchedFiles.size > 0) {
       log.warn(`[PLAN] Blocking finish - plan has incomplete steps`);
       history.addSystemMessage(`${formatPlan()}\n\nNÃO finalize até completar TODOS os passos do plano. Continue trabalhando.`);
       return true;
