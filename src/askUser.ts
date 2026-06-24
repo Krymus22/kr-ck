@@ -45,26 +45,18 @@ export const ASK_USER_TOOL_DEFINITION: OpenAI.Chat.Completions.ChatCompletionToo
   type: "function",
   function: {
     name: "perguntar_usuario",
-    description:
-      "Faça uma pergunta ao usuário quando você não tem certeza de algo. " +
-      "O usuário vai escolher uma das alternativas ou digitar a própria resposta. " +
-      "USE SEMPRE que: não entendeu perfeitamente o pedido, há múltiplas interpretações, " +
-      "precisa de informação que não está no contexto, ou precisa confirmar uma decisão importante. " +
-      "NUNCA assuma — pergunte. É melhor perguntar e errar 0 vezes do que assumir e errar 5. " +
-      "Dê alternativas específicas (não genéricas). O usuário sempre pode digitar resposta livre.",
+    description: "Ask the user a question with choices.",
     parameters: {
       type: "object",
       properties: {
         pergunta: {
           type: "string",
-          description: "A pergunta em linguagem natural, clara e específica",
+          description: "The question.",
         },
         alternativas: {
           type: "array",
           items: { type: "string" },
-          description:
-            "Lista de alternativas pré-definidas (mínimo 2, máximo 6). " +
-            "O usuário pode escolher uma OU digitar resposta livre.",
+          description: "2-6 choices. User can also type freely.",
           minItems: 2,
           maxItems: 6,
         },

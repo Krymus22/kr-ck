@@ -128,9 +128,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "ler_arquivo",
       description:
-        "Reads file content or lists directory contents. Supports offset/limit for reading specific line ranges, " +
-        "and optional grep filtering. If path is a directory, returns file listing. " +
-        "Use this to inspect any source file or explore folder structure before making changes.",
+        "Read file content or list directory.",
       parameters: {
         type: "object",
         properties: {
@@ -150,8 +148,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "editar_arquivo",
       description:
-        "Edit a file using string match/replace. Supports multiple edits and create-if-missing. " +
-        "More precise than aplicar_diff for simple changes.",
+        "Edit file via string match/replace.",
       parameters: {
         type: "object",
         properties: {
@@ -183,9 +180,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "buscar_web",
       description:
-        "Search the web for current information. Returns search results with titles, URLs, and snippets. " +
-        "Use when you need up-to-date info, API docs, package versions, or solutions to errors. " +
-        "More general than pesquisar_api_atualizada (which is API-specific).",
+        "Search the web.",
       parameters: {
         type: "object",
         properties: {
@@ -201,9 +196,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "ler_url",
       description:
-        "Fetch and read the content of a web URL. Returns the text content (HTML stripped). " +
-        "Use to read documentation pages, GitHub issues, blog posts, or any web page. " +
-        "Useful after buscar_web to read a specific result in detail.",
+        "Read content from a web URL.",
       parameters: {
         type: "object",
         properties: {
@@ -219,8 +212,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "buscar_arquivos",
       description:
-        "Search for files by glob pattern (e.g. **/*.ts, src/**/*.test.ts). " +
-        "Returns matching file paths relative to cwd.",
+        "Find files by glob pattern.",
       parameters: {
         type: "object",
         properties: {
@@ -238,7 +230,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "buscar_texto",
       description:
-        "Search file contents using regex (like grep). Returns matching lines with file paths and line numbers.",
+        "Search file contents with regex.",
       parameters: {
         type: "object",
         properties: {
@@ -296,8 +288,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "parse_ast",
       description:
-        "Parse a source file and extract symbols (functions, classes, interfaces, etc.), imports, and exports. " +
-        "Language-agnostic: supports TypeScript, JavaScript, Python, Rust, Go, Java.",
+        "Extract symbols from source file.",
       parameters: {
         type: "object",
         properties: {
@@ -312,9 +303,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "todo_write",
       description:
-        "Update the visible todo list for the current task. Use this to plan and track multi-step work. " +
-        "Call repeatedly as work progresses to mark items as `in_progress` or `completed`. " +
-        "Only one item should be `in_progress` at a time. Pass an empty array to clear the list.",
+        "Update the todo list.",
       parameters: {
         type: "object",
         properties: {
@@ -353,8 +342,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "executar_comando",
       description:
-        "Executes a shell command in the terminal and returns its combined stdout/stderr output. " +
-        "Use this tool to run tests, linters, or compilation commands locally.",
+        "Run a shell command.",
       parameters: {
         type: "object",
         properties: {
@@ -369,9 +357,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "executar_testes",
       description:
-        "Runs the project's test suite and returns structured results. " +
-        "Auto-detects test framework (vitest, jest, pytest, cargo, go). " +
-        "Can optionally run tests for a specific file. Returns pass/fail counts and failure details.",
+        "Run test suite (auto-detects framework).",
       parameters: {
         type: "object",
         properties: {
@@ -386,8 +372,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "sugerir_fixes",
       description:
-        "Analyzes test failures and suggests fixes. " +
-        "Use after running tests to get actionable fix suggestions for each failure.",
+        "Analyze test failures and suggest fixes.",
       parameters: {
         type: "object",
         properties: {
@@ -401,11 +386,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "desfazer_edicao",
       description:
-        "Desfaz a última edição aplicada via aplicar_diff / editar_arquivo no arquivo informado. " +
-        "Restaura o conteúdo do backup mais recente salvo automaticamente antes da edição. " +
-        "Cada chamada remove O backup mais recente da pilha - chamadas sucessivas desfezem edições mais antigas. " +
-        "Backups expiram após 5 minutos. " +
-        "Use quando uma edição introduzir um erro e você quiser voltar ao estado anterior.",
+        "Undo the last file edit.",
       parameters: {
         type: "object",
         properties: {
@@ -420,8 +401,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "listar_backups",
       description:
-        "Lista os backups de rollback disponíveis. Se 'caminho' for fornecido, filtra apenas os backups daquele arquivo. " +
-        "Use para inspecionar o histórico de edições antes de desfazer.",
+        "List available rollback backups.",
       parameters: {
         type: "object",
         properties: {
@@ -435,10 +415,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "atualizar_estado",
       description:
-        "Atualiza o arquivo TASK_STATE.md com o estado estruturado da tarefa. " +
-        "Use para manter registro do que já foi feito, do que falta, das decisões tomadas e dos bugs encontrados. " +
-        "O arquivo é lido automaticamente após compaction para que o modelo recupere o contexto. " +
-        "Todos os campos são opcionais - apenas os fornecidos serão atualizados.",
+        "Update TASK_STATE.md (done/todo/decisions/bugs).",
       parameters: {
         type: "object",
         properties: {
@@ -458,8 +435,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "marcar_feito",
       description:
-        "Move um item de 'todo' para 'done' no TASK_STATE.md. " +
-        "Forneça uma substring que identifique o item - o primeiro 'todo' que contiver a substring será movido.",
+        "Mark a todo item as done.",
       parameters: {
         type: "object",
         properties: {
@@ -474,14 +450,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "pesquisar_api_atualizada",
       description:
-        "Pesquisa na web a documentação atual de uma API específica (última versão). " +
-        "USE quando: (1) for escrever código usando uma API que pode ter mudado recentemente, " +
-        "(2) selene/luau-lsp/linter reclamar de 'undefined global' que você acha que é uma API nova, " +
-        "(3) o usuário pedir 'versão atual' ou 'latest API', " +
-        "(4) em modo Roblox, antes de usar qualquer API de serviço (TweenService, Players, ReplicatedStorage, etc). " +
-        "A pesquisa inclui a data atual do sistema para priorizar fontes recentes. " +
-        "Resultados ficam em cache por 7 dias. Sempre chame ANTES de escrever código com APIs que " +
-        "você não tem certeza absoluta que estão atualizadas - especialmente em Roblox onde APIs mudam toda semana.",
+        "Search web for current API docs.",
       parameters: {
         type: "object",
         properties: {
@@ -511,9 +480,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "escrever_spec",
       description:
-        "Escreve uma especificação técnica ANTES de implementar código. " +
-        "OBRIGATÓRIO para features complexas. Define: inputs, outputs, edge cases, constraints. " +
-        "A spec vira um contrato que a implementação deve satisfazer.",
+        "Write a technical spec before implementing.",
       parameters: {
         type: "object",
         properties: {
@@ -556,10 +523,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "criar_tdd",
       description:
-        "Registra que TDD está ativo: testes foram escritos ANTES da implementação. " +
-        "Use APENAS quando você já escreveu os testes (em arquivo .spec). " +
-        "Os testes viram oráculo - a implementação deve fazê-los passar. " +
-        "NÃO modifique os testes depois de criá-los.",
+        "Register TDD spec.",
       parameters: {
         type: "object",
         properties: {
@@ -577,7 +541,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "ler_estado",
       description:
-        "Lê o conteúdo atual do TASK_STATE.md e retorna como string formatada. " +
+        "Read TASK_STATE.md." +
         "Use após context compaction para recuperar o estado da tarefa.",
       parameters: { type: "object", properties: {} },
     },
@@ -587,9 +551,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "explorar_subagente",
       description:
-        "Delegate task to a read-only sub-agent with clean context. Returns summary only." +
-        "O sub-agente tem apenas tools de leitura (ler_arquivo, buscar_texto, buscar_arquivos, parse_ast) e faz até 8 chamadas. " +
-        "Retorna resumo de 500-2000 tokens. DISPONÍVEL APENAS com effort=high ou max (consome tokens da mesma API key).",
+        "Delegate task to a read-only sub-agent.",
       parameters: {
         type: "object",
         properties: {

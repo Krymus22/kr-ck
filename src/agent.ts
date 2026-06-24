@@ -292,7 +292,7 @@ function getExternalToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionToo
       type: "function",
       function: {
         name: "listar_tools",
-        description: "List all available external tools, optionally filtered by category",
+        description: "List available external tools.",
         parameters: {
           type: "object",
           properties: {
