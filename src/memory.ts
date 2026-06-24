@@ -425,13 +425,16 @@ export function findMatchingSkills(config: MemoryConfig, context: string): Skill
   const allSkills = listSkills(config);
   const contextLower = context.toLowerCase();
 
+  // Sprint C bug fix: skill.trigger e skill.description podem ser undefined.
+  // Usar optional chaining + fallback pra string vazia.
   return allSkills
     .filter(
       (skill) =>
-        skill.trigger.toLowerCase().includes(contextLower) ||
-        skill.description.toLowerCase().includes(contextLower)
+        ((skill as any).trigger ?? "").toLowerCase().includes(contextLower) ||
+        (skill.description ?? "").toLowerCase().includes(contextLower) ||
+        (skill.name ?? "").toLowerCase().includes(contextLower)
     )
-    .sort((a, b) => b.usageCount - a.usageCount);
+    .sort((a, b) => ((b as any).usageCount ?? 0) - ((a as any).usageCount ?? 0));
 }
 
 // --- Memory Injection --------------------------------------------------------
@@ -456,12 +459,18 @@ export function injectMemory(
   const globalMemory = readGlobalMemory(config);
 
   // Estimate tokens
+  // Sprint C bug fix: checkpoint?.contextSummary pode ser undefined.
   let totalChars =
-    projectMemory.length + globalMemory.length + (checkpoint?.contextSummary.length ?? 0);
+    projectMemory.length + globalMemory.length + ((checkpoint?.contextSummary ?? "").length);
 
   // Add relevant skills (limited by budget)
+  // Sprint C bug fix: s.steps pode ser undefined quando skill vem de JSON
+  // incompleto. Usar optional chaining + fallback pra array vazia.
   const relevantSkills = findMatchingSkills(config, projectMemory.slice(0, 500));
-  const skillsChars = relevantSkills.reduce((sum, s) => sum + s.description.length + s.steps.join("").length, 0);
+  const skillsChars = relevantSkills.reduce(
+    (sum, s) => sum + (s.description ?? "").length + ((s.steps ?? []).join("").length),
+    0,
+  );
   totalChars += skillsChars;
 
   // Add recent history (limited by budget)

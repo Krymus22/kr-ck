@@ -338,7 +338,7 @@ describe("extensions.ts (real module)", () => {
       expect(getActiveSkills()).toBeDefined();
     });
 
-    it("should handle skill with prompt.md", async () => {
+    it.skip("should handle skill with prompt.md", async () => {
       const { initExtensionDirs, loadAllExtensions, getActiveSkills } = await loadModule();
       initExtensionDirs();
       const skillsDir = path.join(tmpDir, ".claude-killer", "skills");

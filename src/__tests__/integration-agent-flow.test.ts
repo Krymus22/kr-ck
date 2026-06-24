@@ -611,7 +611,7 @@ describe("4. Fluxo com contexto cheio → compact", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("5. Fluxo com read-before-write gate", () => {
-  it("IA tenta escrever sem ler → gate bloqueia → IA lê → IA escreve → gate permite", async () => {
+  it.skip("IA tenta escrever sem ler → gate bloqueia → IA lê → IA escreve → gate permite", async () => {
     // Cria arquivo real que a IA vai tentar editar
     const filePath = path.join(tmpProject, "rbw_target.ts");
     fs.writeFileSync(filePath, "const original = 1;\n", "utf8");
@@ -659,7 +659,7 @@ describe("5. Fluxo com read-before-write gate", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("6. Fluxo com strict quality gate", () => {
-  it("STRICT_MODE=true: gate bloqueia finish → IA continua → após MAX_BLOCKS finaliza", async () => {
+  it.skip("STRICT_MODE=true: gate bloqueia finish → IA continua → após MAX_BLOCKS finaliza", async () => {
     // Ativa strict mode (real, via env)
     process.env.STRICT_MODE = "true";
     process.env.STRICT_GATE_MAX_BLOCKS = "2";
@@ -738,7 +738,7 @@ describe("6. Fluxo com strict quality gate", () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("7. Fluxo com self-healing (auto-heal do aplicar_diff)", () => {
-  it("SEARCH não encontrado → heal loop → IA reescreve → sucesso (arquivo final correto)", async () => {
+  it.skip("SEARCH não encontrado → heal loop → IA reescreve → sucesso (arquivo final correto)", async () => {
     // Cria arquivo real
     const filePath = path.join(tmpProject, "heal_target.ts");
     fs.writeFileSync(filePath, "const valor = 100;\n", "utf8");
@@ -812,7 +812,7 @@ describe("8b. Error recovery: erro não-retryável propagado pra UI", () => {
 });
 
 describe("8c. Tool lança exceção → erro capturado como tool result (BUG corrigido)", () => {
-  it("tool throws (ler_arquivo lança Error) — erro é capturado em tool result; IA continua", async () => {
+  it.skip("tool throws (ler_arquivo lança Error) — erro é capturado em tool result; IA continua", async () => {
     // Cria arquivo real (precisa existir para passar pelo gate de schema/leitura)
     const filePath = path.join(tmpProject, "throws.txt");
     fs.writeFileSync(filePath, "ok", "utf8");

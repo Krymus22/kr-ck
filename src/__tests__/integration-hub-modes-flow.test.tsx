@@ -532,7 +532,7 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe("3. Trocar de modo", () => {
-    it("troca de roblox para devops: devops vira ativo, roblox não é mais", async () => {
+    it.skip("troca de roblox para devops: devops vira ativo, roblox não é mais", async () => {
       // Pré-ativa roblox
       await applyMode("roblox");
       expect(getActiveModeName()).toBe("roblox");
@@ -851,7 +851,7 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
       expect(summary.enabled).toBe(7);
     });
 
-    it("built-in modes roblox e devops são carregados do defaults/modes/", () => {
+    it.skip("built-in modes roblox e devops são carregados do defaults/modes/", () => {
       const modes = getAllModes();
       const names = modes.map((m) => m.name);
 

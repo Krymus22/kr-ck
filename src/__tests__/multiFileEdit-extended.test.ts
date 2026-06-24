@@ -137,17 +137,17 @@ describe("multiFileEdit-extended: validateBatch (validação interna do prepareE
 });
 
 describe("multiFileEdit-extended: edge cases", () => {
-  it("lida com request cujo edit.search é string vazia em arquivo NÃO-VAZIO (nenhuma substituição, mas sucesso)", () => {
+  it("lida com request cujo edit.search é string vazia em arquivo NÃO-VAZIO (append)", () => {
     fs.writeFileSync(path.join(TEST_DIR, "empty-search.ts"), "HELLO\n", "utf8");
     const requests: FileEditRequest[] = [
       { filePath: path.join(TEST_DIR, "empty-search.ts"), edits: [{ search: "", replace: "PREFIX_" }] },
     ];
     const result = multiFileEdit(requests);
-    // Comportamento do applyEdits: search="" só substitui quando content é vazio (cria novo).
-    // Em arquivo não-vazio, edit é pulado e resultado é sucesso sem mudanças.
+    // Sprint C (BUG-V): search="" em arquivo não-vazio agora faz APPEND.
+    // Antes era skip (0 replacements). Agora: "HELLO\n" + "PREFIX_" = "HELLO\nPREFIX_"
     expect(result.success).toBe(true);
     const content = fs.readFileSync(path.join(TEST_DIR, "empty-search.ts"), "utf8");
-    expect(content).toBe("HELLO\n");
+    expect(content).toBe("HELLO\nPREFIX_");
   });
 
   it("não altera arquivos quando request tem edits vazio (substituições vazias)", () => {

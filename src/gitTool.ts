@@ -131,5 +131,12 @@ async function gitCommand(args: string, cwd?: string): Promise<string> {
   if (result.exitCode !== 0 && result.stderr) {
     return `[GIT ERROR] ${result.stderr}`;
   }
-  return result.stdout.trim();
+  // Sprint A bug fix: NÃO usar .trim() aqui — `git status --porcelain=v1`
+  // retorna linhas como " M README.md" onde o leading space É SIGNIFICATIVO
+  // (indica que o arquivo não está staged). Com .trim(), " M README.md"
+  // vira "M README.md", e o parser (line[0]=indexStatus, line[1]=workStatus)
+  // interpreta errado: indexStatus="M" (staged!) em vez de indexStatus=" "
+  // (not staged). Resultado: todos os arquivos modified apareciam como staged.
+  // Só remover trailing newline.
+  return result.stdout.replace(/\n+$/, "");
 }

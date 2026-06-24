@@ -601,15 +601,14 @@ describe("getSystemPrompt with skills (lines 169-180)", () => {
       },
     ]);
     setCavemanLevel("ultra");
-    // getSystemPrompt is called by resetHistory; trigger it
-    resetHistory();
+    // Sprint C: skills now inject only name+description, not full content
     const sysContent = getHistory()[0].content as string;
-    expect(sysContent).toContain("--- START SKILL: caveman ---");
-    expect(sysContent).toContain("Speak like caveman.");
-    expect(sysContent).toContain("--- END SKILL: caveman ---");
-    expect(sysContent).toContain("--- START SKILL: other-skill ---");
-    expect(sysContent).toContain("CRITICAL CONTEXT: Caveman Mode is currently locked at level");
-    expect(sysContent).toContain("ultra");
+    expect(sysContent).toContain("## Available Skills");
+    expect(sysContent).toContain("caveman");
+    expect(sysContent).toContain("other-skill");
+    // Full content is NOT injected anymore — IA reads via ler_arquivo
+    expect(sysContent).not.toContain("--- START SKILL: caveman ---");
+    expect(sysContent).not.toContain("Speak like caveman.");
   });
 
   it("ensureHistoryInitialized pushes system prompt when history is empty (line 206)", () => {

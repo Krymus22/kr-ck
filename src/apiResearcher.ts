@@ -208,7 +208,7 @@ interface SearchResult {
   snippet: string;
 }
 
-async function webSearch(query: string, num: number = 5): Promise<SearchResult[]> {
+export async function webSearch(query: string, num: number = 5): Promise<SearchResult[]> {
   // Try z-ai CLI first (we know it's installed in this env)
   try {
     const tmpFile = path.join(os.tmpdir(), `claude-killer-search-${Date.now()}.json`);
@@ -263,7 +263,7 @@ async function webSearch(query: string, num: number = 5): Promise<SearchResult[]
  * Read a web page and extract its text content.
  * Uses z-ai CLI's page_reader function if available.
  */
-async function webRead(url: string): Promise<string> {
+export async function webRead(url: string): Promise<string> {
   try {
     const tmpFile = path.join(os.tmpdir(), `claude-killer-page-${Date.now()}.json`);
     const result = await runCmd(

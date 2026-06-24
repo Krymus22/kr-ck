@@ -173,16 +173,15 @@ export function getSystemPrompt(): string {
     return injectPatterns(basePrompt);
   }
 
-  let prompt = `${basePrompt}\n\nAvailable Skills / Workflows you must follow when instructed or relevant:\n`;
+  // Sprint C: inject ONLY skill name + description (not full content).
+  // IA can read the full skill file with ler_arquivo when needed.
+  // This reduces context from ~20k to ~500 tokens for 17 skills.
+  let prompt = `${basePrompt}\n\n## Available Skills\n`;
+  prompt += `Use ler_arquivo to read the full skill file when you need details.\n\n`;
   for (const skill of skills) {
-    prompt += `\n--- START SKILL: ${skill.name} ---\n`;
-    prompt += `Description: ${skill.description}\n`;
-    prompt += `Instructions:\n${skill.content}\n`;
-    // If caveman mode is active on this skill, reinforce the instruction
-    if (skill.name === "caveman" && currentCavemanLevel) {
-      prompt += `\nCRITICAL CONTEXT: Caveman Mode is currently locked at level "${currentCavemanLevel}" for this session. You MUST obey the specific rules of level "${currentCavemanLevel}".\n`;
-    }
-    prompt += `--- END SKILL: ${skill.name} ---\n`;
+    // Extract a short description: try skill.description, then skill.name
+    const desc = skill.description?.slice(0, 100) ?? "";
+    prompt += `- ${skill.name}: ${desc}\n`;
   }
   return injectPatterns(prompt);
 }

@@ -8,6 +8,14 @@ Thumbs.db
 .scannerwork/
 sonar-issues.txt
 sonar-remaining.txt
+sonar-project.properties
 coverage/
 .rollback/
-.claude-killer/TASK_STATE.md
+.claude-killer/
+__test_aplicardir__/
+__test_lerdir__/
+scratch/
+e2e/
+Z:\nonexistent\
+tool-results/
+Z*

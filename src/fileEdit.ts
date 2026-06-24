@@ -33,6 +33,13 @@ export function applyEdits(content: string, edits: EditOperation[]): EditResult 
       if (currentContent === "") {
         currentContent = edit.replace;
         totalReplacements += 1;
+      } else {
+        // Sprint C bug fix (BUG-V): se search é vazio mas o arquivo tem
+        // conteúdo, fazer APPEND do replace ao final. Antes, o código
+        // fazia `continue` (pula) e nada era adicionado — a IA achava
+        // que funcionou mas o arquivo não mudava.
+        currentContent = currentContent.replace(/\n?$/, "\n") + edit.replace;
+        totalReplacements += 1;
       }
       continue;
     }
@@ -378,8 +385,21 @@ export async function editFile(
     log.debug(`fileEdit: post-edit hooks skipped: ${(err as Error).message}`);
   }
 
-  // Build success message - append impact hint + hook results
-  let msg = `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
+  // Build success/warning message - append impact hint + hook results
+  // Sprint C bug fix (BUG-U): quando 0 replacements, retorna WARNING em vez
+  // de SUCESSO. Antes, a IA via "SUCESSO 0 substituições" e achava que
+  // funcionou, mas nada foi alterado. Agora retorna erro claro pra IA
+  // entender que o search string não foi encontrado.
+  let msg: string;
+  if (result.replacements === 0) {
+    msg = `[AVISO] 0 substituições aplicadas em ${resolved}. ` +
+      `Nenhuma ocorrência do texto de busca foi encontrada. ` +
+      `Verifique se o 'search' corresponde exatamente ao conteúdo do arquivo. ` +
+      `Use ler_arquivo para ver o conteúdo atual antes de editar.`;
+    log.warn(`fileEdit: 0 replacements for ${resolved} — search string not found`);
+  } else {
+    msg = `[SUCESSO] ${result.replacements}substituições(s) aplicada(s) em ${resolved}`;
+  }
   if (impactHint) {
     msg += `\n\n${impactHint}`;
   }

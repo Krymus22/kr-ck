@@ -226,8 +226,23 @@ function getMergedTools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
  * Public accessor for the merged tool list (used by sub-agents).
  * Includes TOOL_DEFINITIONS + external tools + think tool + MCP tools,
  * all with poka-yoke expanded descriptions.
+ *
+ * Sprint A bug fix: recarrega activeManifests se estiver vazio. Antes,
+ * chamar getMergedToolsPublic() ANTES de runAgentLoop() retornava lista
+ * sem manifest tools (rojo_build, selene_lint, etc) porque
+ * activeManifests só era setado dentro de runAgentLoop. Isso causava
+ * bug onde sub-agentes não viam as tools de manifest.
  */
 export function getMergedToolsPublic(): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  // Sprint A: ensure activeManifests is loaded
+  if (activeManifests.length === 0) {
+    try {
+      activeManifests = loadActiveManifests();
+      log.debug(`[AGENT] getMergedToolsPublic: loaded ${activeManifests.length} manifests (lazy)`);
+    } catch (err) {
+      log.debug(`[AGENT] getMergedToolsPublic: failed to load manifests: ${(err as Error).message}`);
+    }
+  }
   return getMergedTools();
 }
 
@@ -247,6 +262,16 @@ export async function dispatchToolCallPublic(
   toolCall: ToolCall,
   healRetry: number = 0
 ): Promise<ToolResult> {
+  // Sprint A: ensure activeManifests is loaded (otherwise manifest tools
+  // like rojo_build/selene_lint would be unknown to dispatchToolCall)
+  if (activeManifests.length === 0) {
+    try {
+      activeManifests = loadActiveManifests();
+      log.debug(`[AGENT] dispatchToolCallPublic: loaded ${activeManifests.length} manifests (lazy)`);
+    } catch (err) {
+      log.debug(`[AGENT] dispatchToolCallPublic: failed to load manifests: ${(err as Error).message}`);
+    }
+  }
   return dispatchToolCall(toolCall, healRetry);
 }
 
@@ -301,58 +326,12 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   "ler_arquivo": async (args) => {
-    const result = await lerArquivo({ caminho: asString(args.caminho) });
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "executar_comando": async (args) => {
-    const result = await executarComando({ comando: asString(args.comando) });
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "aplicar_diff": async (args, toolCall, healRetry) => {
-    const result = await aplicarDiff({
-      caminho: asString(args.caminho),
-      bloco_diff: asString(args.bloco_diff),
-    });
-
-    if (!result.written && healRetry < config.maxHealRetries) {
-      log.warn(
-        `Falha ao aplicar diff ou guardrail rejeitou o código. Auto-cura iniciada ` +
-          `(tentativa ${healRetry + 1}/${config.maxHealRetries})...`
-      );
-      history.addToolResult(toolCall.id, result.toolMessage);
-      history.optimizeContext();
-      const allTools = getMergedTools();
-      const apiResponse = await chat(history.getHistory(), undefined, undefined, undefined, allTools);
-      const choice = apiResponse.choices[0];
-      if (!choice) throw new Error("Empty response from API during auto-heal");
-      history.addRawAssistantMessage(choice.message);
-
-      if (choice.finish_reason === "tool_calls" && choice.message.tool_calls?.length) {
-        const nextCall = choice.message.tool_calls[0];
-        if (nextCall?.function.name === "aplicar_diff") {
-          return dispatchToolCall(nextCall, healRetry + 1);
-        }
-        const sub = await dispatchToolCall(nextCall, 0);
-        return { ...sub, usedHeal: true };
-      }
-
-      const finalText = choice.message.content ?? "(sem resposta)";
-      log.warn("Claude-Killer encerrou o loop de auto-cura sem reescrever o arquivo.");
-      return { resultStr: finalText, usedHeal: true };
-    }
-
-    if (!result.written && healRetry >= config.maxHealRetries) {
-      log.error(`Limite de tentativas de auto-cura atingido (${config.maxHealRetries}). Diff NÃO foi aplicado.`);
-    }
-
-    return { resultStr: result.toolMessage, usedHeal: healRetry > 0 };
-  },
-
-  "ler_arquivo_avancado": async (args) => {
+    // Sprint C: merged ler_arquivo + ler_arquivo_avancado into one tool.
+    // Supports offset/limit/grep (optional) + backwards compat with caminho.
+    const filePath = asString(args.path ?? args.caminho);
+    const { readFileAdvanced } = await import("./fileRead.js");
     const result = readFileAdvanced({
-      path: asString(args.path ?? args.caminho),
+      path: filePath,
       offset: args.offset as number | undefined,
       limit: args.limit as number | undefined,
       grep: args.grep as string | undefined,
@@ -361,13 +340,43 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result, usedHeal: false };
   },
 
+  "executar_comando": async (args) => {
+    const result = await executarComando({ comando: asString(args.comando) });
+    return { resultStr: result, usedHeal: false };
+  },
+
   "editar_arquivo": async (args) => {
-    const edits = args.edits as EditOperation[] | undefined;
+    const filePath = asString(args.path ?? args.caminho);
+    // Sprint C bug fix (BUG-R): salvar backup no rollbackStore ANTES de editar.
+    // Antes, desfazer_edicao não encontrava backup porque editar_arquivo nunca
+    // chamava saveBackup — só fazia .bak file se options.backup=true (que não
+    // era passado). Agora salva no rollbackStore automaticamente.
+    try {
+      const { saveBackup } = await import("./rollbackStore.js");
+      const resolved = await import("node:path").then((p) => p.resolve(filePath));
+      if (await import("node:fs").then((fs) => fs.existsSync(resolved))) {
+        const content = await import("node:fs").then((fs) => fs.readFileSync(resolved, "utf8"));
+        saveBackup(resolved, content, "editar_arquivo");
+      }
+    } catch {
+      // rollbackStore não disponível — não bloqueia o edit
+    }
+
+    // Sprint C bug fix (BUG-T): algumas IAs (especialmente Llama) passam
+    // 'edits' como string JSON em vez de array nativo. Auto-parse se string.
+    let edits = args.edits as EditOperation[] | undefined;
+    if (typeof edits === "string") {
+      try {
+        edits = JSON.parse(edits);
+      } catch {
+        // não é JSON válido — deixa como está pra schema validation pegar
+      }
+    }
     if (edits && Array.isArray(edits)) {
       const result = await editFile(
-        asString(args.path ?? args.caminho),
+        filePath,
         edits,
-        { createIfMissing: args.createIfMissing as boolean | undefined }
+        { createIfMissing: args.createIfMissing === true || args.createIfMissing === "true" }
       );
       readOnlyCache.invalidate("ler_arquivo", { caminho: args.path ?? args.caminho });
       return { resultStr: result, usedHeal: false };
@@ -375,14 +384,53 @@ const toolHandlers: Record<string, ToolHandler> = {
     const edit: EditOperation = {
       search: asString(args.search ?? args.oldString),
       replace: asString(args.replace ?? args.newString),
-      all: args.all as boolean | undefined,
+      all: args.all === true || args.all === "true",
     };
     const result = await editFile(
-      asString(args.path ?? args.caminho),
+      filePath,
       [edit],
-      { createIfMissing: args.createIfMissing as boolean | undefined }
+      { createIfMissing: args.createIfMissing === true || args.createIfMissing === "true" }
     );
     return { resultStr: result, usedHeal: false };
+  },
+
+  "buscar_web": async (args) => {
+    const query = asString(args.query);
+    if (!query) {
+      return { resultStr: "[ERRO] 'query' é obrigatório.", usedHeal: false };
+    }
+    const maxResults = (args.maxResults as number) ?? 5;
+    try {
+      const { webSearch } = await import("./apiResearcher.js");
+      const results = await webSearch(query, maxResults);
+      if (results.length === 0) {
+        return { resultStr: `[INFO] Nenhum resultado encontrado para: "${query}"`, usedHeal: false };
+      }
+      const formatted = results.map((r: any, i: number) =>
+        `${i + 1}. ${r.title ?? "(sem título)"}\n   URL: ${r.url}\n   ${r.snippet ?? r.description ?? ""}`
+      ).join("\n\n");
+      return { resultStr: `[RESULTADOS WEB] ${results.length} resultado(s) para "${query}":\n\n${formatted}`, usedHeal: false };
+    } catch (err) {
+      return { resultStr: `[ERRO] Falha na busca web: ${(err as Error).message}`, usedHeal: false };
+    }
+  },
+
+  "ler_url": async (args) => {
+    const url = asString(args.url);
+    if (!url) {
+      return { resultStr: "[ERRO] 'url' é obrigatório.", usedHeal: false };
+    }
+    const maxLength = (args.maxLength as number) ?? 10000;
+    try {
+      const { webRead } = await import("./apiResearcher.js");
+      const content = await webRead(url);
+      const truncated = content.length > maxLength
+        ? content.slice(0, maxLength) + `\n\n[CONTEÚDO TRUNCADO — ${content.length} chars total, mostrando ${maxLength}]`
+        : content;
+      return { resultStr: truncated || `[ERRO] Não foi possível extrair conteúdo de: ${url}`, usedHeal: false };
+    } catch (err) {
+      return { resultStr: `[ERRO] Falha ao ler URL: ${(err as Error).message}`, usedHeal: false };
+    }
   },
 
   "buscar_arquivos": async (args) => {
@@ -411,74 +459,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: output, usedHeal: false };
   },
 
-  "git_status": async (args) => {
-    const status = await gitStatus(args.cwd as string | undefined);
-    const output = [
-      `Branch: ${status.branch}`,
-      status.ahead > 0 ? `Ahead: ${status.ahead}` : "",
-      status.behind > 0 ? `Behind: ${status.behind}` : "",
-      status.staged.length > 0 ? `Staged: ${status.staged.join(", ")}` : "",
-      status.modified.length > 0 ? `Modified: ${status.modified.join(", ")}` : "",
-      status.untracked.length > 0 ? `Untracked: ${status.untracked.join(", ")}` : "",
-      status.conflicted.length > 0 ? `Conflicted: ${status.conflicted.join(", ")}` : "",
-    ].filter(Boolean).join("\n");
-    return { resultStr: output ?? "Clean working tree.", usedHeal: false };
-  },
-
-  "git_diff": async (args) => {
-    const result = await gitDiff(
-      args.cwd as string | undefined,
-      args.file as string | undefined,
-      args.staged as boolean | undefined
-    );
-    return { resultStr: result ?? "No changes.", usedHeal: false };
-  },
-
-  "git_log": async (args) => {
-    const result = await gitLog(
-      args.cwd as string | undefined,
-      (args.count as number) ?? 10,
-      args.file as string | undefined
-    );
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_commit": async (args) => {
-    const result = await gitCommit(
-      asString(args.message),
-      args.cwd as string | undefined,
-      args.files as string[] | undefined
-    );
-    readOnlyCache.invalidate("git_status");
-    readOnlyCache.invalidate("git_log");
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_blame": async (args) => {
-    const result = await gitBlame(
-      asString(args.file ?? args.filePath),
-      args.cwd as string | undefined,
-      args.startLine as number | undefined,
-      args.endLine as number | undefined
-    );
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_show": async (args) => {
-    const result = await gitShow(asString(args.commitHash), args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_branch": async (args) => {
-    const result = await gitBranch(args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_checkout": async (args) => {
-    const result = await gitCheckout(asString(args.branch), args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
-  },
-
   "editar_multi_arquivos": async (args) => {
     const requests = args.requests as FileEditRequest[] | undefined;
     if (!requests || !Array.isArray(requests)) {
@@ -492,27 +472,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: output, usedHeal: false };
   },
 
-  "salvar_sessao": async (args) => {
-    const id = saveSession(args.id as string | undefined);
-    return { resultStr: `[SUCESSO] Sessão salva: ${id}`, usedHeal: false };
-  },
-
-  "carregar_sessao": async (args) => {
-    const ok = loadSession(asString(args.id));
-    return {
-      resultStr: ok ? `[SUCESSO] Sessão carregada: ${String(args.id)}` : `[ERRO] Sessão não encontrada: ${String(args.id)}`,
-      usedHeal: false,
-    };
-  },
-
-  "listar_sessoes": async () => {
-    const sessions = listSessions();
-    const output = sessions.length === 0
-      ? "Nenhuma sessão salva."
-      : sessions.map((s) => `  ${s.id} (${s.messageCount} msgs, ${s.lastModified})`).join("\n");
-    return { resultStr: output, usedHeal: false };
-  },
-
   "parse_ast": async (args) => {
     const result = await parseFile(asString(args.path ?? args.filePath));
     const output = [
@@ -523,23 +482,6 @@ const toolHandlers: Record<string, ToolHandler> = {
       `Imports: ${result.imports.length}`,
       ...result.imports.map((i: { module: string }) => `  ${i.module}`),
     ].join("\n");
-    return { resultStr: output, usedHeal: false };
-  },
-
-  "executar_paralelo": async (args) => {
-    const toolNames = args.tools as string[] | undefined;
-    const toolArgsList = args.args as Record<string, unknown>[] | undefined;
-    if (!toolNames?.length || !toolArgsList?.length || toolNames.length !== toolArgsList.length) {
-      return { resultStr: "[ERRO] 'tools' and 'args' arrays required", usedHeal: false };
-    }
-    const parallelTools: ParallelToolCall[] = toolNames.map((tn, i) => ({
-      id: `parallel_${i}`,
-      name: tn,
-      args: toolArgsList[i],
-      execute: async () => `[Placeholder for ${tn}]`,
-    }));
-    const results = await executeParallelTools(parallelTools);
-    const output = results.map((r) => `${r.name}: ${r.success ? r.result.slice(0, 100) : r.error}`).join("\n");
     return { resultStr: output, usedHeal: false };
   },
 
@@ -558,25 +500,6 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   // --- External Tools ----------------------------------------------------
-
-  "executar_tool": async (args) => {
-    const toolName = asString(args.tool);
-    const toolArgs = (args.args as Record<string, any>) ?? {};
-    const cwd = args.dir ? asString(args.dir) : undefined;
-    
-    const executor = getExecutor();
-    const result = await executor.execute(toolName, toolArgs, { cwd });
-    
-    const output = [
-      result.success ? "OK Sucesso" : "X Falha",
-      result.output,
-      result.errors?.length ? `Erros:\n${result.errors.join("\n")}` : "",
-      result.suggestions?.length ? `Sugestões:\n${result.suggestions.join("\n")}` : "",
-      result.duration ? `Duração: ${result.duration}ms` : ""
-    ].filter(Boolean).join("\n");
-    
-    return { resultStr: output, usedHeal: false };
-  },
 
   "listar_tools": async (args) => {
     const registry = getRegistry();
@@ -758,36 +681,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  "criar_plano": async (args) => {
-    const passos = args.passos as string[] | undefined;
-    if (!passos || !Array.isArray(passos) || passos.length === 0) {
-      return { resultStr: "[ERRO] 'passos' é obrigatório e deve ser um array não vazio.", usedHeal: false };
-    }
-    const { createPlan, formatPlan } = await import("./planExecutor.js");
-    createPlan(passos);
-    return {
-      resultStr: `[SUCESSO] Plano criado com ${passos.length} passo(s).\n\n${formatPlan()}`,
-      usedHeal: false,
-    };
-  },
-
-  "marcar_passo": async (args) => {
-    const indice = args.indice as number | undefined;
-    const feito = args.feito as boolean | undefined;
-    if (indice === undefined || feito === undefined) {
-      return { resultStr: "[ERRO] 'indice' e 'feito' são obrigatórios.", usedHeal: false };
-    }
-    const { markStep, formatPlan } = await import("./planExecutor.js");
-    const ok = markStep(indice, feito);
-    if (!ok) {
-      return { resultStr: `[ERRO] Não foi possível marcar o passo ${indice}. Plano não existe ou índice inválido.`, usedHeal: false };
-    }
-    return {
-      resultStr: `[SUCESSO] Passo ${indice} marcado como ${feito ? "concluído" : "reaberto"}.\n\n${formatPlan()}`,
-      usedHeal: false,
-    };
-  },
-
   "escrever_spec": async (args) => {
     const nome = asString(args.nome);
     const descricao = asString(args.descricao);
@@ -816,38 +709,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     const { registerTDD, formatTDD } = await import("./tddMode.js");
     registerTDD(arquivoTeste, arquivoImpl, linguagem, (args.casos as string[]) ?? []);
     return { resultStr: `[SUCESSO] TDD registrado.\n\n${formatTDD()}`, usedHeal: false };
-  },
-
-  "capturar_snapshot": async (args) => {
-    const funcao = asString(args.funcao);
-    const arquivo = asString(args.arquivo);
-    const inputs = asString(args.inputs);
-    if (!funcao || !arquivo || !inputs) {
-      return { resultStr: "[ERRO] 'funcao', 'arquivo' e 'inputs' são obrigatórios.", usedHeal: false };
-    }
-    const { captureBeforeSnapshot } = await import("./snapshotTesting.js");
-    const result = await captureBeforeSnapshot(funcao, arquivo, inputs);
-    return { resultStr: result.message, usedHeal: false };
-  },
-
-  "executar_workflow": async (args) => {
-    const script = asString(args.script);
-    if (!script) {
-      return { resultStr: "[ERRO] 'script' é obrigatório.", usedHeal: false };
-    }
-    const { validateWorkflow, executeWorkflow } = await import("./dynamicWorkflow.js");
-    const validation = validateWorkflow(script);
-    if (!validation.valid) {
-      return { resultStr: `[ERRO] Workflow inválido: ${validation.error}`, usedHeal: false };
-    }
-    const result = await executeWorkflow(script);
-    if (!result.success) {
-      return { resultStr: `[ERRO] Workflow falhou: ${result.error}\n\nOutput:\n${result.output}`, usedHeal: false };
-    }
-    return {
-      resultStr: `[SUCESSO] Workflow executado em ${result.durationMs}ms (${result.stepsExecuted} passos).\n\n${result.output}`,
-      usedHeal: false,
-    };
   },
 
   "ler_estado": async () => {
@@ -887,15 +748,19 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   // --- Multi-key pool status (IDEIA Fase 1) ------------------------------
-  "status_pool": async () => {
-    if (getPoolSize() === 0) {
-      return {
-        resultStr: "[POOL] Modo single-key (apenas NVIDIA_API_KEY configurada). Para ativar multi-key, defina NVIDIA_API_KEYS (comma-separated).",
-        usedHeal: false,
-      };
+  // Sprint C bug fix (BUG-S): todo_write estava definido em TOOL_DEFINITIONS
+  // mas NÃO tinha handler. IA via a tool, chamava, e recebia "Ferramenta
+  // desconhecida". Agora delega para todo.todoWrite().
+  "todo_write": async (args) => {
+    const { todoWrite } = await import("./todo.js");
+    const items = args.items;
+    if (!Array.isArray(items)) {
+      return { resultStr: "[ERRO] 'items' deve ser um array.", usedHeal: false };
     }
-    return { resultStr: formatPoolStats(), usedHeal: false };
+    const result = todoWrite(items as any);
+    return { resultStr: result, usedHeal: false };
   },
+
 };
 
 // --- Tool Dispatcher ----------------------------------------------------------
@@ -1042,6 +907,10 @@ async function resolvePreCallHooks(name: string, rawArgs: Record<string, unknown
 
 /** Run schema validation, poka-yoke, and read-before-write gates. Returns an error string if blocked, else null. */
 function runDispatchGates(name: string, args: Record<string, unknown>): string | null {
+  // Sprint C bug fix (BUG-T): auto-parse args que algumas IAs (Llama) passam
+  // como string JSON em vez de tipo nativo. Faz isso ANTES do schema gate.
+  autoParseArgs(name, args);
+
   const schemaBlock = runSchemaGate(name, args);
   if (schemaBlock) return schemaBlock;
 
@@ -1052,6 +921,54 @@ function runDispatchGates(name: string, args: Record<string, unknown>): string |
   if (!rbwResult.allowed) return rbwResult.message ?? "[BLOCKED] Read-before-write check failed.";
 
   return null;
+}
+
+/**
+ * Sprint C (BUG-T): Auto-parse args que algumas IAs passam como string JSON.
+ * - editar_arquivo: 'edits' deve ser array mas IA passa como string JSON
+ *  mas IA passa como string JSON
+ * - editar_multi_arquivos: 'requests' deve ser array mas IA passa como string
+ * - Boolean fields: 'createIfMissing', 'all' passados como "true"/"false" string
+ * Modifica args in-place.
+ */
+function autoParseArgs(name: string, args: Record<string, unknown>): void {
+  // Array fields que IAs costumam passar como string JSON
+  const arrayFields: Record<string, string[]> = {
+    "editar_arquivo": ["edits"],
+    "editar_multi_arquivos": ["requests"],
+    "todo_write": ["items"],
+    "atualizar_estado": ["done", "todo", "decisions", "bugs", "dependencies"],
+  };
+
+  const fields = arrayFields[name];
+  if (fields) {
+    for (const field of fields) {
+      const val = args[field];
+      if (typeof val === "string" && val.trim().startsWith("[")) {
+        try {
+          args[field] = JSON.parse(val);
+          log.debug(`[AUTO-PARSE] Parsed ${name}.${field} from string to array`);
+        } catch {
+          // não é JSON válido — deixa como está
+        }
+      }
+    }
+  }
+
+  // Boolean fields que IAs passam como string "true"/"false"
+  const boolFields: Record<string, string[]> = {
+    "editar_arquivo": ["createIfMissing", "all"],
+    "editar_multi_arquivos": ["createIfMissing"],
+  };
+
+  const bFields = boolFields[name];
+  if (bFields) {
+    for (const field of bFields) {
+      const val = args[field];
+      if (val === "true") args[field] = true;
+      else if (val === "false") args[field] = false;
+    }
+  }
 }
 
 function runSchemaGate(name: string, args: Record<string, unknown>): string | null {
@@ -1079,7 +996,27 @@ function trackFileAccess(name: string, args: Record<string, unknown>): void {
 }
 
 async function executeHandler(name: string, args: Record<string, unknown>, toolCall: ToolCall, healRetry: number): Promise<ToolResult> {
-  const handler = toolHandlers[name];
+  // Sprint C bug fix (BUG-Z): algumas IAs (deepseek, mistral) inventam nomes
+  // de tools diferentes dos definidos no schema. Mapear aliases comuns.
+  const TOOL_ALIASES: Record<string, string> = {
+    "buscar_conteudo": "buscar_texto",
+    "buscar_texto_no_projeto": "buscar_texto",
+    "grep": "buscar_texto",
+    "search": "buscar_texto",
+    "find_files": "buscar_arquivos",
+    "glob": "buscar_arquivos",
+    "list_files": "buscar_arquivos",
+    "read_file": "ler_arquivo",
+    "read": "ler_arquivo",
+    "write_file": "editar_arquivo",
+    "write": "editar_arquivo",
+    "edit": "editar_arquivo",
+    "run_command": "executar_comando",
+    "shell": "executar_comando",
+    "think": "pensar",
+  };
+  const resolvedName = TOOL_ALIASES[name] ?? name;
+  const handler = toolHandlers[resolvedName];
   if (handler) {
     try {
       return await handler(args, toolCall, healRetry);
@@ -1124,24 +1061,23 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
 // --- Tool Call Processing -----------------------------------------------------
 
 const READ_ONLY_TOOLS = new Set([
-  "ler_arquivo", "ler_arquivo_avancado", "buscar_arquivos", "buscar_texto",
+  "ler_arquivo", "buscar_arquivos", "buscar_texto",
   "git_status", "git_log", "git_diff", "parse_ast",
   // IDEIA 5: explorar_subagente is read-only (only reads code, never edits)
   // and benefits from parallel execution with other read-only tools.
   "explorar_subagente",
   // Multi-key pool status is read-only and side-effect-free.
-  "status_pool",
   // Task state read is read-only.
   "ler_estado",
 ]);
 
 const FILE_TOOLS = new Set([
-  "aplicar_diff", "editar_arquivo", "editar_multi_arquivos",
+  "editar_arquivo", "editar_multi_arquivos",
 ]);
 
 /** File-mutating tools - used to populate turnTouchedFiles for the strict quality gate */
 const WRITE_FILE_TOOLS = new Set([
-  "aplicar_diff", "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao",
+  "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao",
 ]);
 
 async function executeReadOnlyCallsInParallel(toolCalls: ToolCall[]): Promise<void> {
@@ -1187,7 +1123,7 @@ async function executeToolCallsSequentially(toolCalls: ToolCall[]): Promise<void
  * Builds a human-readable activity label for a tool call.
  * Examples:
  *   ler_arquivo { path: "/foo.ts" }            ->  "ler_arquivo /foo.ts"
- *   aplicar_diff { path: "/foo.ts" }            ->  "aplicar_diff /foo.ts"
+ *   editar_arquivo { path: "/foo.ts" }            ->  "editar_arquivo /foo.ts"
  *   executar_comando { comando: "npm test" }    ->  "executar_comando: npm test"
  *   pensar { pensamento: "..." }                ->  "pensar"
  */
@@ -1278,7 +1214,7 @@ function checkAutoHeal(toolCalls: ToolCall[]): void {
         if (content && isTestFailure(content)) {
           history.addSystemMessage(
             `[AUTO-HEAL] A ferramenta "${tc.function.name}" retornou falhas. ` +
-            `Analise o erro acima, corrija o código usando aplicar_diff, e rode os testes novamente. ` +
+            `Analise o erro acima, corrija o código usando editar_arquivo, e rode os testes novamente. ` +
             `Máximo de ${MAX_AUTO_HEAL_RETRIES} tentativas automáticas.`
           );
           log.debug(`Auto-heal triggered for ${tc.function.name}`);
@@ -1450,6 +1386,14 @@ async function checkPlanCompletion(): Promise<boolean> {
   try {
     const { hasIncompletePlan, formatPlan } = await import("./planExecutor.js");
     if (hasIncompletePlan()) {
+      // Sprint C bug fix (BUG-AA): só bloquear finish se a IA realmente
+      // tocou arquivos (fez trabalho). Se a IA só foi pedida pra CRIAR
+      // o plano (sem executar), não faz sentido bloquear — a tarefa era
+      // criar o plano, não completá-lo.
+      if (turnTouchedFiles.size === 0) {
+        log.debug(`[PLAN] Plan has incomplete steps but no files touched — allowing finish (plan creation task)`);
+        return false;
+      }
       log.warn(`[PLAN] Blocking finish - plan has incomplete steps`);
       history.addSystemMessage(`${formatPlan()}\n\nNÃO finalize até completar TODOS os passos do plano. Continue trabalhando.`);
       return true;
@@ -1542,9 +1486,10 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   if (gateBlocked) return true;
 
   // IDEIA 11: Plan-then-execute - block finish if plan has incomplete steps
+  // Sprint C (BUG-AA): só bloquear se IA tocou arquivos (fez trabalho real).
   try {
     const { hasIncompletePlan, formatPlan } = await import("./planExecutor.js");
-    if (hasIncompletePlan()) {
+    if (hasIncompletePlan() && turnTouchedFiles.size > 0) {
       log.warn(`[PLAN] Blocking finish - plan has incomplete steps`);
       history.addSystemMessage(`${formatPlan()}\n\nNÃO finalize até completar TODOS os passos do plano. Continue trabalhando.`);
       return true;

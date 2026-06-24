@@ -128,48 +128,20 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "ler_arquivo",
       description:
-        "Reads the complete content of a local file or lists directory contents from the filesystem. " +
-        "If the path is a directory, it returns the list of files and subdirectories. " +
+        "Reads file content or lists directory contents. Supports offset/limit for reading specific line ranges, " +
+        "and optional grep filtering. If path is a directory, returns file listing. " +
         "Use this to inspect any source file or explore folder structure before making changes.",
       parameters: {
         type: "object",
         properties: {
-          caminho: {
-            type: "string",
-            description: "Relative or absolute path to the file or directory.",
-          },
+          path: { type: "string", description: "File or directory path to read." },
+          caminho: { type: "string", description: "Alias for path (backwards compat)." },
+          offset: { type: "number", description: "1-indexed start line (optional)." },
+          limit: { type: "number", description: "Max lines to return (optional)." },
+          grep: { type: "string", description: "Regex pattern to filter lines (optional)." },
+          contextLines: { type: "number", description: "Lines of context around grep matches (optional)." },
         },
-        required: ["caminho"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "buscar_web",
-      description: "Search the web for current information. Returns titles, URLs, and snippets.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Search query." },
-          maxResults: { type: "number", description: "Max results (default: 5)." },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "ler_url",
-      description: "Fetch and read content from a web URL. HTML is stripped to text.",
-      parameters: {
-        type: "object",
-        properties: {
-          url: { type: "string", description: "URL to fetch." },
-          maxLength: { type: "number", description: "Max chars to return (default: 10000)." },
-        },
-        required: ["url"],
+        required: ["path"],
       },
     },
   },
@@ -203,6 +175,42 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_web",
+      description:
+        "Search the web for current information. Returns search results with titles, URLs, and snippets. " +
+        "Use when you need up-to-date info, API docs, package versions, or solutions to errors. " +
+        "More general than pesquisar_api_atualizada (which is API-specific).",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query (be specific for better results)." },
+          maxResults: { type: "number", description: "Max results to return (default: 5)." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ler_url",
+      description:
+        "Fetch and read the content of a web URL. Returns the text content (HTML stripped). " +
+        "Use to read documentation pages, GitHub issues, blog posts, or any web page. " +
+        "Useful after buscar_web to read a specific result in detail.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The URL to fetch and read." },
+          maxLength: { type: "number", description: "Max characters to return (default: 10000)." },
+        },
+        required: ["url"],
       },
     },
   },
@@ -579,8 +587,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "explorar_subagente",
       description:
-        "Spawna um sub-agente em-processo com contexto LIMPO para explorar o codebase e retornar apenas um resumo. " +
-        "Use para tarefas como 'entenda como o auth funciona', 'encontre todos os lugares que chamam X', 'mapeie o fluxo de Y'. " +
+        "Delegate task to a read-only sub-agent with clean context. Returns summary only." +
         "O sub-agente tem apenas tools de leitura (ler_arquivo, buscar_texto, buscar_arquivos, parse_ast) e faz até 8 chamadas. " +
         "Retorna resumo de 500-2000 tokens. DISPONÍVEL APENAS com effort=high ou max (consome tokens da mesma API key).",
       parameters: {

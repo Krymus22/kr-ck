@@ -58,7 +58,9 @@ describe("applyEdits", () => {
     const content = "hello";
     const result = applyEdits(content, [{ search: "", replace: "x" }]);
     expect(result.success).toBe(true);
-    expect(result.replacements).toBe(0);
+    // Sprint C (BUG-V): empty search on non-empty file now appends (1 replacement)
+    expect(result.replacements).toBe(1);
+    expect(result.content).toBe("hello\nx");
   });
 });
 
