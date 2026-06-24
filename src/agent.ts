@@ -394,6 +394,45 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result, usedHeal: false };
   },
 
+  "buscar_web": async (args) => {
+    const query = asString(args.query);
+    if (!query) {
+      return { resultStr: "[ERRO] 'query' é obrigatório.", usedHeal: false };
+    }
+    const maxResults = (args.maxResults as number) ?? 5;
+    try {
+      const { webSearch } = await import("./apiResearcher.js");
+      const results = await webSearch(query, maxResults);
+      if (results.length === 0) {
+        return { resultStr: `[INFO] Nenhum resultado encontrado para: "${query}"`, usedHeal: false };
+      }
+      const formatted = results.map((r: any, i: number) =>
+        `${i + 1}. ${r.title ?? "(sem título)"}\n   URL: ${r.url}\n   ${r.snippet ?? r.description ?? ""}`
+      ).join("\n\n");
+      return { resultStr: `[RESULTADOS WEB] ${results.length} resultado(s) para "${query}":\n\n${formatted}`, usedHeal: false };
+    } catch (err) {
+      return { resultStr: `[ERRO] Falha na busca web: ${(err as Error).message}`, usedHeal: false };
+    }
+  },
+
+  "ler_url": async (args) => {
+    const url = asString(args.url);
+    if (!url) {
+      return { resultStr: "[ERRO] 'url' é obrigatório.", usedHeal: false };
+    }
+    const maxLength = (args.maxLength as number) ?? 10000;
+    try {
+      const { webRead } = await import("./apiResearcher.js");
+      const content = await webRead(url);
+      const truncated = content.length > maxLength
+        ? content.slice(0, maxLength) + `\n\n[CONTEÚDO TRUNCADO — ${content.length} chars total, mostrando ${maxLength}]`
+        : content;
+      return { resultStr: truncated || `[ERRO] Não foi possível extrair conteúdo de: ${url}`, usedHeal: false };
+    } catch (err) {
+      return { resultStr: `[ERRO] Falha ao ler URL: ${(err as Error).message}`, usedHeal: false };
+    }
+  },
+
   "buscar_arquivos": async (args) => {
     const results = globSearch({
       pattern: asString(args.pattern ?? args.glob, "**/*"),
@@ -418,74 +457,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     });
     const output = formatGrepResults(matches);
     return { resultStr: output, usedHeal: false };
-  },
-
-  "git_status": async (args) => {
-    const status = await gitStatus(args.cwd as string | undefined);
-    const output = [
-      `Branch: ${status.branch}`,
-      status.ahead > 0 ? `Ahead: ${status.ahead}` : "",
-      status.behind > 0 ? `Behind: ${status.behind}` : "",
-      status.staged.length > 0 ? `Staged: ${status.staged.join(", ")}` : "",
-      status.modified.length > 0 ? `Modified: ${status.modified.join(", ")}` : "",
-      status.untracked.length > 0 ? `Untracked: ${status.untracked.join(", ")}` : "",
-      status.conflicted.length > 0 ? `Conflicted: ${status.conflicted.join(", ")}` : "",
-    ].filter(Boolean).join("\n");
-    return { resultStr: output ?? "Clean working tree.", usedHeal: false };
-  },
-
-  "git_diff": async (args) => {
-    const result = await gitDiff(
-      args.cwd as string | undefined,
-      args.file as string | undefined,
-      args.staged as boolean | undefined
-    );
-    return { resultStr: result ?? "No changes.", usedHeal: false };
-  },
-
-  "git_log": async (args) => {
-    const result = await gitLog(
-      args.cwd as string | undefined,
-      (args.count as number) ?? 10,
-      args.file as string | undefined
-    );
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_commit": async (args) => {
-    const result = await gitCommit(
-      asString(args.message),
-      args.cwd as string | undefined,
-      args.files as string[] | undefined
-    );
-    readOnlyCache.invalidate("git_status");
-    readOnlyCache.invalidate("git_log");
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_blame": async (args) => {
-    const result = await gitBlame(
-      asString(args.file ?? args.filePath),
-      args.cwd as string | undefined,
-      args.startLine as number | undefined,
-      args.endLine as number | undefined
-    );
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_show": async (args) => {
-    const result = await gitShow(asString(args.commitHash), args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_branch": async (args) => {
-    const result = await gitBranch(args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "git_checkout": async (args) => {
-    const result = await gitCheckout(asString(args.branch), args.cwd as string | undefined);
-    return { resultStr: result, usedHeal: false };
   },
 
   "editar_multi_arquivos": async (args) => {

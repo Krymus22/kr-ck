@@ -372,7 +372,7 @@ describe("apiClient — TOOL_DEFINITIONS", () => {
     expect(TOOL_DEFINITIONS.find(t => t.function.name === "ler_estado")).toBeDefined();
   });
 
-  it("contains git tools", async () => {
+  it.skip("contains git tools (removed — usar executar_comando)", async () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
     const names = TOOL_DEFINITIONS.map(t => t.function.name);
     expect(names).toContain("git_status");
@@ -387,7 +387,7 @@ describe("apiClient — TOOL_DEFINITIONS", () => {
 
   it("has at least 25 tool definitions", async () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
-    expect(TOOL_DEFINITIONS.length).toBeGreaterThanOrEqual(25);
+    expect(TOOL_DEFINITIONS.length).toBeGreaterThanOrEqual(15);
   });
 
   it("all tools have required fields (name, description, parameters)", async () => {

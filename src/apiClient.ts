@@ -181,6 +181,42 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "buscar_web",
+      description:
+        "Search the web for current information. Returns search results with titles, URLs, and snippets. " +
+        "Use when you need up-to-date info, API docs, package versions, or solutions to errors. " +
+        "More general than pesquisar_api_atualizada (which is API-specific).",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query (be specific for better results)." },
+          maxResults: { type: "number", description: "Max results to return (default: 5)." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ler_url",
+      description:
+        "Fetch and read the content of a web URL. Returns the text content (HTML stripped). " +
+        "Use to read documentation pages, GitHub issues, blog posts, or any web page. " +
+        "Useful after buscar_web to read a specific result in detail.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "The URL to fetch and read." },
+          maxLength: { type: "number", description: "Max characters to return (default: 10000)." },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "buscar_arquivos",
       description:
         "Search for files by glob pattern (e.g. **/*.ts, src/**/*.test.ts). " +
@@ -215,115 +251,6 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
           maxResults: { type: "number", description: "Max results to return." },
         },
         required: ["pattern"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_status",
-      description: "Shows the working tree status (branch, staged, modified, untracked files).",
-      parameters: { type: "object", properties: { cwd: { type: "string" } } },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_diff",
-      description: "Shows file changes. Use staged=true for staged changes.",
-      parameters: {
-        type: "object",
-        properties: {
-          cwd: { type: "string" },
-          file: { type: "string", description: "Specific file to diff." },
-          staged: { type: "boolean", description: "Show staged changes." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_log",
-      description: "Shows recent commit history.",
-      parameters: {
-        type: "object",
-        properties: {
-          cwd: { type: "string" },
-          count: { type: "number", description: "Number of commits (default 10)." },
-          file: { type: "string", description: "Show history for specific file." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_commit",
-      description: "Create a git commit. Optionally stage files first.",
-      parameters: {
-        type: "object",
-        properties: {
-          message: { type: "string", description: "Commit message." },
-          files: { type: "array", items: { type: "string" }, description: "Files to stage." },
-          cwd: { type: "string" },
-        },
-        required: ["message"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_blame",
-      description: "Show who changed each line of a file.",
-      parameters: {
-        type: "object",
-        properties: {
-          file: { type: "string", description: "File to blame." },
-          cwd: { type: "string" },
-          startLine: { type: "number" },
-          endLine: { type: "number" },
-        },
-        required: ["file"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_show",
-      description: "Show details of a specific commit.",
-      parameters: {
-        type: "object",
-        properties: {
-          commitHash: { type: "string", description: "Commit hash to show." },
-          cwd: { type: "string" },
-        },
-        required: ["commitHash"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_branch",
-      description: "List all branches (local and remote).",
-      parameters: { type: "object", properties: { cwd: { type: "string" } } },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "git_checkout",
-      description: "Switch to a branch.",
-      parameters: {
-        type: "object",
-        properties: {
-          branch: { type: "string", description: "Branch name." },
-          cwd: { type: "string" },
-        },
-        required: ["branch"],
       },
     },
   },

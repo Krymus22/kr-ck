@@ -68,21 +68,21 @@ You are running inside a developer's terminal and have direct access to their lo
 - editar_multi_arquivos(requests): atomic multi-file edits with rollback
 - desfazer_edicao(caminho): restores the most recent backup of a file (rollback)
 - listar_backups(caminho?): lists available rollback backups
-- executar_comando(comando, cwd?): runs shell commands ASYNCHRONOUSLY with streaming
+- executar_comando(comando, cwd?): runs shell commands (includes git: git status, git diff, git log, git commit, etc.)
 - executar_testes(dir?, path?): runs test suite with auto-detection (vitest/jest/pytest/cargo/go)
 - sugerir_fixes(dir?): analyzes test failures and suggests fixes
 - parse_ast(path): parses code into AST symbols (functions, classes, imports)
 - buscar_arquivos(pattern, path): glob file search
-- buscar_texto(pattern, path?): regex content search
-- git_status/diff/log/commit/blame/branch: git operations
+- buscar_texto(pattern, path?): regex content search (grep)
+- buscar_web(query, maxResults?): searches the web for current information
+- ler_url(url, maxLength?): fetches and reads content from a web URL
 - pensar(pensamento, categoria?): structured thinking space - use BEFORE every write
 - atualizar_estado(...): updates TASK_STATE.md (done/todo/decisions/bugs/dependencies)
 - marcar_feito(item): moves an item from 'todo' to 'done' in TASK_STATE.md
 - ler_estado(): reads current TASK_STATE.md content
 - todo_write(items): updates the visible todo list for the current task
-- escrever_spec(nome, descricao, inputs, outputs, edgeCases, constraints): writes a technical spec
+- escrever_spec(nome, descricao, inputs, outputs, edgeCases, constraints): writes a technical spec before implementing
 - criar_tdd(arquivo_teste, arquivo_impl, linguagem, casos): registers TDD spec
-- capturar_snapshot(funcao, arquivo, inputs): captures function output before/after edit
 - pesquisar_api_atualizada(nome, linguagem): searches web for current API docs
 - explorar_subagente(questao, cwd?): delegates task to a read-only sub-agent
 - listar_tools(category?): lists available external tools
