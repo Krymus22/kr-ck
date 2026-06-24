@@ -331,14 +331,14 @@ describe("apiClient — chat() with mocked streaming", () => {
 // through the E2E tests (which already passed 7/7). ───────────────
 
 describe("apiClient — TOOL_DEFINITIONS", () => {
-  it("contains ler_arquivo tool", async () => {
+  it("contains ler_arquivo tool (merged with avancado)", async () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
     const lerArquivo = TOOL_DEFINITIONS.find(t => t.function.name === "ler_arquivo");
     expect(lerArquivo).toBeDefined();
-    expect(lerArquivo!.function.parameters.required).toContain("caminho");
+    expect(lerArquivo!.function.parameters.required).toContain("path");
   });
 
-  it("contains aplicar_diff tool", async () => {
+  it.skip("contains aplicar_diff tool (removed)", async () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
     const aplicarDiff = TOOL_DEFINITIONS.find(t => t.function.name === "aplicar_diff");
     expect(aplicarDiff).toBeDefined();
@@ -359,7 +359,7 @@ describe("apiClient — TOOL_DEFINITIONS", () => {
     expect(explorar!.function.parameters.required).toContain("questao");
   });
 
-  it("contains status_pool tool", async () => {
+  it.skip("contains status_pool tool (removed)", async () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
     const status = TOOL_DEFINITIONS.find(t => t.function.name === "status_pool");
     expect(status).toBeDefined();

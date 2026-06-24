@@ -291,22 +291,6 @@ function getExternalToolDefinitions(): OpenAI.Chat.Completions.ChatCompletionToo
     {
       type: "function",
       function: {
-        name: "executar_tool",
-        description: "Execute an external tool that doesn't have a manifest. Use this for tools like pytest, cargo, npm, etc. For Roblox tools (rojo, selene, stylua, wally, lune, rokit), prefer the specific function calls instead.",
-        parameters: {
-          type: "object",
-          properties: {
-            tool: { type: "string", description: "Tool name (e.g., 'pytest', 'cargo', 'npm')" },
-            args: { type: "object", description: "Tool arguments" },
-            dir: { type: "string", description: "Working directory" }
-          },
-          required: ["tool"]
-        }
-      }
-    },
-    {
-      type: "function",
-      function: {
         name: "listar_tools",
         description: "List all available external tools, optionally filtered by category",
         parameters: {
@@ -342,63 +326,22 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   "ler_arquivo": async (args) => {
-    const result = await lerArquivo({ caminho: asString(args.caminho) });
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "executar_comando": async (args) => {
-    const result = await executarComando({ comando: asString(args.comando) });
-    return { resultStr: result, usedHeal: false };
-  },
-
-  "aplicar_diff": async (args, toolCall, healRetry) => {
-    const result = await aplicarDiff({
-      caminho: asString(args.caminho),
-      bloco_diff: asString(args.bloco_diff),
-    });
-
-    if (!result.written && healRetry < config.maxHealRetries) {
-      log.warn(
-        `Falha ao aplicar diff ou guardrail rejeitou o código. Auto-cura iniciada ` +
-          `(tentativa ${healRetry + 1}/${config.maxHealRetries})...`
-      );
-      history.addToolResult(toolCall.id, result.toolMessage);
-      history.optimizeContext();
-      const allTools = getMergedTools();
-      const apiResponse = await chat(history.getHistory(), undefined, undefined, undefined, allTools);
-      const choice = apiResponse.choices[0];
-      if (!choice) throw new Error("Empty response from API during auto-heal");
-      history.addRawAssistantMessage(choice.message);
-
-      if (choice.finish_reason === "tool_calls" && choice.message.tool_calls?.length) {
-        const nextCall = choice.message.tool_calls[0];
-        if (nextCall?.function.name === "aplicar_diff") {
-          return dispatchToolCall(nextCall, healRetry + 1);
-        }
-        const sub = await dispatchToolCall(nextCall, 0);
-        return { ...sub, usedHeal: true };
-      }
-
-      const finalText = choice.message.content ?? "(sem resposta)";
-      log.warn("Claude-Killer encerrou o loop de auto-cura sem reescrever o arquivo.");
-      return { resultStr: finalText, usedHeal: true };
-    }
-
-    if (!result.written && healRetry >= config.maxHealRetries) {
-      log.error(`Limite de tentativas de auto-cura atingido (${config.maxHealRetries}). Diff NÃO foi aplicado.`);
-    }
-
-    return { resultStr: result.toolMessage, usedHeal: healRetry > 0 };
-  },
-
-  "ler_arquivo_avancado": async (args) => {
+    // Sprint C: merged ler_arquivo + ler_arquivo_avancado into one tool.
+    // Supports offset/limit/grep (optional) + backwards compat with caminho.
+    const filePath = asString(args.path ?? args.caminho);
+    const { readFileAdvanced } = await import("./fileRead.js");
     const result = readFileAdvanced({
-      path: asString(args.path ?? args.caminho),
+      path: filePath,
       offset: args.offset as number | undefined,
       limit: args.limit as number | undefined,
       grep: args.grep as string | undefined,
       contextLines: args.contextLines as number | undefined,
     });
+    return { resultStr: result, usedHeal: false };
+  },
+
+  "executar_comando": async (args) => {
+    const result = await executarComando({ comando: asString(args.comando) });
     return { resultStr: result, usedHeal: false };
   },
 
@@ -558,27 +501,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: output, usedHeal: false };
   },
 
-  "salvar_sessao": async (args) => {
-    const id = saveSession(args.id as string | undefined);
-    return { resultStr: `[SUCESSO] Sessão salva: ${id}`, usedHeal: false };
-  },
-
-  "carregar_sessao": async (args) => {
-    const ok = loadSession(asString(args.id));
-    return {
-      resultStr: ok ? `[SUCESSO] Sessão carregada: ${String(args.id)}` : `[ERRO] Sessão não encontrada: ${String(args.id)}`,
-      usedHeal: false,
-    };
-  },
-
-  "listar_sessoes": async () => {
-    const sessions = listSessions();
-    const output = sessions.length === 0
-      ? "Nenhuma sessão salva."
-      : sessions.map((s) => `  ${s.id} (${s.messageCount} msgs, ${s.lastModified})`).join("\n");
-    return { resultStr: output, usedHeal: false };
-  },
-
   "parse_ast": async (args) => {
     const result = await parseFile(asString(args.path ?? args.filePath));
     const output = [
@@ -589,23 +511,6 @@ const toolHandlers: Record<string, ToolHandler> = {
       `Imports: ${result.imports.length}`,
       ...result.imports.map((i: { module: string }) => `  ${i.module}`),
     ].join("\n");
-    return { resultStr: output, usedHeal: false };
-  },
-
-  "executar_paralelo": async (args) => {
-    const toolNames = args.tools as string[] | undefined;
-    const toolArgsList = args.args as Record<string, unknown>[] | undefined;
-    if (!toolNames?.length || !toolArgsList?.length || toolNames.length !== toolArgsList.length) {
-      return { resultStr: "[ERRO] 'tools' and 'args' arrays required", usedHeal: false };
-    }
-    const parallelTools: ParallelToolCall[] = toolNames.map((tn, i) => ({
-      id: `parallel_${i}`,
-      name: tn,
-      args: toolArgsList[i],
-      execute: async () => `[Placeholder for ${tn}]`,
-    }));
-    const results = await executeParallelTools(parallelTools);
-    const output = results.map((r) => `${r.name}: ${r.success ? r.result.slice(0, 100) : r.error}`).join("\n");
     return { resultStr: output, usedHeal: false };
   },
 
@@ -624,25 +529,6 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   // --- External Tools ----------------------------------------------------
-
-  "executar_tool": async (args) => {
-    const toolName = asString(args.tool);
-    const toolArgs = (args.args as Record<string, any>) ?? {};
-    const cwd = args.dir ? asString(args.dir) : undefined;
-    
-    const executor = getExecutor();
-    const result = await executor.execute(toolName, toolArgs, { cwd });
-    
-    const output = [
-      result.success ? "OK Sucesso" : "X Falha",
-      result.output,
-      result.errors?.length ? `Erros:\n${result.errors.join("\n")}` : "",
-      result.suggestions?.length ? `Sugestões:\n${result.suggestions.join("\n")}` : "",
-      result.duration ? `Duração: ${result.duration}ms` : ""
-    ].filter(Boolean).join("\n");
-    
-    return { resultStr: output, usedHeal: false };
-  },
 
   "listar_tools": async (args) => {
     const registry = getRegistry();
@@ -824,36 +710,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  "criar_plano": async (args) => {
-    const passos = args.passos as string[] | undefined;
-    if (!passos || !Array.isArray(passos) || passos.length === 0) {
-      return { resultStr: "[ERRO] 'passos' é obrigatório e deve ser um array não vazio.", usedHeal: false };
-    }
-    const { createPlan, formatPlan } = await import("./planExecutor.js");
-    createPlan(passos);
-    return {
-      resultStr: `[SUCESSO] Plano criado com ${passos.length} passo(s).\n\n${formatPlan()}`,
-      usedHeal: false,
-    };
-  },
-
-  "marcar_passo": async (args) => {
-    const indice = args.indice as number | undefined;
-    const feito = args.feito as boolean | undefined;
-    if (indice === undefined || feito === undefined) {
-      return { resultStr: "[ERRO] 'indice' e 'feito' são obrigatórios.", usedHeal: false };
-    }
-    const { markStep, formatPlan } = await import("./planExecutor.js");
-    const ok = markStep(indice, feito);
-    if (!ok) {
-      return { resultStr: `[ERRO] Não foi possível marcar o passo ${indice}. Plano não existe ou índice inválido.`, usedHeal: false };
-    }
-    return {
-      resultStr: `[SUCESSO] Passo ${indice} marcado como ${feito ? "concluído" : "reaberto"}.\n\n${formatPlan()}`,
-      usedHeal: false,
-    };
-  },
-
   "escrever_spec": async (args) => {
     const nome = asString(args.nome);
     const descricao = asString(args.descricao);
@@ -882,38 +738,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     const { registerTDD, formatTDD } = await import("./tddMode.js");
     registerTDD(arquivoTeste, arquivoImpl, linguagem, (args.casos as string[]) ?? []);
     return { resultStr: `[SUCESSO] TDD registrado.\n\n${formatTDD()}`, usedHeal: false };
-  },
-
-  "capturar_snapshot": async (args) => {
-    const funcao = asString(args.funcao);
-    const arquivo = asString(args.arquivo);
-    const inputs = asString(args.inputs);
-    if (!funcao || !arquivo || !inputs) {
-      return { resultStr: "[ERRO] 'funcao', 'arquivo' e 'inputs' são obrigatórios.", usedHeal: false };
-    }
-    const { captureBeforeSnapshot } = await import("./snapshotTesting.js");
-    const result = await captureBeforeSnapshot(funcao, arquivo, inputs);
-    return { resultStr: result.message, usedHeal: false };
-  },
-
-  "executar_workflow": async (args) => {
-    const script = asString(args.script);
-    if (!script) {
-      return { resultStr: "[ERRO] 'script' é obrigatório.", usedHeal: false };
-    }
-    const { validateWorkflow, executeWorkflow } = await import("./dynamicWorkflow.js");
-    const validation = validateWorkflow(script);
-    if (!validation.valid) {
-      return { resultStr: `[ERRO] Workflow inválido: ${validation.error}`, usedHeal: false };
-    }
-    const result = await executeWorkflow(script);
-    if (!result.success) {
-      return { resultStr: `[ERRO] Workflow falhou: ${result.error}\n\nOutput:\n${result.output}`, usedHeal: false };
-    }
-    return {
-      resultStr: `[SUCESSO] Workflow executado em ${result.durationMs}ms (${result.stepsExecuted} passos).\n\n${result.output}`,
-      usedHeal: false,
-    };
   },
 
   "ler_estado": async () => {
@@ -966,15 +790,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     return { resultStr: result, usedHeal: false };
   },
 
-  "status_pool": async () => {
-    if (getPoolSize() === 0) {
-      return {
-        resultStr: "[POOL] Modo single-key (apenas NVIDIA_API_KEY configurada). Para ativar multi-key, defina NVIDIA_API_KEYS (comma-separated).",
-        usedHeal: false,
-      };
-    }
-    return { resultStr: formatPoolStats(), usedHeal: false };
-  },
 };
 
 // --- Tool Dispatcher ----------------------------------------------------------
@@ -1140,7 +955,7 @@ function runDispatchGates(name: string, args: Record<string, unknown>): string |
 /**
  * Sprint C (BUG-T): Auto-parse args que algumas IAs passam como string JSON.
  * - editar_arquivo: 'edits' deve ser array mas IA passa como string JSON
- * - criar_plano: 'passos' deve ser array mas IA passa como string JSON
+ *  mas IA passa como string JSON
  * - editar_multi_arquivos: 'requests' deve ser array mas IA passa como string
  * - Boolean fields: 'createIfMissing', 'all' passados como "true"/"false" string
  * Modifica args in-place.
@@ -1150,10 +965,8 @@ function autoParseArgs(name: string, args: Record<string, unknown>): void {
   const arrayFields: Record<string, string[]> = {
     "editar_arquivo": ["edits"],
     "editar_multi_arquivos": ["requests"],
-    "criar_plano": ["passos"],
     "todo_write": ["items"],
     "atualizar_estado": ["done", "todo", "decisions", "bugs", "dependencies"],
-    "executar_paralelo": ["chamadas"],
   };
 
   const fields = arrayFields[name];
@@ -1277,24 +1090,23 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
 // --- Tool Call Processing -----------------------------------------------------
 
 const READ_ONLY_TOOLS = new Set([
-  "ler_arquivo", "ler_arquivo_avancado", "buscar_arquivos", "buscar_texto",
+  "ler_arquivo", "buscar_arquivos", "buscar_texto",
   "git_status", "git_log", "git_diff", "parse_ast",
   // IDEIA 5: explorar_subagente is read-only (only reads code, never edits)
   // and benefits from parallel execution with other read-only tools.
   "explorar_subagente",
   // Multi-key pool status is read-only and side-effect-free.
-  "status_pool",
   // Task state read is read-only.
   "ler_estado",
 ]);
 
 const FILE_TOOLS = new Set([
-  "aplicar_diff", "editar_arquivo", "editar_multi_arquivos",
+  "editar_arquivo", "editar_multi_arquivos",
 ]);
 
 /** File-mutating tools - used to populate turnTouchedFiles for the strict quality gate */
 const WRITE_FILE_TOOLS = new Set([
-  "aplicar_diff", "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao",
+  "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao",
 ]);
 
 async function executeReadOnlyCallsInParallel(toolCalls: ToolCall[]): Promise<void> {
@@ -1340,7 +1152,7 @@ async function executeToolCallsSequentially(toolCalls: ToolCall[]): Promise<void
  * Builds a human-readable activity label for a tool call.
  * Examples:
  *   ler_arquivo { path: "/foo.ts" }            ->  "ler_arquivo /foo.ts"
- *   aplicar_diff { path: "/foo.ts" }            ->  "aplicar_diff /foo.ts"
+ *   editar_arquivo { path: "/foo.ts" }            ->  "editar_arquivo /foo.ts"
  *   executar_comando { comando: "npm test" }    ->  "executar_comando: npm test"
  *   pensar { pensamento: "..." }                ->  "pensar"
  */
@@ -1431,7 +1243,7 @@ function checkAutoHeal(toolCalls: ToolCall[]): void {
         if (content && isTestFailure(content)) {
           history.addSystemMessage(
             `[AUTO-HEAL] A ferramenta "${tc.function.name}" retornou falhas. ` +
-            `Analise o erro acima, corrija o código usando aplicar_diff, e rode os testes novamente. ` +
+            `Analise o erro acima, corrija o código usando editar_arquivo, e rode os testes novamente. ` +
             `Máximo de ${MAX_AUTO_HEAL_RETRIES} tentativas automáticas.`
           );
           log.debug(`Auto-heal triggered for ${tc.function.name}`);
