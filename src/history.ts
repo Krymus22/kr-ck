@@ -259,8 +259,55 @@ export function addToolResult(toolCallId: string, content: string): void {
 }
 
 /** Append a system message to the history (for memory injection, etc). */
+/**
+ * Add a system message, replacing any previous message with the same prefix.
+ *
+ * Sprint C (BUG-CC): Previously, addSystemMessage just pushed a new message
+ * every turn. TASK_STATE and Memory were injected at EVERY turn, accumulating
+ * 10+ copies in history after 10 turns. This caused:
+ * 1. Context bloat (each copy ~200-500 tokens × 10 turns = 2-5k wasted tokens)
+ * 2. IA confusion (sees multiple conflicting versions of TASK_STATE)
+ * 3. Hallucination (IA might reference outdated state from turn 3)
+ *
+ * Now: if the new message starts with a known prefix (## TASK_STATE, ## Persistent
+ * Memory, ## SELF-VALIDATION, [PLAN], [GOAL, [HONESTY), any previous system
+ * message with the same prefix is REPLACED instead of duplicated.
+ */
 export function addSystemMessage(content: string): void {
   ensureHistoryInitialized();
+
+  // Known injectable prefixes that should replace, not accumulate
+  const REPLACABLE_PREFIXES = [
+    "## TASK_STATE",
+    "## Persistent Memory",
+    "## SELF-VALIDATION",
+    "[SELF-VALIDATION",
+    "[PLAN]",
+    "[GOAL",
+    "[HONESTY",
+    "[STRICT_GATE",
+    "[QUALITY",
+    "[FALSE_PROMISE",
+    "[CHECKPOINT",
+  ];
+
+  // Check if this message matches a replacable prefix
+  for (const prefix of REPLACABLE_PREFIXES) {
+    if (content.startsWith(prefix)) {
+      // Find and remove ALL previous system messages with same prefix
+      // (except the base system prompt at index 0)
+      for (let i = history.length - 1; i >= 1; i--) {
+        if (history[i]!.role === "system") {
+          const prevContent = (history[i] as any).content as string;
+          if (prevContent && prevContent.startsWith(prefix)) {
+            history.splice(i, 1);
+          }
+        }
+      }
+      break; // Only match one prefix
+    }
+  }
+
   history.push({ role: "system", content });
 }
 
