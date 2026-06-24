@@ -66,7 +66,7 @@ describe("pokaYokeCheck — validação de paths", () => {
   it("bloqueia path que é apenas whitespace (sanitizeInput)", () => {
     const r = pokaYokeCheck("ler_arquivo", { caminho: "   \t\n  " });
     expect(r.ok).toBe(false);
-    expect(r.error).toContain("não vazio");
+    expect(r.error).toContain("non-empty");
   });
 
   it("aceita aliases alternativos (path, filePath, file) além de caminho", () => {
@@ -117,7 +117,7 @@ describe("pokaYokeCheck — sanitização de entrada", () => {
   it("rejeita caminho quando é number (não string)", () => {
     const r = pokaYokeCheck("ler_arquivo", { caminho: 12345 });
     expect(r.ok).toBe(false);
-    expect(r.error).toContain("não vazio");
+    expect(r.error).toContain("non-empty");
   });
 
   it("rejeita caminho quando é null explicitamente", () => {

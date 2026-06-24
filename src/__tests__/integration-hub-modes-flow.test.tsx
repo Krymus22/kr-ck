@@ -402,7 +402,7 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
 
   describe("1. Ativar modo Roblox", () => {
     it("ativa modo roblox via UI (Tab → Modes → Enter) e aplica mudanças reais", async () => {
-      // Estado inicial: nenhum modo ativo
+      // Estado inicial: no active mode
       expect(getActiveModeName()).toBeNull();
       // effortLevel inicial = medium (resetado no beforeEach)
       expect(getEffortLevel()).toBe("medium");
@@ -833,7 +833,7 @@ describe("Integration: ExtensionHub + Modes + EffortLevels flow", () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe("Cross-module state sanity", () => {
-    it("estado inicial: nenhum modo ativo, effort medium, 9 extensões carregadas", () => {
+    it("estado inicial: no active mode, effort medium, 9 extensões carregadas", () => {
       // No modes active
       expect(getActiveModeName()).toBeNull();
 

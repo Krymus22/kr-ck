@@ -19,7 +19,7 @@ vi.mock("../apiClient.js", () => ({
 }));
 
 vi.mock("../tools.js", () => ({
-  lerArquivo: vi.fn().mockResolvedValue("file content mock"),
+  lerFile: vi.fn().mockResolvedValue("file content mock"),
 }));
 
 vi.mock("../fileSearch.js", () => ({

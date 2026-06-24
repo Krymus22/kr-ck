@@ -99,11 +99,11 @@ function checkMultiFileRead(args: Record<string, unknown>, toolName: string): { 
   if (unreadPaths.length === 0) return { allowed: true };
 
   const msg =
-    `[ERRO: READ-BEFORE-WRITE] Você tentou editar arquivos sem lê-los primeiro:\n` +
+    `[ERROR: READ-BEFORE-WRITE] You tried to edit files without reading them first:\n` +
     unreadPaths.map((p) => `  - ${p}`).join("\n") +
-    `\n\nREGRAS: SEMPRE use ler_arquivo ou ler_arquivo_avancado for ler um arquivo ANTES de editá-lo. ` +
-    `Isso garante que você conhece o conteúdo atual e evita alucinações.\n` +
-    `Chame ler_arquivo for cada arquivo acima e DEPOIS faça a edição.`;
+    `\n\nRULES: ALWAYS use ler_arquivo to read a file BEFORE editing it. ` +
+    `This ensures you know the current content and avoids hallucinations.\n` +
+    `Call ler_arquivo for each file above and THEN do the edit.`;
   log.warn(`[READ-BEFORE-WRITE] Blocked ${toolName} on unread files: ${unreadPaths.join(", ")}`);
   return { allowed: false, message: msg };
 }

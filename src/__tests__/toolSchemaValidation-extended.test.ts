@@ -129,9 +129,9 @@ describe("validateSchema — objetos aninhados", () => {
 describe("formatError — formatValidationErrors", () => {
   it("formata lista vazia sem quebrar (mantém header e footer)", () => {
     const msg = formatValidationErrors("tool_x", []);
-    expect(msg).toContain("[ERRO: VALIDAÇÃO DE SCHEMA]");
+    expect(msg).toContain("[ERROR: SCHEMA VALIDATION]");
     expect(msg).toContain("tool_x");
-    expect(msg).toContain("Corrija os argumentos");
+    expect(msg).toContain("Fix the arguments");
     // Sem erros, não deve haver linhas "X ..."
     expect(msg).not.toContain("X ");
   });

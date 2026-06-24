@@ -65,9 +65,9 @@ export function pokaYokeCheck(
       return {
         ok: false,
         error:
-          `[POKA-YOKE] A ferramenta "${toolName}" requer um caminho de arquivo não vazio. ` +
+          `[POKA-YOKE] Tool "${toolName}" requires a non-empty file path. ` +
           `Provide "caminho" (or "path") with a non-empty string. ` +
-          `Exemplo: ${toolName}({ caminho: "/abs/path/to/file.ts" })`,
+          `Example: ${toolName}({ caminho: "/abs/path/to/file.ts" })`,
       };
     }
     // Null bytes em paths são PERIGOSOS: em bindings nativos/C, "\0" é
@@ -77,10 +77,10 @@ export function pokaYokeCheck(
       return {
         ok: false,
         error:
-          `[POKA-YOKE] Caminho inválido for "${toolName}": contém null byte (\\0). ` +
-          `Null bytes em paths podem causar path injection em bindings nativos ` +
-          `(ex.: "/tmp/foo\\0.txt" pode ser interpretado como "/tmp/foo" em C). ` +
-          `Remova o caractere nulo do caminho e tente novamente.`,
+          `[POKA-YOKE] Invalid path for "${toolName}": contains null byte (\\0). ` +
+          `Null bytes in paths can cause path injection in native bindings ` +
+          `(e.g. "/tmp/foo\\0.txt" may be interpreted as "/tmp/foo" in C). ` +
+          `Remove the null character from the path and try again.`,
       };
     }
     // path is present and safe - fall through to tool-specific checks below
@@ -120,18 +120,18 @@ function checkAplicarDiff(args: Record<string, unknown>): PokaYokeResult {
     return {
       ok: false,
       error:
-        `[POKA-YOKE] aplicar_diff requer "bloco_diff" não vazio. ` +
-        `Formato esperado:\n` +
-        `<<<<<<< SEARCH\n[código exato do arquivo]\n=======\n[novo código]\n>>>>>>> REPLACE`,
+        `[POKA-YOKE] aplicar_diff requires non-empty "bloco_diff". ` +
+        `Expected format:\n` +
+        `<<<<<<< SEARCH\n[exact code from file]\n=======\n[new code]\n>>>>>>> REPLACE`,
     };
   }
   if (!bloco.includes("<<<<<<< SEARCH") || !bloco.includes(">>>>>>> REPLACE")) {
     return {
       ok: false,
       error:
-        `[POKA-YOKE] "bloco_diff" não contém a estrutura esperada. ` +
-        `Cada bloco deve ter marcadores "<<<<<<< SEARCH" no início e ">>>>>>> REPLACE" no fim, ` +
-        `separados por uma linha "=======".`,
+        `[POKA-YOKE] "bloco_diff" does not contain the expected structure. ` +
+        `Each block must have "<<<<<<< SEARCH" at the start and ">>>>>>> REPLACE" at the end, ` +
+        `separated by a "=======" line.`,
     };
   }
   return { ok: true };
@@ -146,16 +146,19 @@ function checkEditarArquivo(args: Record<string, unknown>): PokaYokeResult {
   // search não-vazio — criando contradição. Agora: se createIfMissing=true
   // e replace é string, permite mesmo com search vazio.
   const isCreateIfMissing = args.createIfMissing === true && typeof args.replace === "string";
-  if (!hasEditsArray && !hasSearchReplace && !isCreateIfMissing) {
+  // BUG-SS fix: also allow empty search + replace + createIfMissing (append mode).
+  const isAppendMode = args.createIfMissing === true && typeof args.replace === "string" && args.search === "";
+  if (!hasEditsArray && !hasSearchReplace && !isCreateIfMissing && !isAppendMode) {
     return {
       ok: false,
       error:
-        `[POKA-YOKE] editar_arquivo requer OU "edits" (array de {search, replace, all?}) ` +
-        `OU "search" + "replace" como strings. ` +
-        `OU "replace" + "createIfMissing: true" (for criar novo arquivo). ` +
-        `Exemplo 1: editar_arquivo({ path: "/x.ts", search: "foo", replace: "bar" }) ` +
-        `Exemplo 2: editar_arquivo({ path: "/x.ts", edits: [{search: "foo", replace: "bar"}] }) ` +
-        `Exemplo 3: editar_arquivo({ path: "/new.ts", replace: "content", createIfMissing: true })`,
+        `[POKA-YOKE] editar_arquivo requires EITHER "edits" (array of {search, replace, all?}) ` +
+        `OR "search" + "replace" as strings. ` +
+        `OR "replace" + "createIfMissing: true" (to create new file or append to existing). ` +
+        `Example 1: editar_arquivo({ path: "/x.ts", search: "foo", replace: "bar" }) ` +
+        `Example 2: editar_arquivo({ path: "/x.ts", edits: [{search: "foo", replace: "bar"}] }) ` +
+        `Example 3: editar_arquivo({ path: "/new.ts", replace: "content", createIfMissing: true }) ` +
+        `Example 4 (append): editar_arquivo({ path: "/x.ts", search: "", replace: "// comment", createIfMissing: true })`,
     };
   }
   return { ok: true };
@@ -167,7 +170,7 @@ function checkDesfazerEdicao(args: Record<string, unknown>): PokaYokeResult {
       ok: false,
       error:
         `[POKA-YOKE] desfazer_edicao requires "caminho" (non-empty string) ` +
-        `apontando for o arquivo cuja última edição deve ser desfeita.`,
+        `pointing to the file whose last edit should be undone.`,
     };
   }
   return { ok: true };
@@ -179,7 +182,7 @@ function checkExecutarComando(args: Record<string, unknown>): PokaYokeResult {
       ok: false,
       error:
         `[POKA-YOKE] executar_comando requires "comando" (non-empty string). ` +
-        `Exemplo: executar_comando({ comando: "npm test" })`,
+        `Example: executar_comando({ comando: "npm test" })`,
     };
   }
   return { ok: true };
@@ -190,8 +193,8 @@ function checkEditarMultiArquivos(args: Record<string, unknown>): PokaYokeResult
     return {
       ok: false,
       error:
-        `[POKA-YOKE] editar_multi_arquivos requer "requests" como array não vazio ` +
-        `de { filePath, edits: [{search, replace, all?}], createIfMissing? }.`,
+        `[POKA-YOKE] editar_multi_arquivos requires "requests" as a non-empty array ` +
+        `of { filePath, edits: [{search, replace, all?}], createIfMissing? }.`,
     };
   }
   return { ok: true };

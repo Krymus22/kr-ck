@@ -225,8 +225,8 @@ export async function aplicarDiff(
   // -- Step 2: Parse diff blocks ---------------------------------------------
   const blocks = parseDiffBlocks(args.bloco_diff);
   if (blocks.length === 0) {
-    const msg = `Error: Nenhum bloco SEARCH/REPLACE válido encontrado no bloco_diff. Certifique-se de usar a estrutura:\n<<<<<<< SEARCH\n[código antigo]\n=======\n[código novo]\n>>>>>>> REPLACE`;
-    log.toolResult("aplicar_diff", false, "nenhum bloco parseado");
+    const msg = `Error: No valid SEARCH/REPLACE block found in bloco_diff. Make sure to use the structure:\n<<<<<<< SEARCH\n[old code]\n=======\n[new code]\n>>>>>>> REPLACE`;
+    log.toolResult("aplicar_diff", false, "no block parsed");
     return { written: false, toolMessage: msg };
   }
 
@@ -234,7 +234,7 @@ export async function aplicarDiff(
   const patchResult = applyDiffs(originalContent, blocks);
   if (!patchResult.success) {
     const searchPart = patchResult.errorBlock ?? "";
-    const msg = `Error: Bloco SEARCH not found no arquivo original. Certifique-se de copiar o trecho exatamente como ele é.\n\nBloco SEARCH que failed:\n${searchPart}`;
+    const msg = `Error: SEARCH block not found in the original file. Make sure to copy the snippet exactly as it is.\n\nSEARCH block that failed:\n${searchPart}`;
     log.toolResult("aplicar_diff", false, "SEARCH not found");
     return { written: false, toolMessage: msg };
   }
@@ -244,7 +244,7 @@ export async function aplicarDiff(
   // -- Step 4: Diff preview + approval ----------------------------------------
   const approved = await previewAndApprove(resolved, originalContent, newContent);
   if (!approved) {
-    const msg = `[REJEITADO] Diff não aplicado - usuário rejeitou a alteração no preview.`;
+    const msg = `[REJECTED] Diff not applied - user rejected the change in preview.`;
     log.toolResult("aplicar_diff", false, "diff rejected by user");
     return { written: false, toolMessage: msg };
   }
@@ -252,7 +252,7 @@ export async function aplicarDiff(
   // -- Step 5: Pre-file-write hooks -----------------------------------------
   const preWriteResult = await executePreFileWriteHooks(resolved, newContent);
   if (preWriteResult.block) {
-    const msg = `[BLOQUEADO] Escrita impedida por hook: ${preWriteResult.reason ?? "sem motivo"}`;
+    const msg = `[BLOCKED] Write prevented by hook: ${preWriteResult.reason ?? "no reason"}`;
     log.toolResult("aplicar_diff", false, "bloqueado por pre-hook");
     return { written: false, toolMessage: msg };
   }
@@ -270,7 +270,7 @@ export async function aplicarDiff(
     const dir = path.dirname(resolved);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(resolved, contentToWrite, "utf8");
-    log.success(`Arquivo gravado: ${resolved} (${contentToWrite.length} bytes)`);
+    log.success(`File written: ${resolved} (${contentToWrite.length} bytes)`);
   } catch (err) {
     const msg = `[ERROR] Failed to write ${resolved}: ${(err as Error).message}`;
     log.toolResult("aplicar_diff", false, (err as Error).message);
@@ -285,11 +285,11 @@ export async function aplicarDiff(
 
   if (!validation.valid) {
     const warnMsg =
-      `[AVISO_POS_ESCRITA] Arquivo salvo com sucesso, mas a validação pós-escrita detectou problemas.\n` +
-      `Arquivo: ${resolved}\n\n` +
-      `Log de erros do validador:\n${validation.errorMessage}\n\n` +
+      `[POST-WRITE WARNING] File saved successfully, but post-write validation detected issues.\n` +
+      `File: ${resolved}\n\n` +
+      `Validator error log:\n${validation.errorMessage}\n\n` +
       `The file HAS BEEN SAVED to disk. Analyze the errors above in the real project context ` +
-      `e decida se precisa aplicar um diff de correção ou se o erro pode ser ignorado como falso positivo.`;
+      `and decide whether to apply a fix diff or whether the error can be ignored as a false positive.`;
 
     log.toolResult(
       "aplicar_diff",
@@ -324,19 +324,19 @@ export function desfazerEdicao(args: DesfazerEdicaoArgs): string {
 
   const ok = restoreBackup(resolved);
   if (ok) {
-    return `[SUCCESS] Arquivo restaurado a partir do backup: ${resolved}`;
+    return `[SUCCESS] File restored from backup: ${resolved}`;
   }
 
   // List available backups for diagnostics
   const backups = listBackups(resolved);
   if (backups.length === 0) {
     return `[ERROR] No backup available for ${resolved}. ` +
-      `Backups são criados automaticamente antes de cada aplicar_diff / editar_arquivo bem-sucedido em arquivos existentes, ` +
-      `e expiram após 5 minutos.`;
+      `Backups are created automatically before each successful aplicar_diff / editar_arquivo on existing files, ` +
+      `and expire after 5 minutes.`;
   }
 
-  return `[ERROR] Falha ao restaurar backup for ${resolved}. ` +
-    `Existem ${backups.length} backup(s) registrado(s) mas a restauração failed (arquivo de backup pode estar corrompido ou ausente).`;
+  return `[ERROR] Failed to restore backup for ${resolved}. ` +
+    `There are ${backups.length} backup(s) registered but the restore failed (backup file may be corrupted or missing).`;
 }
 
 // --- listar_backups -----------------------------------------------------------
@@ -425,7 +425,7 @@ export async function executarComando(
 
     child.on("error", (err) => {
       clearTimeout(timer);
-      const output = `[ERROR] Falha ao iniciar comando: ${err.message}`;
+      const output = `[ERROR] Failed to start command: ${err.message}`;
       log.toolResult("executar_comando", false, err.message);
       resolve(output);
     });
@@ -435,7 +435,7 @@ export async function executarComando(
       const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
 
       if (killed) {
-        const out = `[ERROR] Comando excedeu timeout de ${timeoutMs}ms e foi morto.\n${combined}`;
+        const out = `[ERROR] Command exceeded timeout of ${timeoutMs}ms and was killed.\n${combined}`;
         log.toolResult("executar_comando", false, "timeout");
         resolve(out);
         return;
@@ -443,9 +443,9 @@ export async function executarComando(
 
       if (code === 0) {
         log.toolResult("executar_comando", true, `exit=0`);
-        resolve(combined || "[OK] Comando concluído sem saída.");
+        resolve(combined || "[OK] Command completed with no output.");
       } else {
-        const out = `[ERROR] Comando failed (exit=${code}):\n${combined}`;
+        const out = `[ERROR] Command failed (exit=${code}):\n${combined}`;
         log.toolResult("executar_comando", false, `exit=${code}`);
         resolve(out);
       }

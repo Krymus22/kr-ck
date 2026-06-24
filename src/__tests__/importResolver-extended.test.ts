@@ -281,7 +281,7 @@ describe("importResolver — cobertura estendida", () => {
     expect(result1.missingImports).toEqual(result2.missingImports);
     expect(result1.message).toBe(result2.message);
 
-    // Segunda chamada não é significativamente mais lenta (sem regressão)
+    // Segunda chamada não é significativamentand  morelenta (sem regressão)
     const firstMs = Number(t1 - t0) / 1e6;
     const secondMs = Number(t2 - t1) / 1e6;
     // Tolerância: segunda chamada pode ser até 5x mais lenta em CI lento

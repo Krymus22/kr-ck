@@ -186,10 +186,10 @@ describe("safetyReviewer - formatter", () => {
         durationMs: 2500,
       };
       const formatted = formatSafetyReview(result);
-      expect(formatted).toContain("BLOQUEIO DE SEGURANÇA");
+      expect(formatted).toContain("SECURITY BLOCK");
       expect(formatted).toContain("HIGH");
       expect(formatted).toContain("RemoveAsync");
-      expect(formatted).toContain("NÃO escreva este código");
+      expect(formatted).toContain("DO NOT write this code");
       expect(formatted).toContain("guardrails");
     });
 
@@ -203,11 +203,11 @@ describe("safetyReviewer - formatter", () => {
         durationMs: 1500,
       };
       const formatted = formatSafetyReview(result);
-      expect(formatted).toContain("AVISO DE SEGURANÇA");
-      expect(formatted).toContain("BAIXO");
+      expect(formatted).toContain("SECURITY WARNING");
+      expect(formatted).toContain("LOW");
       expect(formatted).toContain("SetAsync");
       // Should NOT contain blocking language
-      expect(formatted).not.toContain("BLOQUEIO");
+      expect(formatted).not.toContain("SECURITY BLOCK");
     });
 
     it("should format none-risk result (LLM reviewed) as OK", async () => {
@@ -220,7 +220,7 @@ describe("safetyReviewer - formatter", () => {
         durationMs: 1500,
       };
       const formatted = formatSafetyReview(result);
-      expect(formatted).toContain("SEGURANÇA OK");
+      expect(formatted).toContain("SECURITY OK");
     });
 
     it("should return empty string for none-risk without LLM review", async () => {

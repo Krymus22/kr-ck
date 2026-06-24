@@ -91,7 +91,7 @@ describe("formatGrepResults", () => {
 
   it("should show message when no results", () => {
     const formatted = formatGrepResults([]);
-    expect(formatted).toContain("Nenhum resultado");
+    expect(formatted).toContain("No results found");
   });
 
   it("should truncate at maxDisplay", () => {

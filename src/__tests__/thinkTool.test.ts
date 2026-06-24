@@ -15,9 +15,9 @@ import { think, THINK_TOOL_DEFINITION } from "../thinkTool.js";
 describe("thinkTool", () => {
   describe("think()", () => {
     it("returns confirmed=true with a message containing the category", async () => {
-      const r = await think({ pensamento: "I should check X", categoria: "verification" });
+      const r = await think({ pensamento: "I should check X", category: "verification" });
       expect(r.confirmed).toBe(true);
-      expect(r.message).toContain("PENSAMENTO REGISTRADO");
+      expect(r.message).toContain("THOUGHT RECORDED");
       expect(r.message).toContain("verification");
     });
 
@@ -60,7 +60,7 @@ describe("thinkTool", () => {
 
     it("supports the categoria enum", () => {
       const params = THINK_TOOL_DEFINITION.function.parameters as {
-        properties: { categoria: { enum: string[] } };
+        properties: { category: { enum: string[] } };
       };
       expect(params.properties.categoria.enum).toContain("planning");
       expect(params.properties.categoria.enum).toContain("verification");

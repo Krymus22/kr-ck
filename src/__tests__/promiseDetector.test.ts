@@ -133,7 +133,7 @@ describe("promiseDetector", () => {
 
     it("includes the attempt number on retry", () => {
       const msg = buildFalsePromiseRejectionMessage("vou verificar", 2);
-      expect(msg).toContain("tentativa 2");
+      expect(msg).toContain("attempt 2");
     });
 
     it("does NOT include attempt suffix on first try", () => {

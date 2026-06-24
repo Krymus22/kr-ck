@@ -363,7 +363,7 @@ async function executeSubAgentTool(name: string, args: any, cwd: string): Promis
       }
       case "buscar_arquivos": {
         const results = globSearch({ pattern: args.pattern ?? "**/*", cwd });
-        return results.length > 0 ? results.join("\n") : "Nenhum arquivo encontrado.";
+        return results.length > 0 ? results.join("\n") : "No files found.";
       }
       case "buscar_texto": {
         const searchPath = resolveSearchPath(args.path, cwd);

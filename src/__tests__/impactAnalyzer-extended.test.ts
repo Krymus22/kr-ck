@@ -231,7 +231,7 @@ return M
       };
       const summary = formatImpactSummary(report);
       // 4 usages em 3 arquivos
-      expect(summary).toBe("4 uso(s) em 3 arquivo(s)");
+      expect(summary).toBe("4 usage(s) in 3 file(s)");
     });
   });
 
@@ -261,14 +261,14 @@ return M
       expect(hint).toContain("consumer_a.luau");
       expect(hint).toContain("consumer_b.luau");
       // Deve mostrar contagem de símbolos
-      expect(hint).toContain("2 símbolo(s)");
+      expect(hint).toContain("2 symbol(s)");
       // Deve mostrar contagem total de usages e arquivos
-      expect(hint).toContain("3 uso(s)");
-      expect(hint).toContain("2 arquivo(s)");
+      expect(hint).toContain("3 usage(s)");
+      expect(hint).toContain("2 file(s)");
       // Deve mostrar o nome do arquivo alvo (basename)
       expect(hint).toContain("Core.luau");
       // Deve incluir a instrução de cuidado
-      expect(hint).toContain("RENOMEAR ou REMOVER");
+      expect(hint).toContain("RENAME or REMOVE");
     });
   });
 });

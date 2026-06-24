@@ -356,7 +356,7 @@ export async function checkEvidenceRequirement(
           ["executar_testes", "executar_comando", "ler_arquivo", "pesquisar_api_atualizada"].includes(t)
         );
         if (!hasVerification) {
-          unverified.push(`"${claim}" (nenhuma tool de verificação foi chamada)`);
+          unverified.push(`"${claim}" (no verification tool was called)`);
         } else {
           verified.push(claim);
         }
@@ -642,7 +642,7 @@ export async function checkContradictions(
     return { contradictions: [], message: "" };
   }
 
-  const msg = `[CONTRADICTION DETECTED] Você fez claims que contradizem claims anteriores:\n${contradictions.map((c) => `  - Antes: ${c.oldClaim} | Agora: ${c.newClaim}`).join("\n")}\n\nQual está correta? Verifique antes de continuar.`;
+  const msg = `[CONTRADICTION DETECTED] You made claims that contradict earlier claims:\n${contradictions.map((c) => `  - Before: ${c.oldClaim} | Now: ${c.newClaim}`).join("\n")}\n\nWhich one is correct? Verify before continuing.`;
   log.warn(`[HONESTY:Contradiction] ${msg}`);
   return { contradictions, message: msg };
 }

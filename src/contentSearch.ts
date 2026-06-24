@@ -120,7 +120,7 @@ export function grepSearch(opts: GrepOptions): GrepMatch[] {
 }
 
 export function formatGrepResults(matches: GrepMatch[], maxDisplay: number = 50): string {
-  if (matches.length === 0) return "Nenhum resultado encontrado.";
+  if (matches.length === 0) return "No results found.";
 
   const lines: string[] = [];
   const displayCount = Math.min(matches.length, maxDisplay);

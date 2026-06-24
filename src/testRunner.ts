@@ -617,7 +617,11 @@ export function formatTestResult(result: TestResult): string {
 }
 
 export function formatFixSuggestions(suggestions: FixSuggestion[]): string {
-  if (suggestions.length === 0) return "No fix suggestions.";
+  if (suggestions.length === 0) {
+    return "[INFO] No fix suggestions available. This tool analyzes test failures — " +
+      "if the project has no test framework (vitest/jest/pytest/cargo/go) or no tests failed, " +
+      "no suggestions can be generated. For static code analysis, use parse_ast instead.";
+  }
 
   const lines = ["Fix Suggestions:"];
   for (const s of suggestions) {

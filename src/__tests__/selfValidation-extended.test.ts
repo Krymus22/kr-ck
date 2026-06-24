@@ -52,11 +52,11 @@ describe("selfValidation (extended) — shouldSelfValidate casos limítrofes", (
 describe("selfValidation (extended) — injectSelfValidationPrompt output", () => {
   it("prompt contém as 5 perguntas obrigatórias (não só as 4 do teste básico)", () => {
     const prompt = injectSelfValidationPrompt(["foo.ts"]);
-    expect(prompt).toContain("1. O QUE MUDOU");
-    expect(prompt).toContain("2. VERIFICAÇÃO");
-    expect(prompt).toContain("3. ERROS RESTANTES");
+    expect(prompt).toContain("1. WHAT CHANGED");
+    expect(prompt).toContain("2. VERIFICATION");
+    expect(prompt).toContain("3. REMAINING ERRORS");
     expect(prompt).toContain("4. EDGE CASES");
-    expect(prompt).toContain("5. HONESTIDADE");
+    expect(prompt).toContain("5. HONESTY");
   });
 
   it("lista exatamente N arquivos quando <= 5 (sem truncamento)", () => {
@@ -76,7 +76,7 @@ describe("selfValidation (extended) — formatIssues / conteúdo do prompt", () 
   it("prompt instrui a corrigir problemas antes de responder", () => {
     const prompt = injectSelfValidationPrompt(["x.ts"]);
     expect(prompt).toContain("FIX");
-    expect(prompt).toContain("Não pule esta validação");
+    expect(prompt).toContain("Do not skip this validation");
   });
 });
 

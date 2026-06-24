@@ -110,11 +110,11 @@ describe("toolSchemaValidation", () => {
   describe("formatValidationErrors", () => {
     it("formats errors with header and footer", () => {
       const msg = formatValidationErrors("test_tool", ["error 1", "error 2"]);
-      expect(msg).toContain("VALIDAÇÃO DE SCHEMA");
+      expect(msg).toContain("SCHEMA VALIDATION");
       expect(msg).toContain("test_tool");
       expect(msg).toContain("error 1");
       expect(msg).toContain("error 2");
-      expect(msg).toContain("Corrija");
+      expect(msg).toContain("Fix");
     });
   });
 });

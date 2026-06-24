@@ -226,27 +226,27 @@ async function handleConfiguratorTool(
 
     case "copiar_para_tools": {
       const sourcePath = String(args.sourcePath ?? "");
-      if (!sourcePath) return "[ERROR] sourcePath é obrigatório";
-      if (!modeName) return "[ERROR] nenhum modo ativo";
+      if (!sourcePath) return "[ERROR] sourcePath is required";
+      if (!modeName) return "[ERROR] no active mode";
       if (!fs.existsSync(sourcePath)) return `[ERROR] File not found: ${sourcePath}`;
       const destPath = copyToModeTools(sourcePath, modeName);
       if (destPath) {
-        return `Arquivo copiado para: ${destPath}`;
+        return `File copied to: ${destPath}`;
       }
-      return "[ERROR] Falha ao copiar arquivo";
+      return "[ERROR] Failed to copy file";
     }
 
     case "perguntar_usuario": {
-      if (!onAskUser) return "[ERROR] perguntar_usuario não disponível in this context";
+      if (!onAskUser) return "[ERROR] perguntar_usuario not available in this context";
       const pergunta = String(args.pergunta ?? "");
       const alternativas = Array.isArray(args.alternativas) ? (args.alternativas as string[]) : [];
-      if (!pergunta || alternativas.length < 2) return "[ERROR] pergunta e alternativas (min 2) obrigatórios";
+      if (!pergunta || alternativas.length < 2) return "[ERROR] pergunta and alternativas (min 2) are required";
       const response = await onAskUser({ pergunta, alternativas });
-      return response.cancelled ? "[USUÁRIO CANCELOU]" : `[RESPOSTA] ${response.value}`;
+      return response.cancelled ? "[USER CANCELLED]" : `[ANSWER] ${response.value}`;
     }
 
     default:
-      return `[ERROR] Tool desconhecida: ${toolName}`;
+      return `[ERROR] Unknown tool: ${toolName}`;
   }
 }
 

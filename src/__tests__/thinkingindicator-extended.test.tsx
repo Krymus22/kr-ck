@@ -240,7 +240,7 @@ describe("ThinkingIndicator — testes estendidos", () => {
 
   // ─── Múltiplas atividades (stack) ────────────────────────────────────
 
-  it("mostra a atividade mais recente (topo da stack) quando aninhada", () => {
+  it("mostra a atividadand  morerecente (topo da stack) quando aninhada", () => {
     pushActivity("api_call", "model-x");
     pushActivity("tool", "ler_arquivo"); // atividade do topo
 

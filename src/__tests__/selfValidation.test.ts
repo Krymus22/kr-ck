@@ -62,10 +62,10 @@ describe("selfValidation", () => {
     it("injects a system message with the 4 mandatory questions", () => {
       const result = injectSelfValidationPrompt(["foo.ts", "bar.ts"]);
       expect(mockedAddSystem).toHaveBeenCalledTimes(1);
-      expect(result).toContain("SELF-VALIDATION OBRIGATÓRIA");
-      expect(result).toContain("O QUE MUDOU");
-      expect(result).toContain("VERIFICAÇÃO");
-      expect(result).toContain("ERROS RESTANTES");
+      expect(result).toContain("MANDATORY SELF-VALIDATION");
+      expect(result).toContain("WHAT CHANGED");
+      expect(result).toContain("VERIFICATION");
+      expect(result).toContain("REMAINING ERRORS");
       expect(result).toContain("EDGE CASES");
     });
 
@@ -81,7 +81,7 @@ describe("selfValidation", () => {
       const result = injectSelfValidationPrompt(files);
       expect(result).toContain("a.ts");
       expect(result).toContain("e.ts");
-      expect(result).toContain("mais 2"); // "e mais N"
+      expect(result).toContain("and 2 more");
       // Should NOT list f.ts and g.ts explicitly
       expect(result).not.toMatch(/  - f\.ts\n/);
     });

@@ -156,7 +156,7 @@ describe("ChatDisplay — testes estendidos", () => {
     expect(out).toContain("you:");
     // Pelo menos algum do conteúdo deve aparecer.
     expect(out).toContain("A");
-    // Não deve crashar — output deve ser não vazio.
+    // Não deve crashar — output deve ser non-empty.
     expect(out.length).toBeGreaterThan(0);
   });
 

@@ -310,12 +310,12 @@ return M
         durationMs: 50,
       };
       const hint = formatImpactHint(report);
-      expect(hint).toContain("ANÁLISE DE IMPACTO");
+      expect(hint).toContain("IMPACT ANALYSIS");
       expect(hint).toContain("InventoryService.luau");
       expect(hint).toContain("ShopController.luau");
       expect(hint).toContain("PlayerHUD.luau");
       expect(hint).toContain("GetCoins");
-      expect(hint).toContain("RENOMEAR ou REMOVER");
+      expect(hint).toContain("RENAME or REMOVE");
     });
 
     it("should limit to 5 usages per file", async () => {
@@ -334,7 +334,7 @@ return M
         durationMs: 10,
       };
       const hint = formatImpactHint(report);
-      expect(hint).toContain("mais 5 uso(s)");
+      expect(hint).toContain("and 5 more usage(s)");
     });
   });
 
@@ -364,7 +364,7 @@ return M
         ],
         durationMs: 10,
       };
-      expect(formatImpactSummary(report)).toBe("3 uso(s) em 2 arquivo(s)");
+      expect(formatImpactSummary(report)).toBe("3 usage(s) in 2 file(s)");
     });
   });
 

@@ -243,7 +243,7 @@ describe("E2E: Sistema de modos completo", () => {
     setActiveMode("devops");
     expect(getActiveModeName()).toBe("devops");
     expect(getActiveMode()!.name).toBe("devops");
-    // Não deve mais retornar o roblox
+    // Não devand  moreretornar o roblox
     expect(getActiveMode()!.name).not.toBe("roblox");
 
     // Voltar para roblox

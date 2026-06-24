@@ -378,7 +378,7 @@ const x = 2;
     fs.writeFileSync(filePath, "content");
     const result = await aplicarDiff({ caminho: filePath, bloco_diff: "no markers" });
     expect(result.written).toBe(false);
-    expect(result.toolMessage).toContain("Nenhum bloco");
+    expect(result.toolMessage).toContain("No valid SEARCH/REPLACE");
   });
 
   it("returns error when SEARCH block not found", async () => {
@@ -391,7 +391,7 @@ replaced
 >>>>>>> REPLACE`;
     const result = await aplicarDiff({ caminho: filePath, bloco_diff: diff });
     expect(result.written).toBe(false);
-    expect(result.toolMessage).toContain("Bloco SEARCH not found");
+    expect(result.toolMessage).toContain("SEARCH block not found");
   });
 
   it("creates new file with empty search block", async () => {
@@ -418,7 +418,7 @@ const x = 2;
 >>>>>>> REPLACE`;
     const result = await aplicarDiff({ caminho: filePath, bloco_diff: diff });
     expect(result.written).toBe(false);
-    expect(result.toolMessage).toContain("BLOQUEADO");
+    expect(result.toolMessage).toContain("BLOCKED");
     expect(result.toolMessage).toContain("forbidden by policy");
   });
 
@@ -464,7 +464,7 @@ const x = 2;
 >>>>>>> REPLACE`;
     const result = await aplicarDiff({ caminho: filePath, bloco_diff: diff });
     expect(result.written).toBe(true);
-    expect(result.toolMessage).toContain("AVISO_POS_ESCRITA");
+    expect(result.toolMessage).toContain("POST-WRITE WARNING");
     expect(result.toolMessage).toContain("Type mismatch");
   });
 
@@ -500,6 +500,6 @@ const x = 2;
 >>>>>>> REPLACE`;
     const result = await aplicarDiff({ caminho: filePath, bloco_diff: diff });
     expect(result.written).toBe(false);
-    expect(result.toolMessage).toContain("REJEITADO");
+    expect(result.toolMessage).toContain("REJECTED");
   });
 });

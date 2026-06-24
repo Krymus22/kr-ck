@@ -100,7 +100,7 @@ describe("toolConfigurator — extended (edge cases)", () => {
     // paths sem espaços/aspas (chars: word, dot, slash, backslash, dash).
     expect(isSafeCommand("where rojo")).toBe(true);
     expect(isSafeCommand("where /usr/bin/rojo")).toBe(true);
-    // Paths com aspas ou espaços são REJEITADOS (não batem no regex estrito).
+    // Paths com aspas ou espaços são REJECTEDS (não batem no regex estrito).
     expect(isSafeCommand('where "C:\\Program Files\\rojo"')).toBe(false);
   });
 
@@ -110,7 +110,7 @@ describe("toolConfigurator — extended (edge cases)", () => {
     // Aspas e asteriscos NÃO são permitidos (seriam rejeitados).
     expect(isSafeCommand("find / -name darklua")).toBe(true);
     expect(isSafeCommand("find . -name rojo -type f")).toBe(true);
-    // Args com aspas ou asteriscos são REJEITADOS.
+    // Args com aspas ou asteriscos são REJECTEDS.
     expect(isSafeCommand("find . -name 'rojo*' -type f")).toBe(false);
   });
 
@@ -120,31 +120,31 @@ describe("toolConfigurator — extended (edge cases)", () => {
   // Os testes abaixo documentam o comportamento CORRIGIDO (rejeita) — antes,
   // esses comandos eram aceitos pela falta de âncora `$` no regex.
 
-  it("comando com pipe | é REJEITADO (BUG FIX: âncora $ + DANGEROUS_CHARS)", () => {
+  it("comando com pipe | é REJECTED (BUG FIX: âncora $ + DANGEROUS_CHARS)", () => {
     expect(isSafeCommand("rojo --help | cat")).toBe(false);
     expect(isSafeCommand("darklua --version | grep 1.0")).toBe(false);
   });
 
-  it("comando com && é REJEITADO (BUG FIX)", () => {
+  it("comando com && é REJECTED (BUG FIX)", () => {
     expect(isSafeCommand("ls -la && rm -rf /")).toBe(false);
     expect(isSafeCommand("darklua --help && echo hacked")).toBe(false);
   });
 
-  it("comando com ; é REJEITADO (BUG FIX)", () => {
+  it("comando com ; é REJECTED (BUG FIX)", () => {
     expect(isSafeCommand("ls -la; rm -rf /")).toBe(false);
     expect(isSafeCommand("rojo --help; curl bad")).toBe(false);
   });
 
-  it("comando com redirect > é REJEITADO (BUG FIX)", () => {
+  it("comando com redirect > é REJECTED (BUG FIX)", () => {
     expect(isSafeCommand("rojo --help > /etc/passwd")).toBe(false);
     expect(isSafeCommand("ls -la > /tmp/out")).toBe(false);
   });
 
-  it("comando com redirect < é REJEITADO (BUG FIX)", () => {
+  it("comando com redirect < é REJECTED (BUG FIX)", () => {
     expect(isSafeCommand("rojo --help < /etc/passwd")).toBe(false);
   });
 
-  it("comando com redirect >> é REJEITADO (BUG FIX)", () => {
+  it("comando com redirect >> é REJECTED (BUG FIX)", () => {
     expect(isSafeCommand("rojo --help >> /etc/passwd")).toBe(false);
   });
 

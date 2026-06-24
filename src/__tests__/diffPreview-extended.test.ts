@@ -31,7 +31,7 @@ describe("computeUnifiedDiff (variações)", () => {
   });
 
   it("gera diff vazio quando 'before' e 'after' diferem apenas por newline final", () => {
-    // Antes: "abc\n", Depois: "abc" — splitLines remove o \n final
+    // Before: "abc\n", Depois: "abc" — splitLines remove o \n final
     const diff = computeUnifiedDiff("abc\n", "abc", "trail.txt");
     expect(diff).toBe("");
   });

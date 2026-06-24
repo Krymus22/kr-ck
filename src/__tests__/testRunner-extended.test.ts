@@ -139,7 +139,7 @@ describe("testRunner — extended", () => {
 
   describe("edge cases", () => {
     it("formatFixSuggestions retorna mensagem específica para lista vazia", () => {
-      expect(formatFixSuggestions([])).toBe("No fix suggestions.");
+      expect(formatFixSuggestions([])).toContain("No fix suggestions");
     });
 
     it("runTestsWithAutoFix para imediatamente quando fixFn não é fornecido", async () => {

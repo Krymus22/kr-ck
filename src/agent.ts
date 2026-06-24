@@ -397,37 +397,37 @@ const toolHandlers: Record<string, ToolHandler> = {
   "buscar_web": async (args) => {
     const query = asString(args.query);
     if (!query) {
-      return { resultStr: "[ERROR] 'query' é obrigatório.", usedHeal: false };
+      return { resultStr: "[ERROR] 'query' is required.", usedHeal: false };
     }
     const maxResults = (args.maxResults as number) ?? 5;
     try {
       const { webSearch } = await import("./apiResearcher.js");
       const results = await webSearch(query, maxResults);
       if (results.length === 0) {
-        return { resultStr: `[INFO] Nenhum resultado encontrado para: "${query}"`, usedHeal: false };
+        return { resultStr: `[INFO] No results found for: "${query}"`, usedHeal: false };
       }
       const formatted = results.map((r: any, i: number) =>
-        `${i + 1}. ${r.title ?? "(sem título)"}\n   URL: ${r.url}\n   ${r.snippet ?? r.description ?? ""}`
+        `${i + 1}. ${r.title ?? "(untitled)"}\n   URL: ${r.url}\n   ${r.snippet ?? r.description ?? ""}`
       ).join("\n\n");
-      return { resultStr: `[RESULTADOS WEB] ${results.length} resultado(s) for "${query}":\n\n${formatted}`, usedHeal: false };
+      return { resultStr: `[WEB RESULTS] ${results.length} result(s) for "${query}":\n\n${formatted}`, usedHeal: false };
     } catch (err) {
-      return { resultStr: `[ERROR] Falha na busca web: ${(err as Error).message}`, usedHeal: false };
+      return { resultStr: `[ERROR] Web search failed: ${(err as Error).message}`, usedHeal: false };
     }
   },
 
   "ler_url": async (args) => {
     const url = asString(args.url);
     if (!url) {
-      return { resultStr: "[ERROR] 'url' é obrigatório.", usedHeal: false };
+      return { resultStr: "[ERROR] 'url' is required.", usedHeal: false };
     }
     const maxLength = (args.maxLength as number) ?? 10000;
     try {
       const { webRead } = await import("./apiResearcher.js");
       const content = await webRead(url);
       const truncated = content.length > maxLength
-        ? content.slice(0, maxLength) + `\n\n[CONTEÚDO TRUNCADO — ${content.length} chars total, mostrando ${maxLength}]`
+        ? content.slice(0, maxLength) + `\n\n[CONTENT TRUNCATED — ${content.length} chars total, showing ${maxLength}]`
         : content;
-      return { resultStr: truncated || `[ERROR] Não foi possível extrair conteúdo de: ${url}`, usedHeal: false };
+      return { resultStr: truncated || `[ERROR] Could not extract content from: ${url}`, usedHeal: false };
     } catch (err) {
       return { resultStr: `[ERROR] Failed to read URL: ${(err as Error).message}`, usedHeal: false };
     }
@@ -440,7 +440,7 @@ const toolHandlers: Record<string, ToolHandler> = {
       maxDepth: args.maxDepth as number | undefined,
       ignore: args.ignore as string[] | undefined,
     });
-    const output = results.length > 0 ? results.join("\n") : "Nenhum arquivo encontrado.";
+    const output = results.length > 0 ? results.join("\n") : "No files found.";
     return { resultStr: output, usedHeal: false };
   },
 
@@ -467,8 +467,8 @@ const toolHandlers: Record<string, ToolHandler> = {
     const result = multiFileEdit(requests);
     const errorList = result.errors.map((e) => `${e.file}: ${e.error}`).join("; ");
     const output = result.success
-      ? `[SUCCESS] Editados: ${result.filesEdited.join(", ")}`
-      : `[ERROR] Falhas: ${errorList}`;
+      ? `[SUCCESS] Edited: ${result.filesEdited.join(", ")}`
+      : `[ERROR] Failures: ${errorList}`;
     return { resultStr: output, usedHeal: false };
   },
 
@@ -556,13 +556,13 @@ const toolHandlers: Record<string, ToolHandler> = {
     const suggestions = suggester.suggest(message);
     
     if (suggestions.length === 0) {
-      return { resultStr: "Nenhuma tool sugerida for esta mensagem.", usedHeal: false };
+      return { resultStr: "No tool suggested for this message.", usedHeal: false };
     }
     
     const output = [
-      "Q Tools sugeridas:",
+      "? Suggested tools:",
       ...suggestions.slice(0, 5).map((s, i) => 
-        `${i + 1}. ${s.tool.name} (${s.tool.category}) - Confiança: ${(s.confidence * 100).toFixed(0)}%\n   Motivo: ${s.reason}`
+        `${i + 1}. ${s.tool.name} (${s.tool.category}) - Confidence: ${(s.confidence * 100).toFixed(0)}%\n   Reason: ${s.reason}`
       )
     ].join("\n");
     
@@ -577,15 +577,15 @@ const toolHandlers: Record<string, ToolHandler> = {
     const detection = detector.detect(message, dir);
     
     const output = [
-      "Q Detecção de Tools:",
+      "? Tool detection:",
       "",
-      "Por intenção:",
-      detection.intent ? `  * ${detection.intent.tool}` : "  * Nenhuma",
+      "By intent:",
+      detection.intent ? `  * ${detection.intent.tool}` : "  * None",
       "",
-      "Por contexto do projeto:",
+      "By project context:",
       detection.context.length > 0 
         ? detection.context.map(t => `  * ${t.name} (${t.category})`).join("\n")
-        : "  * Nenhuma"
+        : "  * None"
     ].join("\n");
     
     return { resultStr: output, usedHeal: false };
@@ -593,12 +593,14 @@ const toolHandlers: Record<string, ToolHandler> = {
 
   // --- Think Tool (3.1) ----------------------------------------------------
   "pensar": async (args) => {
+    // Accept both `categoria` (PT, original) and `category` (EN, alias)
+    const cat = asString(args.categoria ?? args.category, "general");
     const result = await think({
       pensamento: asString(args.pensamento),
-      categoria: asString(args.categoria, "general"),
+      category: cat,
     });
     // Update task state based on thinking category
-    if (args.categoria === "planning" && asString(args.pensamento).length > 20) {
+    if (cat === "planning" && asString(args.pensamento).length > 20) {
       // Heuristic: capture planning thoughts as a decision
       const snippet = asString(args.pensamento).slice(0, 200).replaceAll("\n", " ");
       appendTaskStateItem("decisions", `[plan] ${snippet}`);
@@ -624,7 +626,7 @@ const toolHandlers: Record<string, ToolHandler> = {
     if (args.notes) patch.notes = asString(args.notes);
     const updated = updateTaskState(patch);
     return {
-      resultStr: `[SUCCESS] TASK_STATE.md atualizado em ${updated.updatedAt}.\n` +
+      resultStr: `[SUCCESS] TASK_STATE.md updated at ${updated.updatedAt}.\n` +
         `Done: ${updated.done.length} | Todo: ${updated.todo.length} | Decisions: ${updated.decisions.length} | Bugs: ${updated.bugs.length}`,
       usedHeal: false,
     };
@@ -633,12 +635,12 @@ const toolHandlers: Record<string, ToolHandler> = {
   "marcar_feito": async (args) => {
     const item = asString(args.item);
     if (!item) {
-      return { resultStr: "[ERROR] 'item' é obrigatório (substring do item em todo).", usedHeal: false };
+      return { resultStr: "[ERROR] 'item' is required (substring of an item in todo).", usedHeal: false };
     }
     const { markTaskItemDone } = await import("./taskState.js");
     const updated = markTaskItemDone(item);
     return {
-      resultStr: `[SUCCESS] Item movido for 'done': "${item}".\nTodo restante: ${updated.todo.length}`,
+      resultStr: `[SUCCESS] Item moved to 'done': "${item}".\nTodo remaining: ${updated.todo.length}`,
       usedHeal: false,
     };
   },
@@ -646,7 +648,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   "ler_estado": async () => {
     const summary = getTaskStateSummary();
     return {
-      resultStr: summary ?? "[INFO] Nenhum TASK_STATE.md encontrado. Use atualizar_estado for criar.",
+      resultStr: summary ?? "[INFO] No TASK_STATE.md found. Use atualizar_estado to create one.",
       usedHeal: false,
     };
   },
@@ -655,7 +657,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   "explorar_subagente": async (args) => {
     const question = asString(args.questao ?? args.question);
     if (!question) {
-      return { resultStr: "[ERROR] 'questao' é obrigatória (pergunta for o sub-agente explorar).", usedHeal: false };
+      return { resultStr: "[ERROR] 'questao' (or 'question') is required (the question for the sub-agent to explore).", usedHeal: false };
     }
     const cwd = args.cwd ? asString(args.cwd) : undefined;
     const maxCalls = args.max_tool_calls as number | undefined;
@@ -669,7 +671,7 @@ const toolHandlers: Record<string, ToolHandler> = {
       const result = await runSubAgent({ question, cwd, maxToolCalls: maxCalls });
     if (result === null) {
       return {
-        resultStr: "[INFO] Sub-agente não executou (effort level muito baixo ou failed). Use effort=high ou max for habilitar.",
+        resultStr: "[INFO] Sub-agent did not execute (effort level too low or failed). Use effort=high or max to enable.",
         usedHeal: false,
       };
     }
@@ -702,6 +704,11 @@ function getToolSchemaMap(): Map<string, Record<string, unknown>> {
   return map;
 }
 
+// BUG-PP+ : track duplicate blocked tool calls per agent loop iteration.
+// Reset at the start of each runAgentLoop. If the same tool+args is blocked 3+ times,
+// dispatchToolCall returns a STOP message forcing the IA to give up and respond.
+const blockedCallCounter = new Map<string, number>();
+
 async function dispatchToolCall(
   toolCall: ToolCall,
   healRetry: number = 0
@@ -727,6 +734,24 @@ async function dispatchToolCall(
     if (currentOnToolResult) {
       try { currentOnToolResult(name, false, gateBlock); } catch { /* ignore */ }
     }
+
+    // BUG-PP+ : detect duplicate blocked tool calls (same tool + same args).
+    // If the IA keeps calling the same tool with the same (bad) args, the agent loop
+    // would otherwise spin until max depth (20) — wasting 3-5 minutes of API calls.
+    // After 2 identical blocked calls, return a stronger error telling the IA to STOP
+    // and respond to the user with what it has so far.
+    const argSignature = `${name}:${toolCall.function.arguments}`;
+    blockedCallCounter.set(argSignature, (blockedCallCounter.get(argSignature) ?? 0) + 1);
+    const attemptNum = blockedCallCounter.get(argSignature)!;
+    if (attemptNum >= 3) {
+      const stopMsg =
+        `[STOP] You have called "${name}" with the same arguments ${attemptNum} times and it keeps failing. ` +
+        `STOP retrying the same call. Respond to the user now with what you have so far, ` +
+        `explain the issue clearly, and ask for guidance if needed. Do NOT call "${name}" again with the same arguments.`;
+      log.warn(`[DEDUP] Tool ${name} blocked ${attemptNum}x with same args — forcing stop`);
+      return { resultStr: stopMsg, usedHeal: false };
+    }
+
     return { resultStr: gateBlock, usedHeal: false };
   }
 
@@ -890,6 +915,25 @@ function autoParseArgs(name: string, args: Record<string, unknown>): void {
       if (val === "true") args[field] = true;
       else if (val === "false") args[field] = false;
     }
+  }
+
+  // BUG-JJ: Numeric fields que IAs passam como string ("1" em vez de 1).
+  // Coerce qualquer arg cujo valor seja string numérica E o schema espera number.
+  // Faz isso olhando o schema real para evitar coerção errada.
+  try {
+    const schema = getToolSchemaMap().get(name);
+    if (schema?.properties) {
+      for (const [key, propSchema] of Object.entries(schema.properties)) {
+        if (propSchema.type !== "number") continue;
+        const val = args[key];
+        if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
+          args[key] = Number(val);
+          log.debug(`[AUTO-PARSE] Coerced ${name}.${key} from string "${val}" to number`);
+        }
+      }
+    }
+  } catch {
+    // schema lookup failed — skip coercion
   }
 }
 
@@ -1226,6 +1270,30 @@ async function handleChatResponse(
   if (!choice) throw new Error("Empty response from NVIDIA NIM API");
 
   const { message, finish_reason } = choice;
+
+  // BUG-PP fix: sanitize malformed tool_call arguments BEFORE adding to history.
+  // Some models (llama-3.3-70b) occasionally emit truncated/malformed JSON in
+  // tool_call.function.arguments. If we store that raw and re-send it on the
+  // next iteration, the OpenAI client rejects the whole request with 400.
+  // Sanitize: if JSON.parse fails on arguments, replace with a valid JSON
+  // object containing the raw text so the model can see what went wrong.
+  if (message.tool_calls && Array.isArray(message.tool_calls)) {
+    for (const tc of message.tool_calls) {
+      if (tc?.function?.arguments && typeof tc.function.arguments === "string") {
+        try {
+          JSON.parse(tc.function.arguments);
+        } catch {
+          log.warn(`[SANITIZE] Tool ${tc.function.name} had malformed JSON args — replacing with valid JSON`);
+          const rawArgs = tc.function.arguments;
+          tc.function.arguments = JSON.stringify({
+            _malformed_json: rawArgs.slice(0, 500),
+            _error: "Previous arguments were malformed JSON. Please retry with valid JSON."
+          });
+        }
+      }
+    }
+  }
+
   history.addRawAssistantMessage(message);
 
   fireTrigger("always");
@@ -1233,6 +1301,26 @@ async function handleChatResponse(
   if (finish_reason === "tool_calls" && message.tool_calls?.length) {
     log.debug(`Model requested ${message.tool_calls.length} tool call(s)`);
     await processToolCalls(message.tool_calls);
+
+    // BUG-PP+ : abort the agent loop if any tool has been blocked 3+ times with the same args.
+    // The IA is stuck in a loop and won't recover — better to return what we have so far
+    // than to spin for another 10+ iterations.
+    let maxBlocked = 0;
+    let blockedTool = "";
+    for (const [sig, count] of blockedCallCounter.entries()) {
+      if (count > maxBlocked) { maxBlocked = count; blockedTool = sig.split(":")[0]; }
+    }
+    if (maxBlocked >= 3) {
+      log.warn(`[DEDUP-ABORT] Aborting agent loop: tool "${blockedTool}" blocked ${maxBlocked}x with same args`);
+      // Return immediately with a final error message. Don't recurse — the IA will
+      // just call the same tool again. Force-terminate.
+      const abortMsg =
+        `[LOOP-ABORT] The agent was terminated because tool "${blockedTool}" was called ${maxBlocked} times ` +
+        `with the same arguments and kept failing. The model appears unable to recover from this state. ` +
+        `Please retry with a different prompt or model.`;
+      return abortMsg;
+    }
+
     return sendAndProcess(depth + 1, onStreamStart, onToken, onThinking, onUsage);
   }
 
@@ -1555,6 +1643,7 @@ export async function runAgentLoop(
   resetSelfValidation();
   resetAutoTestSuggestions();
   resetFalsePromiseCounter();
+  blockedCallCounter.clear(); // BUG-PP+: reset duplicate-call counter for new session
   setEffortLevel(getEffortLevel()); // refresh system prompt with current effort
 
   // 3.7: Initialize TASK_STATE.md from the user's first message

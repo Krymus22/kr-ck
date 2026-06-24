@@ -109,10 +109,10 @@ describe("safetyReviewer — extended", () => {
         reviewedByLlm: true,
         durationMs: 100,
       });
-      expect(r).toContain("AVISO DE SEGURANÇA");
-      expect(r).toContain("BAIXO");
+      expect(r).toContain("SECURITY WARNING");
+      expect(r).toContain("LOW");
       // Sem patterns, não imprime a lista
-      expect(r).not.toContain("Padrões detectados");
+      expect(r).not.toContain("Patterns detected");
     });
 
     it("formata high com 'NÃO escreva este código' e recomendações", () => {
@@ -123,7 +123,7 @@ describe("safetyReviewer — extended", () => {
         reviewedByLlm: true,
         durationMs: 200,
       });
-      expect(r).toContain("BLOQUEIO DE SEGURANÇA");
+      expect(r).toContain("SECURITY BLOCK");
       expect(r).toContain("UpdateAsync");
       expect(r).toContain("backup/rollback");
     });

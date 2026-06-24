@@ -335,7 +335,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "sugerir_fixes",
       description:
-        "Analyze test failures and suggest fixes.",
+        "Run the project's test suite and suggest fixes for failing tests. Only useful if the project has a test framework (vitest/jest/pytest/cargo/go). Returns 'No fix suggestions' if no tests fail or no framework is detected.",
       parameters: {
         type: "object",
         properties: {
@@ -744,15 +744,16 @@ function buildQuotaExhaustedMessage(retryAfterS: number, errBody: string): strin
   const retryAfterLabel = Number.isNaN(retryAfterS) ? "N/A" : retryAfterS + "s";
   const hint = isQuotaExhausted
     ? `Retry-After missing or too long (${retryAfterLabel}) - likely daily/monthly quota exhausted.`
-    : `Limite de ${MAX_429_RETRIES} retentativas atingido.`;
+    : `Max retries (${MAX_429_RETRIES}) reached.`;
+  const modelHint = config.model ? `the model ${config.model}` : "this model";
 
   return (
-    `\nx  Erro 429 da NVIDIA NIM API - ${hint}\n\n` +
-    `   Possíveis causas:\n` +
-    `     * Quota diária/mensal da sua API key esgotada\n` +
-    `     * Plano gratuito sem acesso ao modelo minimaxai/minimax-m3\n` +
-    `     * Verifique em: https://build.nvidia.com/ -> Usage & Billing\n\n` +
-    `   Detalhes do erro: ${errBody}`
+    `\nx  NVIDIA NIM API 429 error - ${hint}\n\n` +
+    `   Possible causes:\n` +
+    `     * Daily/monthly API key quota exhausted\n` +
+    `     * Free-tier plan without access to ${modelHint}\n` +
+    `     * Check: https://build.nvidia.com/ -> Usage & Billing\n\n` +
+    `   Error details: ${errBody}`
   );
 }
 

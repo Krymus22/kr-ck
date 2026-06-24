@@ -56,7 +56,7 @@ vi.mock("../history.js", () => ({
 }));
 
 vi.mock("../tools.js", () => ({
-  lerArquivo: vi.fn(() => "file content"),
+  lerFile: vi.fn(() => "file content"),
   aplicarDiff: vi.fn(async () => ({ written: true, toolMessage: "diff applied", success: true })),
   executarComando: vi.fn(() => ({ stdout: "ok", stderr: "", exitCode: 0 })),
   desfazerEdicao: vi.fn(() => "Undo successful. File restored to previous version."),

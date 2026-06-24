@@ -234,8 +234,50 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
     // z-ai CLI not available, fall through
   }
 
-  // Fallback: use GitHub search API for code-related queries
-  if (query.toLowerCase().includes("roblox") || query.toLowerCase().includes("api")) {
+  // Fallback 1: DuckDuckGo HTML search (no API key required, public endpoint)
+  try {
+    const ddgResult = await runCmd(
+      "curl",
+      ["-sL", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
+      SEARCH_TIMEOUT_MS
+    );
+    if (ddgResult.ok && ddgResult.stdout) {
+      const results: SearchResult[] = [];
+      // DuckDuckGo HTML results: <a class="result__a" href="...">title</a>
+      // and <a class="result__snippet" href="...">snippet</a>
+      const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+      const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      const snippets: string[] = [];
+      let sm;
+      while ((sm = snippetRegex.exec(ddgResult.stdout)) !== null) {
+        snippets.push(sm[1].replace(/<[^>]+>/g, "").trim());
+      }
+      let m;
+      let i = 0;
+      while ((m = linkRegex.exec(ddgResult.stdout)) !== null && i < num) {
+        // DDG wraps URLs in //duckduckgo.com/l/?uddg=<encoded>
+        let url = m[1];
+        const uddgMatch = url.match(/uddg=([^&]+)/);
+        if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
+        if (url.startsWith("//")) url = "https:" + url;
+        const title = m[2].replace(/<[^>]+>/g, "").trim();
+        results.push({
+          url,
+          title,
+          snippet: snippets[i] ?? "",
+        });
+        i++;
+      }
+      if (results.length > 0) return results;
+    }
+  } catch {
+    // DuckDuckGo unavailable, fall through
+  }
+
+  // Fallback 2: GitHub search API for code-related queries
+  if (query.toLowerCase().includes("roblox") || query.toLowerCase().includes("api") ||
+      query.toLowerCase().includes("github") || query.toLowerCase().includes("library")) {
     try {
       const ghResult = await runCmd(
         "curl",
@@ -292,6 +334,34 @@ export async function webRead(url: string): Promise<string> {
       return text.slice(0, MAX_CONTENT_LENGTH);
     }
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+  } catch {
+    // ignore
+  }
+
+  // Fallback: direct curl fetch + HTML stripping
+  try {
+    const curlResult = await runCmd(
+      "curl",
+      ["-sL", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+       "--max-time", "15", url],
+      READ_TIMEOUT_MS
+    );
+    if (curlResult.ok && curlResult.stdout) {
+      const html = curlResult.stdout;
+      const text = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text.length > 0) return text.slice(0, MAX_CONTENT_LENGTH);
+    }
   } catch {
     // ignore
   }

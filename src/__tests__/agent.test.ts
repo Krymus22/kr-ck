@@ -55,7 +55,7 @@ vi.mock("../history.js", () => ({
 }));
 
 vi.mock("../tools.js", () => ({
-  lerArquivo: vi.fn(),
+  lerFile: vi.fn(),
   aplicarDiff: vi.fn(),
   executarComando: vi.fn(),
 }));

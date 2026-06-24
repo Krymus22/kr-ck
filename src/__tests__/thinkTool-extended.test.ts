@@ -33,8 +33,8 @@ describe("thinkTool (extended) — handler pensar", () => {
 
   it("preserva a categoria informada em todos os 5 valores do enum", async () => {
     for (const cat of ["planning", "verification", "debugging", "architecture", "general"]) {
-      const r = await think({ pensamento: "x", categoria: cat });
-      expect(r.message).toContain(`categoria: ${cat}`);
+      const r = await think({ pensamento: "x", category: cat });
+      expect(r.message).toContain(`category: ${cat}`);
     }
   });
 });
@@ -50,22 +50,22 @@ describe("thinkTool (extended) — reasoning storage", () => {
   });
 
   it("categoria 'debugging' aparece literalmente na mensagem registrada", async () => {
-    const r = await think({ pensamento: "analisando bug", categoria: "debugging" });
-    expect(r.message).toContain("categoria: debugging");
-    expect(r.message).toContain("PENSAMENTO REGISTRADO");
+    const r = await think({ pensamento: "analisando bug", category: "debugging" });
+    expect(r.message).toContain("category: debugging");
+    expect(r.message).toContain("THOUGHT RECORDED");
   });
 });
 
 describe("thinkTool (extended) — context injection na mensagem", () => {
   it("mensagem orienta a prosseguir com a ação planejada", async () => {
     const r = await think({ pensamento: "planejando" });
-    expect(r.message).toContain("prossiga");
-    expect(r.message).toContain("planejada");
+    expect(r.message).toContain("proceed");
+    expect(r.message).toContain("planned action");
   });
 
-  it("mensagem sempre começa com marcador PENSAMENTO REGISTRADO", async () => {
-    const r = await think({ pensamento: "teste", categoria: "planning" });
-    expect(r.message.startsWith("[PENSAMENTO REGISTRADO")).toBe(true);
+  it("mensagem sempre começa com marcador THOUGHT RECORDED", async () => {
+    const r = await think({ pensamento: "teste", category: "planning" });
+    expect(r.message.startsWith("[THOUGHT RECORDED")).toBe(true);
   });
 });
 

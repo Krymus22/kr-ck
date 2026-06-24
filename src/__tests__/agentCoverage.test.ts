@@ -74,7 +74,7 @@ vi.mock("../apiKeyPool.js", () => ({
 }));
 
 vi.mock("../tools.js", () => ({
-  lerArquivo: vi.fn(),
+  lerFile: vi.fn(),
   aplicarDiff: vi.fn(),
   executarComando: vi.fn(),
   desfazerEdicao: vi.fn(),

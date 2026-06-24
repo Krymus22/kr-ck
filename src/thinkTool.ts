@@ -19,6 +19,8 @@ export interface ThinkArgs {
   pensamento: string;
   /** Optional: category of thinking (planning, verification, debugging, architecture) */
   categoria?: string;
+  /** Alias for categoria (some callers/tests use the English name) */
+  category?: string;
 }
 
 export interface ThinkResult {
@@ -27,14 +29,15 @@ export interface ThinkResult {
 }
 
 export async function think(args: ThinkArgs): Promise<ThinkResult> {
-  const category = args.categoria ?? "general";
+  // Accept both `categoria` (PT, original) and `category` (EN, alias) for robustness
+  const category = args.categoria ?? args.category ?? "general";
   const thoughtLength = args.pensamento.length;
   
   return {
     confirmed: true,
-    message: `[PENSAMENTO REGISTRADO - categoria: ${category}, ${thoughtLength} chars]\n` +
-      `Use este espaço for raciocinar antes de agir. ` +
-      `Agora prossiga com a ação planejada.`,
+    message: `[THOUGHT RECORDED - category: ${category}, ${thoughtLength} chars]\n` +
+      `Use this space to reason before acting. ` +
+      `Now proceed with the planned action.`,
   };
 }
 

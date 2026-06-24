@@ -297,7 +297,7 @@ describe("property-validators", () => {
     //   O JSDoc da função agora documenta isso explicitamente. A propriedade
     //   abaixo foi ajustada para verificar o comportamento REAL: sem modo
     //   ativo, shouldValidateFile retorna false mesmo para .luau/.lua.
-    it("shouldValidateFile(path) retorna false para .luau/.lua quando nenhum modo ativo (comportamento documentado)", async () => {
+    it("shouldValidateFile(path) retorna false para .luau/.lua quando no active mode (comportamento documentado)", async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.oneof(

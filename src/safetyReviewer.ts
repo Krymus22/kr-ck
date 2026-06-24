@@ -322,31 +322,31 @@ export function formatSafetyReview(result: SafetyReviewResult): string {
   const lines: string[] = [];
 
   if (result.risk === "high") {
-    lines.push("[BLOQUEIO DE SEGURANÇA] Revisor detectou risco ALTO for dados:");
+    lines.push("[SECURITY BLOCK] Reviewer detected HIGH risk to data:");
     lines.push("");
-    lines.push(`Risco: HIGH`);
-    lines.push(`Justificativa: ${result.reasoning}`);
+    lines.push(`Risk: HIGH`);
+    lines.push(`Reasoning: ${result.reasoning}`);
     if (result.patternsMatched.length > 0) {
       lines.push("");
-      lines.push("Padrões detectados:");
+      lines.push("Patterns detected:");
       for (const p of result.patternsMatched) {
         lines.push(`  - ${p}`);
       }
     }
     lines.push("");
-    lines.push("[!] NÃO escreva este código sem:");
-    lines.push("  1. Confirmar explicitamente com o usuário que ele quer essa operação");
-    lines.push("  2. Adicionar guardrails (ex: if not IS_TEST_SERVER then return end)");
-    lines.push("  3. Implementar backup/rollback antes da operação destrutiva");
-    lines.push("  4. Para DataStore: usar :UpdateAsync em vez de :SetAsync (merge em vez de overwrite)");
+    lines.push("[!] DO NOT write this code without:");
+    lines.push("  1. Explicitly confirming with the user that they want this operation");
+    lines.push("  2. Adding guardrails (e.g. if not IS_TEST_SERVER then return end)");
+    lines.push("  3. Implementing backup/rollback before the destructive operation");
+    lines.push("  4. For DataStore: use :UpdateAsync instead of :SetAsync (merge instead of overwrite)");
     lines.push("");
-    lines.push("Revise o código e tente novamente. Se você tem CERTEZA que o usuário pediu isso,");
-    lines.push("explique o risco no seu response e peça confirmação antes de prosseguir.");
+    lines.push("Review the code and try again. If you are CERTAIN the user asked for this,");
+    lines.push("explain the risk in your response and ask for confirmation before proceeding.");
   } else if (result.risk === "low") {
-    lines.push("[AVISO DE SEGURANÇA] Revisor detectou risco BAIXO:");
-    lines.push(`Justificativa: ${result.reasoning}`);
+    lines.push("[SECURITY WARNING] Reviewer detected LOW risk:");
+    lines.push(`Reasoning: ${result.reasoning}`);
     if (result.patternsMatched.length > 0) {
-      lines.push("Padrões detectados (tratar com cuidado):");
+      lines.push("Patterns detected (handle with care):");
       for (const p of result.patternsMatched) {
         lines.push(`  - ${p}`);
       }
@@ -354,8 +354,8 @@ export function formatSafetyReview(result: SafetyReviewResult): string {
   } else {
     // risk = none, but LLM was called (patterns matched but LLM said safe)
     if (result.reviewedByLlm) {
-      lines.push("[SEGURANÇA OK] Revisor analisou e confirmou: sem risco a dados.");
-      lines.push(`Justificativa: ${result.reasoning}`);
+      lines.push("[SECURITY OK] Reviewer analyzed and confirmed: no data risk.");
+      lines.push(`Reasoning: ${result.reasoning}`);
     }
     // If risk=none and not reviewed by LLM, return empty (no message needed)
   }

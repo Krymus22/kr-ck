@@ -144,7 +144,7 @@ describe("multiFileEdit-extended: edge cases", () => {
     ];
     const result = multiFileEdit(requests);
     // Sprint C (BUG-V): search="" em arquivo não-vazio agora faz APPEND.
-    // Antes era skip (0 replacements). Agora: "HELLO\n" + "PREFIX_" = "HELLO\nPREFIX_"
+    // Antes era skip (0 replacements). Now: "HELLO\n" + "PREFIX_" = "HELLO\nPREFIX_"
     expect(result.success).toBe(true);
     const content = fs.readFileSync(path.join(TEST_DIR, "empty-search.ts"), "utf8");
     expect(content).toBe("HELLO\nPREFIX_");

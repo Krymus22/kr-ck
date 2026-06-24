@@ -162,8 +162,8 @@ export function validateToolCall(
 
 export function formatValidationErrors(toolName: string, errors: string[]): string {
   return (
-    `[ERRO: VALIDAÇÃO DE SCHEMA] A chamada "${toolName}" tem argumentos inválidos:\n\n` +
+    `[ERROR: SCHEMA VALIDATION] The call to "${toolName}" has invalid arguments:\n\n` +
     errors.map((e) => `  X ${e}`).join("\n") +
-    `\n\nCorrija os argumentos e tente novamente. Verifique os tipos e campos obrigatórios.`
+    `\n\nFix the arguments and try again. Check the types and required fields.`
   );
 }

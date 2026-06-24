@@ -112,7 +112,7 @@ describe("rollbackStore-extended — restoreBackup", () => {
     // Tentar restore deve falhar e remover a entrada stale do índice
     const ok = restoreBackup(filePath);
     expect(ok).toBe(false);
-    // Índice não deve mais conter a entrada stale
+    // Índice não devand  moreconter a entrada stale
     const remaining = listBackups(filePath);
     expect(remaining).toHaveLength(0);
   });

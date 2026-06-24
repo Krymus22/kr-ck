@@ -23,7 +23,7 @@ describe("pokaYokeCheck", () => {
     it("blocks when path is empty string", () => {
       const r = pokaYokeCheck("ler_arquivo", { caminho: "" });
       expect(r.ok).toBe(false);
-      expect(r.error).toContain("não vazio");
+      expect(r.error).toContain("non-empty");
     });
 
     it("passes when path is provided", () => {

@@ -78,7 +78,7 @@ describe("promiseDetector — extended", () => {
       const m1 = buildFalsePromiseRejectionMessage("vou ver", 1);
       const m2 = buildFalsePromiseRejectionMessage("vou ver", 2);
       expect(m1).not.toContain("tentativa 1");
-      expect(m2).toContain("(tentativa 2 de 2)");
+      expect(m2).toContain("(attempt 2 of 2)");
     });
   });
 

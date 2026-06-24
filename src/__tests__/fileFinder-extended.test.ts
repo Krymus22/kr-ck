@@ -137,7 +137,7 @@ describe("fileFinder — extended (edge cases)", () => {
 
   it("modeName null não compila (TS) — runtime retorna erro ou cria pasta root", () => {
     // copyToModeTools aceita modeName: string (não nullable). Vamos testar com
-    // string vazia que é o equivalente runtime mais próximo.
+    // string vazia que é o equivalente runtimand  morepróximo.
     const src = path.join(tmpHome, "src.bin");
     fs.writeFileSync(src, "x", "utf8");
     const result = copyToModeTools(src, "");

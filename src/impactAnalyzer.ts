@@ -611,9 +611,9 @@ export function formatImpactHint(report: ImpactReport): string {
   if (report.usages.length === 0) return "";
 
   const lines: string[] = [];
-  lines.push(`[ANÁLISE DE IMPACTO] Antes de editar ${path.basename(report.targetFile)}:`);
-  lines.push(`Encontrei ${report.symbols.length} símbolo(s) definidos neste arquivo.`);
-  lines.push(`${report.usages.length} uso(s) encontrado(s) em ${report.affectedFiles.length} arquivo(s) do projeto:`);
+  lines.push(`[IMPACT ANALYSIS] Before editing ${path.basename(report.targetFile)}:`);
+  lines.push(`Found ${report.symbols.length} symbol(s) defined in this file.`);
+  lines.push(`${report.usages.length} usage(s) found in ${report.affectedFiles.length} file(s):`);
   lines.push("");
 
   // Group usages by file
@@ -624,18 +624,18 @@ export function formatImpactHint(report: ImpactReport): string {
   }
 
   for (const [file, usages] of byFile) {
-    lines.push(`  ${file} (${usages.length} uso${usages.length > 1 ? "s" : ""}):`);
+    lines.push(`  ${file} (${usages.length} usage${usages.length > 1 ? "s" : ""}):`);
     for (const u of usages.slice(0, 5)) {  // max 5 lines per file
       lines.push(`    L${u.line}: ${u.lineContent}`);
     }
     if (usages.length > 5) {
-      lines.push(`    ... e mais ${usages.length - 5} uso(s)`);
+      lines.push(`    ... and ${usages.length - 5} more usage(s)`);
     }
   }
 
   lines.push("");
-  lines.push(`Se você for RENOMEAR ou REMOVER algum desses símbolos, precisa editar`);
-  lines.push(`todos os arquivos acima também. Caso contrário, vai quebrar em runtime.`);
+  lines.push(`If you RENAME or REMOVE any of these symbols, you must also edit`);
+  lines.push(`all the files listed above. Otherwise, it will break at runtime.`);
 
   return lines.join("\n");
 }
@@ -645,7 +645,7 @@ export function formatImpactHint(report: ImpactReport): string {
  */
 export function formatImpactSummary(report: ImpactReport): string {
   if (report.usages.length === 0) return "no dependencies";
-  return `${report.usages.length} uso(s) em ${report.affectedFiles.length} arquivo(s)`;
+  return `${report.usages.length} usage(s) in ${report.affectedFiles.length} file(s)`;
 }
 
 /** Clear the cache. Useful for tests. */

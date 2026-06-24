@@ -239,26 +239,26 @@ export function detectFalsePromise(
  * what it did wrong and what to do instead.
  */
 export function buildFalsePromiseRejectionMessage(matchedPhrase: string, attempt: number): string {
-  const attemptSuffix = attempt > 1 ? ` (tentativa ${attempt} de 2)` : "";
+  const attemptSuffix = attempt > 1 ? ` (attempt ${attempt} of 2)` : "";
   return [
     `[FALSE_PROMISE_DETECTED${attemptSuffix}]`,
     ``,
-    `Sua última mensagem disse "${matchedPhrase}..." mas você não chamou nenhuma ferramenta nem editou nenhum arquivo.`,
+    `Your last message said "${matchedPhrase}..." but you didn't call any tool or edit any file.`,
     ``,
-    `Isto é um problema porque o usuário espera que você execute a ação prometida. Para o usuário, parece que você "parou sem fazer nada".`,
+    `This is a problem because the user expects you to fulfill the promised action. To the user, it looks like you "stopped without doing anything".`,
     ``,
-    `Você tem duas opções:`,
+    `You have two options:`,
     ``,
-    `1. **Chame uma ferramenta AGORA** for cumprir a promessa:`,
-    `   - ler_arquivo({ path: "..." }) for investigar um arquivo`,
-    `   - buscar_texto({ padrao: "...", caminho: "..." }) for procurar algo`,
-    `   - explorar_subagente({ questao: "..." }) for delegar a investigação`,
-    `   - executar_comando({ comando: "..." }) for rodar algo`,
+    `1. **Call a tool NOW** to fulfill the promise:`,
+    `   - ler_arquivo({ path: "..." }) to investigate a file`,
+    `   - buscar_texto({ padrao: "...", caminho: "..." }) to search for something`,
+    `   - explorar_subagente({ questao: "..." }) to delegate the investigation`,
+    `   - executar_comando({ comando: "..." }) to run something`,
     ``,
-    `2. **Explique explicitamente POR QUE não pode agir agora** (ex.: "não tenho acesso a X", "preciso que você confirme Y"):`,
-    `   - Em vez de "vou investigar", diga "não consigo investigar porque Z. Você pode me fornecer W?"`,
+    `2. **Explicitly explain WHY you cannot act now** (e.g. "I don't have access to X", "I need you to confirm Y"):`,
+    `   - Instead of "I will investigate", say "I cannot investigate because Z. Can you provide W?"`,
     ``,
-    `NÃO repita "vou investigar" sem chamar uma ferramenta — isso será detectado novamente e após 2 tentativas o agente terminará.`,
+    `DO NOT repeat "I will investigate" without calling a tool — this will be detected again and after 2 attempts the agent will terminate.`,
   ].join("\n");
 }
 

@@ -252,7 +252,7 @@ vi.mock("../tools.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../tools.js")>();
   return {
     ...actual,
-    lerArquivo: vi.fn(async (args: { caminho: string }) => {
+    lerFile: vi.fn(async (args: { caminho: string }) => {
       if (hoisted.lerArquivoShouldThrow) {
         throw new Error("simulated handler throw");
       }

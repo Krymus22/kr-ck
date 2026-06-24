@@ -135,7 +135,7 @@ export async function editFile(
     releaseLock = await acquireLock(resolved, holderId, 30_000, 60_000);
   } catch (err) {
     log.warn(`fileEdit: could not acquire lock for ${resolved}: ${(err as Error).message}`);
-    return `[ERROR] Não foi possível obter lock no arquivo: ${(err as Error).message}`;
+    return `[ERROR] Could not acquire file lock: ${(err as Error).message}`;
   }
 
   try {
@@ -392,13 +392,13 @@ export async function editFile(
   // entender que o search string não foi encontrado.
   let msg: string;
   if (result.replacements === 0) {
-    msg = `[AVISO] 0 replacements aplicadas em ${resolved}. ` +
-      `Nenhuma ocorrência do texto de busca foi encontrada. ` +
-      `Verifique se o 'search' corresponde exatamente ao conteúdo do arquivo. ` +
-      `Use ler_arquivo for ver o conteúdo atual antes de editar.`;
+    msg = `[WARNING] 0 replacements applied to ${resolved}. ` +
+      `No occurrence of the search text was found. ` +
+      `Make sure 'search' matches the file content exactly. ` +
+      `Use ler_arquivo to see the current content before editing.`;
     log.warn(`fileEdit: 0 replacements for ${resolved} — search string not found`);
   } else {
-    msg = `[SUCCESS] ${result.replacements}replacement(s) applied em ${resolved}`;
+    msg = `[SUCCESS] ${result.replacements} replacement(s) applied to ${resolved}`;
   }
   if (impactHint) {
     msg += `\n\n${impactHint}`;

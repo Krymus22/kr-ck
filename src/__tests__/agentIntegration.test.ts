@@ -172,16 +172,16 @@ describe("Agent integration: Think Tool", () => {
   it("think() returns a confirmation message the model can act on", async () => {
     const result = await think({
       pensamento: "Vou alterar a função X porque o bug é na linha 42",
-      categoria: "verification",
+      category: "verification",
     });
     expect(result.confirmed).toBe(true);
-    expect(result.message).toContain("PENSAMENTO REGISTRADO");
+    expect(result.message).toContain("THOUGHT RECORDED");
     expect(result.message).toContain("verification");
   });
 
   it("accepts the categoria enum values", async () => {
     for (const cat of ["planning", "verification", "debugging", "architecture", "general"]) {
-      const r = await think({ pensamento: "test", categoria: cat });
+      const r = await think({ pensamento: "test", category: cat });
       expect(r.confirmed).toBe(true);
       expect(r.message).toContain(cat);
     }

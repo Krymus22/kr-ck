@@ -238,7 +238,7 @@ describe("E2E: Configurador flow", () => {
     const toolMsgs = secondCallMessages.filter((m) => m.role === "tool");
     expect(toolMsgs.length).toBe(1);
     expect(toolMsgs[0].content).toMatch(/[ERROR]/);
-    expect(toolMsgs[0].content).toMatch(/Tool desconhecida/i);
+    expect(toolMsgs[0].content).toMatch(/Unknown tool/i);
 
     // configureTool retorna failure (nenhum manifest criado)
     expect(result.success).toBe(false);

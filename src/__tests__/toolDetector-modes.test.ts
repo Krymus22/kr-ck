@@ -396,7 +396,7 @@ describe("verifyToolWorks (complementar)", () => {
 });
 
 describe("getSearchPathsForTool (complementar)", () => {
-  it("retorna array não vazio com paths do home", () => {
+  it("retorna array non-empty com paths do home", () => {
     const paths = getSearchPathsForTool("rojo");
     expect(Array.isArray(paths)).toBe(true);
     expect(paths.length).toBeGreaterThan(5);

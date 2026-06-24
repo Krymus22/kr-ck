@@ -54,26 +54,26 @@ export function injectSelfValidationPrompt(touchedFiles: string[]): string {
   validationCountThisTurn++;
 
   const fileList = touchedFiles.length > 5
-    ? touchedFiles.slice(0, 5).join("\n  - ") + `\n  - ... e mais ${touchedFiles.length - 5}`
+    ? touchedFiles.slice(0, 5).join("\n  - ") + `\n  - ... and ${touchedFiles.length - 5} more`
     : touchedFiles.join("\n  - ");
 
-  const prompt = `[SELF-VALIDATION OBRIGATÓRIA] Antes de responder ao usuário, você DEVE usar a tool pensar() for responder explicitamente a estas 5 perguntas sobre os arquivos que você tocou neste turno:
+  const prompt = `[MANDATORY SELF-VALIDATION] Before responding to the user, you MUST use the pensar() tool to explicitly answer these 5 questions about the files you touched this turn:
 
-Arquivos modificados:
+Modified files:
   - ${fileList}
 
-Perguntas obrigatórias (responda TODAS no pensar()):
-1. O QUE MUDOU: Para cada arquivo, resuma em 1 linha o que foi alterado.
-2. VERIFICAÇÃO: Quais testes/comandos você executou for validar? Se não executou nenhum, por quê?
-3. ERROS RESTANTES: Há algum erro de tipo/lint/runtime que você sabe que ficou? Liste cada um.
-4. EDGE CASES: Quais casos limítrofes você considerou? (ex: input vazio, null, concorrência, encoding)
-5. HONESTIDADE: Você concordou com o usuário em algo que não verificou? Disse "sim" ou "funciona" sem checar? Se sim, corrija agora. Não minta for agradar.
+Required questions (answer ALL in pensar()):
+1. WHAT CHANGED: For each file, summarize in 1 line what was changed.
+2. VERIFICATION: Which tests/commands did you run to validate? If none, why?
+3. REMAINING ERRORS: Are there any type/lint/runtime errors you know are still there? List each one.
+4. EDGE CASES: Which boundary cases did you consider? (e.g. empty input, null, concurrency, encoding)
+5. HONESTY: Did you agree with the user on something you didn't verify? Did you say "yes" or "it works" without checking? If so, correct it now. Don't lie to please.
 
 After validating, if you discover any problem, FIX it before responding.
-Se tudo estiver OK, responda ao usuário normalmente com um resumo conciso das mudanças.
+If everything is OK, respond to the user normally with a concise summary of the changes.
 
-IMPORTANTE: Não pule esta validação. Mesmo que tenha certeza, faça o checklist.
-Lembre-se: HONESTY OVER AGREEMENT. Se você disse algo que não verificou, corrija.`;
+IMPORTANT: Do not skip this validation. Even if you are sure, do the checklist.
+Remember: HONESTY OVER AGREEMENT. If you said something you didn't verify, correct it.`;
 
   history.addSystemMessage(prompt);
   log.debug(`[SELF_VAL] Injected self-validation prompt (turn validations: ${validationCountThisTurn})`);
