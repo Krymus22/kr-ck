@@ -148,7 +148,9 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "editar_arquivo",
       description:
-        "Edit file via string match/replace.",
+        "Edit a file. You MUST provide either 'search'+'replace' or 'edits' array. " +
+        "Example: editar_arquivo({path: '/x.ts', search: 'old', replace: 'new'}). " +
+        "For new files: editar_arquivo({path: '/x.ts', replace: 'content', createIfMissing: true}).",
       parameters: {
         type: "object",
         properties: {
