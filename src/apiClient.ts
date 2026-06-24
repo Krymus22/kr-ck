@@ -448,36 +448,6 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "pesquisar_api_atualizada",
-      description:
-        "Search web for current API docs.",
-      parameters: {
-        type: "object",
-        properties: {
-          nome: {
-            type: "string",
-            description: "Nome da API a pesquisar. Exemplos: 'TweenService:Create', 'FindFirstChild', 'Players:GetPlayerByUserId', 'React.useState', 'fetch', 'axios.get'.",
-          },
-          linguagem: {
-            type: "string",
-            description: "Linguagem ou plataforma da API. Exemplos: 'roblox', 'typescript', 'python', 'rust', 'lua', 'javascript'.",
-          },
-          contexto: {
-            type: "string",
-            description: "Contexto opcional do que você está tentando fazer. Ajuda a refinar a busca. Exemplo: 'quero criar um tween que move uma parte suavemente'.",
-          },
-          forcar_refresh: {
-            type: "boolean",
-            description: "Se true, ignora o cache e faz uma pesquisa fresca. Default: false.",
-          },
-        },
-        required: ["nome", "linguagem"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "escrever_spec",
       description:
         "Write a technical spec before implementing.",

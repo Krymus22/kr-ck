@@ -648,39 +648,6 @@ const toolHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  "pesquisar_api_atualizada": async (args) => {
-    const nome = asString(args.nome);
-    const linguagem = asString(args.linguagem);
-    if (!nome || !linguagem) {
-      return {
-        resultStr: "[ERRO] 'nome' e 'linguagem' são obrigatórios. Exemplo: pesquisar_api_atualizada({nome: 'TweenService:Create', linguagem: 'roblox'}).",
-        usedHeal: false,
-      };
-    }
-    const contexto = asString(args.contexto ?? "");
-    const forcarRefresh = args.forcar_refresh === true;
-    try {
-      const { researchApi, formatResearchResult } = await import("./apiResearcher.js");
-      const result = await researchApi({
-        apiName: nome,
-        language: linguagem,
-        context: contexto || undefined,
-        forceRefresh: forcarRefresh,
-      });
-      const formatted = formatResearchResult(result);
-      // "error" in result check
-      return {
-        resultStr: formatted,
-        usedHeal: false,
-      };
-    } catch (err) {
-      return {
-        resultStr: `[ERRO] Falha ao pesquisar API "${nome}": ${(err as Error).message}`,
-        usedHeal: false,
-      };
-    }
-  },
-
   "escrever_spec": async (args) => {
     const nome = asString(args.nome);
     const descricao = asString(args.descricao);
