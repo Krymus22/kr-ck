@@ -587,8 +587,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "explorar_subagente",
       description:
-        "Spawna um sub-agente em-processo com contexto LIMPO para explorar o codebase e retornar apenas um resumo. " +
-        "Use para tarefas como 'entenda como o auth funciona', 'encontre todos os lugares que chamam X', 'mapeie o fluxo de Y'. " +
+        "Delegate task to a read-only sub-agent with clean context. Returns summary only." +
         "O sub-agente tem apenas tools de leitura (ler_arquivo, buscar_texto, buscar_arquivos, parse_ast) e faz até 8 chamadas. " +
         "Retorna resumo de 500-2000 tokens. DISPONÍVEL APENAS com effort=high ou max (consome tokens da mesma API key).",
       parameters: {
