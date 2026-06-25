@@ -116,6 +116,10 @@ let turnTouchedFiles: Set<string> = new Set();
 let turnStopHits = 0;
 /** Counter of goal verifier blocks this turn (avoids infinite goal-verifier loops) */
 let goalVerifierBlocksThisTurn = 0;
+/** Counter of bug hunter blocks this turn (avoids infinite bug-hunter loops) */
+let bugHunterBlocksThisTurn = 0;
+/** Max bug hunter blocks per turn (after this, let it finish even with bugs) */
+const MAX_BUG_HUNTER_BLOCKS = 2;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
@@ -1333,6 +1337,7 @@ async function handleChatResponse(
   turnTouchedFiles = new Set();
   turnStopHits = 0;
   goalVerifierBlocksThisTurn = 0;
+  bugHunterBlocksThisTurn = 0;
 
   fireTrigger("on_task");
 
@@ -1605,6 +1610,33 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
       }
     }
   } catch { /* goalVerifier not available */ }
+
+  // BUG_HUNTER: Run independent critical code review before finishing.
+  // This is a sub-agent with CLEAN context that hunts for bugs actively.
+  // If it finds CRITICAL or HIGH severity bugs, it BLOCKS finish.
+  try {
+    const { runBugHunter } = await import("./bugHunter.js");
+    if (turnTouchedFiles.size > 0 && turnStopHits === 1 && bugHunterBlocksThisTurn < MAX_BUG_HUNTER_BLOCKS) {
+      const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
+      const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
+      const result = await runBugHunter(
+        [...turnTouchedFiles],
+        userRequest,
+        message.content ?? ""
+      );
+      if (result.shouldBlock && result.completed) {
+        bugHunterBlocksThisTurn++;
+        log.warn(`[BUG_HUNTER] Blocking finish (block ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_BLOCKS}) — critical bugs found`);
+        history.addSystemMessage(result.message);
+        return true;  // Block finish, force IA to fix bugs
+      } else if (result.completed && result.findings.length > 0) {
+        // Non-blocking findings — still inject as advisory
+        history.addSystemMessage(result.message);
+      }
+    }
+  } catch (err) {
+    log.debug(`[BUG_HUNTER] Skipped: ${(err as Error).message}`);
+  }
 
   // IDEIA 14: Inject failure memory before finishing (for next turn's awareness)
   try {

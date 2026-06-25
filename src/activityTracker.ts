@@ -34,7 +34,8 @@ export type ActivityCategory =
   | "compacting"          // Compacting context
   | "checkpoint"          // Writing checkpoint
   | "api_call"            // Making HTTP request to LLM
-  | "api_retry";          // Retrying after transient error
+  | "api_retry"           // Retrying after transient error
+  | "bug_hunter";         // Running Bug Hunter critical review
 
 export interface ActivityState {
   stack: ActivityEntry[];
