@@ -1159,8 +1159,8 @@ async function sendAndProcess(
   onThinking?: () => void,
   onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void
 ): Promise<string> {
-  if (depth > 20) {
-    throw new Error("Agent loop exceeded maximum depth (20). Possible runaway detected.");
+  if (depth > 50) {
+    throw new Error("Agent loop exceeded maximum depth (50). Possible runaway detected.");
   }
 
   await runPreTurnMaintenance();
