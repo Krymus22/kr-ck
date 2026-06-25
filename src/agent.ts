@@ -114,6 +114,8 @@ let lastCheckpointTokens = 0;
 let turnTouchedFiles: Set<string> = new Set();
 /** Counter of stop_reason hits in the current turn (for quality gate loop) */
 let turnStopHits = 0;
+/** Counter of goal verifier blocks this turn (avoids infinite goal-verifier loops) */
+let goalVerifierBlocksThisTurn = 0;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
@@ -147,6 +149,7 @@ let activeManifests: ToolManifest[] = [];
  */
 import { getProviderMaxSubAgents } from "./apiProvider.js";
 import { t } from "./i18n.js";
+import { normalizeArgs } from "./argsNormalizer.js";
 const MAX_CONCURRENT_SUB_AGENTS = parseInt(
   process.env.MAX_CONCURRENT_SUB_AGENTS ?? String(getProviderMaxSubAgents()),
   10
@@ -855,9 +858,17 @@ async function resolvePreCallHooks(name: string, rawArgs: Record<string, unknown
 
 /** Run schema validation, poka-yoke, and read-before-write gates. Returns an error string if blocked, else null. */
 function runDispatchGates(name: string, args: Record<string, unknown>): string | null {
-  // Sprint C bug fix (BUG-T): auto-parse args que algumas IAs (Llama) passam
-  // como string JSON em vez de tipo nativo. Faz isso ANTES do schema gate.
-  autoParseArgs(name, args);
+  // BUG-ARGS: Universal argument normalization BEFORE schema gate.
+  // Auto-corrects: aliases (caminho→path, command→comando), type coercion
+  // (string→number, "true"→true), JSON string parsing, default values.
+  // This makes the system robust to model-specific quirks — even weaker
+  // models won't fail on args.
+  try {
+    const schema = getToolSchemaMap().get(name);
+    normalizeArgs(name, args, schema as any);
+  } catch {
+    // best-effort — don't block the call if normalization fails
+  }
 
   const schemaBlock = runSchemaGate(name, args);
   if (schemaBlock) return schemaBlock;
@@ -869,73 +880,6 @@ function runDispatchGates(name: string, args: Record<string, unknown>): string |
   if (!rbwResult.allowed) return rbwResult.message ?? "[BLOCKED] Read-before-write check failed.";
 
   return null;
-}
-
-/**
- * Sprint C (BUG-T): Auto-parse args que algumas IAs passam como string JSON.
- * - editar_arquivo: 'edits' deve ser array mas IA passa como string JSON
- *  mas IA passa como string JSON
- * - editar_multi_arquivos: 'requests' deve ser array mas IA passa como string
- * - Boolean fields: 'createIfMissing', 'all' passados como "true"/"false" string
- * Modifica args in-place.
- */
-function autoParseArgs(name: string, args: Record<string, unknown>): void {
-  // Array fields que IAs costumam passar como string JSON
-  const arrayFields: Record<string, string[]> = {
-    "editar_arquivo": ["edits"],
-    "editar_multi_arquivos": ["requests"],
-    "todo_write": ["items"],
-    "atualizar_estado": ["done", "todo", "decisions", "bugs", "dependencies"],
-  };
-
-  const fields = arrayFields[name];
-  if (fields) {
-    for (const field of fields) {
-      const val = args[field];
-      if (typeof val === "string" && val.trim().startsWith("[")) {
-        try {
-          args[field] = JSON.parse(val);
-          log.debug(`[AUTO-PARSE] Parsed ${name}.${field} from string to array`);
-        } catch {
-          // não é JSON válido — deixa como está
-        }
-      }
-    }
-  }
-
-  // Boolean fields que IAs passam como string "true"/"false"
-  const boolFields: Record<string, string[]> = {
-    "editar_arquivo": ["createIfMissing", "all"],
-    "editar_multi_arquivos": ["createIfMissing"],
-  };
-
-  const bFields = boolFields[name];
-  if (bFields) {
-    for (const field of bFields) {
-      const val = args[field];
-      if (val === "true") args[field] = true;
-      else if (val === "false") args[field] = false;
-    }
-  }
-
-  // BUG-JJ: Numeric fields que IAs passam como string ("1" em vez de 1).
-  // Coerce qualquer arg cujo valor seja string numérica E o schema espera number.
-  // Faz isso olhando o schema real para evitar coerção errada.
-  try {
-    const schema = getToolSchemaMap().get(name);
-    if (schema?.properties) {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
-        if (propSchema.type !== "number") continue;
-        const val = args[key];
-        if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
-          args[key] = Number(val);
-          log.debug(`[AUTO-PARSE] Coerced ${name}.${key} from string "${val}" to number`);
-        }
-      }
-    }
-  } catch {
-    // schema lookup failed — skip coercion
-  }
 }
 
 function runSchemaGate(name: string, args: Record<string, unknown>): string | null {
@@ -1373,6 +1317,7 @@ async function handleChatResponse(
   // Reset turn-level counters for the next user turn
   turnTouchedFiles = new Set();
   turnStopHits = 0;
+  goalVerifierBlocksThisTurn = 0;
 
   fireTrigger("on_task");
 
@@ -1502,6 +1447,32 @@ async function checkGoalCompletion(message: { content?: string | null }): Promis
   return false;
 }
 
+/**
+ * GOAL-VERIFIER-V2: Heuristic to detect if the user message is a TASK
+ * (something that needs verification) or a QUESTION (just needs an answer).
+ *
+ * Tasks: "create", "fix", "implement", "refactor", "add", "remove", "edit"
+ * Questions: "what", "how", "why", "explain", "show", "list", "?"
+ *
+ * This prevents the goal verifier from blocking finish when the user just
+ * asked a question (no task to verify).
+ */
+function looksLikeTask(userMessage: string): boolean {
+  const lower = userMessage.toLowerCase();
+  // Question indicators
+  const questionWords = ["what ", "how ", "why ", "when ", "where ", "which ", "explain", "show me", "list ", "tell me", "?"];
+  for (const q of questionWords) {
+    if (lower.includes(q)) return false;
+  }
+  // Task indicators
+  const taskWords = ["create", "fix", "implement", "refactor", "add ", "remove", "edit", "update", "change", "modify", "build", "write", "delete", "configure", "install", "run ", "test"];
+  for (const t of taskWords) {
+    if (lower.includes(t)) return true;
+  }
+  // Default: treat as task if it's long enough to be a request
+  return userMessage.length > 30;
+}
+
 async function handleStopReason(message: { content?: string | null }): Promise<boolean> {
   turnStopHits++;
 
@@ -1583,20 +1554,36 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   } catch { /* honestySystem not available */ }
 
   // IDEIA 26: Goal verifier - independent check if task is actually done
+  // GOAL-VERIFIER-V2: Less aggressive — only block if:
+  //   1. This is the FIRST stop attempt (turnStopHits === 1)
+  //   2. Files were modified this turn (real work happened)
+  //   3. We haven't already blocked N times this turn (avoid loops)
+  //   4. The user request looks like a TASK (not a question)
+  // After 2 blocks, allow finish — the IA may genuinely be done.
   try {
     const { verifyGoalCompletion, formatGoalVerification } = await import("./goalVerifier.js");
-    if (turnTouchedFiles.size > 0) {
+    const MAX_GOAL_BLOCKS_PER_TURN = 2;
+    if (turnTouchedFiles.size > 0 &&
+        turnStopHits === 1 &&
+        goalVerifierBlocksThisTurn < MAX_GOAL_BLOCKS_PER_TURN) {
       const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
       const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
-      const result = await verifyGoalCompletion(
-        userRequest,
-        [...turnTouchedFiles],
-        message.content ?? ""
-      );
-      if (!result.done && result.verified) {
-        log.warn(`[GOAL_VERIFIER] Task NOT done - blocking finish`);
-        history.addSystemMessage(formatGoalVerification(result));
-        return true;  // Block finish, force AI to continue
+
+      // Skip verification for simple questions (not tasks)
+      if (!looksLikeTask(userRequest)) {
+        log.debug(`[GOAL_VERIFIER] Skipping — user message is a question, not a task`);
+      } else {
+        const result = await verifyGoalCompletion(
+          userRequest,
+          [...turnTouchedFiles],
+          message.content ?? ""
+        );
+        if (!result.done && result.verified) {
+          goalVerifierBlocksThisTurn++;
+          log.warn(`[GOAL_VERIFIER] Task NOT done (block ${goalVerifierBlocksThisTurn}/${MAX_GOAL_BLOCKS_PER_TURN})`);
+          history.addSystemMessage(formatGoalVerification(result));
+          return true;  // Block finish, force AI to continue
+        }
       }
     }
   } catch { /* goalVerifier not available */ }

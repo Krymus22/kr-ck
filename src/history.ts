@@ -115,7 +115,58 @@ GOOD: "Let me verify... [runs tests] Yes, 1695/1695 pass. 2 skipped — want me 
 BAD: "You're right, critical bug!" (without checking if it's actually handled)
 GOOD: "Let me check... Line 42 already handles X. But there IS an edge case with Y."
 
-HONESTY OVER AGREEMENT. Always.`;
+HONESTY OVER AGREEMENT. Always.
+
+## Tool Call Examples (CORRECT syntax)
+
+Use these EXACT argument names. The system auto-corrects common aliases
+(caminho→path, command→comando) but using the canonical names is safer.
+
+Read a file:
+  ler_arquivo({ path: "/abs/path/to/file.ts" })
+
+Edit a file (search/replace):
+  editar_arquivo({ path: "/abs/path.ts", search: "old code", replace: "new code" })
+
+Create a new file:
+  editar_arquivo({ path: "/abs/new.ts", replace: "file content", createIfMissing: true })
+
+Append to a file:
+  editar_arquivo({ path: "/abs/existing.ts", search: "", replace: "// comment", createIfMissing: true })
+
+Multi-file edit (atomic):
+  editar_multi_arquivos({ requests: [
+    { filePath: "/abs/a.ts", edits: [{ search: "x", replace: "y" }] },
+    { filePath: "/abs/b.ts", edits: [{ search: "1", replace: "2" }] }
+  ]})
+
+Run a command:
+  executar_comando({ comando: "npm test" })
+
+Search for text:
+  buscar_texto({ pattern: "functionName", path: "/abs/dir" })
+
+Find files:
+  buscar_arquivos({ pattern: "*.ts", cwd: "/abs/dir" })
+
+Think before acting (call BEFORE every write):
+  pensar({ pensamento: "I will change X because Y. I read the file. Edge case: Z.", categoria: "planning" })
+
+Undo last edit:
+  desfazer_edicao({ caminho: "/abs/file.ts" })
+
+Ask the user:
+  perguntar_usuario({ pergunta: "Which option?", alternativas: ["A", "B"] })
+
+## Tool Call Examples (INCORRECT — will be blocked or auto-corrected)
+
+WRONG: ler_arquivo({ caminho: "/x" })           → use 'path' (caminho is auto-corrected)
+WRONG: executar_comando({ command: "ls" })       → use 'comando' (command is auto-corrected)
+WRONG: pensar({ thought: "..." })                → use 'pensamento' (thought is auto-corrected)
+WRONG: editar_arquivo({ path: "/x" })            → missing search+replace or edits
+WRONG: editar_arquivo({ path: "/x", search: "" }) → empty search needs createIfMissing:true
+
+Always pass arguments as a JSON object, not a string.`;
 
 let currentCavemanLevel: string | null = null; // 'lite', 'full', 'ultra', 'wenyan-lite', 'wenyan-full', 'wenyan-ultra', or null (disabled)
 
@@ -372,16 +423,50 @@ export function compactHistory(): CompactResult | null {
 
   const beforeTokens = estimateTokens(history);
   const system = history[0];
+
+  // CLAUDE-CODE-STYLE COMPACTION: preserve critical context that the IA
+  // needs to continue the task. Without this, the IA forgets:
+  //   - The project name and goal (TASK_STATE)
+  //   - What was already decided (decisions, plans)
+  //   - What bugs are open
+  //   - Persistent memory (skills, project context)
+  //
+  // Strategy: instead of dropping everything except the last N messages,
+  // we ALSO preserve system messages with critical prefixes.
+  const PRESERVE_PREFIXES = [
+    "## TASK_STATE",
+    "## Persistent Memory",
+    "[CONVERSATION MEMORY",  // accumulated summaries from previous compactions
+  ];
+
+  const preservedSystem: Message[] = [];
+  for (let i = 1; i < history.length - COMPACT_KEEP_RECENT; i++) {
+    const m = history[i];
+    if (m.role !== "system") continue;
+    const content = typeof m.content === "string" ? m.content : "";
+    if (PRESERVE_PREFIXES.some(p => content.startsWith(p))) {
+      // Avoid duplicates
+      if (!preservedSystem.some(p => (typeof p.content === "string" ? p.content : "") === content)) {
+        preservedSystem.push(m);
+      }
+    }
+  }
+
   const recent = history.slice(-COMPACT_KEEP_RECENT);
-  const dropped = history.length - 1 - COMPACT_KEEP_RECENT;
+  const dropped = history.length - 1 - COMPACT_KEEP_RECENT - preservedSystem.length;
   if (dropped <= 0) return null;
+
+  // Build a summary of what was compacted, preserving key facts
+  const compactedMessages = history.slice(1, history.length - COMPACT_KEEP_RECENT);
+  const compactedSummary = buildCompactionSummary(compactedMessages);
 
   const summary: Message = {
     role: "system",
-    content: `[CONTEXT COMPACTED - ${dropped} old messages removed to fit window. Kept only the last ${COMPACT_KEEP_RECENT} recent messages and system prompt. Historical tool_call IDs are now stale: if the model wants to reference past tools, ask the user to repeat.]`,
+    content: compactedSummary,
   };
 
-  history = [system, summary, ...recent];
+  // Reconstruct: [system_prompt, preserved_critical_context, compaction_summary, ...recent]
+  history = [system, ...preservedSystem, summary, ...recent];
 
   // Remove dangling tool messages that no longer match a tool_call in history
   // (this also drops orphan tool results from the dropped assistant calls)
@@ -401,6 +486,86 @@ export function compactHistory(): CompactResult | null {
 
   const afterTokens = estimateTokens(history);
   return { removed: dropped, beforeTokens, afterTokens };
+}
+
+/**
+ * Build a compact summary of the messages being dropped.
+ * Preserves: user requests, assistant conclusions, tool names (not full results).
+ * This is the "conversation memory" that survives compaction.
+ */
+function buildCompactionSummary(messages: Message[]): string {
+  const userRequests: string[] = [];
+  const assistantConclusions: string[] = [];
+  const toolsUsed: string[] = [];
+  const filesModified: Set<string> = new Set();
+
+  for (const m of messages) {
+    if (m.role === "user") {
+      const content = typeof m.content === "string" ? m.content : "";
+      if (content.length > 10 && content.length < 500) {
+        userRequests.push(content.slice(0, 200));
+      }
+    } else if (m.role === "assistant") {
+      const content = typeof m.content === "string" ? m.content : "";
+      if (content.length > 20 && !content.startsWith("[TOOL")) {
+        // Capture conclusions (not tool call descriptions)
+        assistantConclusions.push(content.slice(0, 300));
+      }
+      // Collect tool names
+      if (Array.isArray((m as any).tool_calls)) {
+        for (const tc of (m as any).tool_calls) {
+          const name = tc?.function?.name;
+          if (name && !toolsUsed.includes(name)) toolsUsed.push(name);
+          // Track file modifications
+          try {
+            const args = JSON.parse(tc?.function?.arguments ?? "{}");
+            const path = args.path ?? args.caminho ?? args.filePath;
+            if (typeof path === "string" && (tc.function.name === "editar_arquivo" || tc.function.name === "editar_multi_arquivos")) {
+              filesModified.add(path);
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`[CONVERSATION MEMORY - ${messages.length} old messages compacted]`);
+  lines.push(``);
+
+  if (userRequests.length > 0) {
+    lines.push(`## User Requests (chronological)`);
+    for (const r of userRequests.slice(-5)) { // last 5 user requests
+      lines.push(`- ${r}`);
+    }
+    lines.push(``);
+  }
+
+  if (assistantConclusions.length > 0) {
+    lines.push(`## Key Conclusions`);
+    for (const c of assistantConclusions.slice(-3)) { // last 3 conclusions
+      lines.push(`- ${c}`);
+    }
+    lines.push(``);
+  }
+
+  if (toolsUsed.length > 0) {
+    lines.push(`## Tools Used`);
+    lines.push(toolsUsed.join(", "));
+    lines.push(``);
+  }
+
+  if (filesModified.size > 0) {
+    lines.push(`## Files Modified`);
+    for (const f of filesModified) {
+      lines.push(`- ${f}`);
+    }
+    lines.push(``);
+  }
+
+  lines.push(`Note: Historical tool_call IDs are now stale. If you need to reference past tool results, ask the user.`);
+
+  return lines.join("\n");
 }
 
 /** Return a human-readable summary of the current history stats. */
