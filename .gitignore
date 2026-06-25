@@ -19,3 +19,11 @@ e2e/
 Z:\nonexistent\
 tool-results/
 Z*
+
+# Test artifacts (created by E2E tests that the IA runs in the project dir)
+/PlayerData.lua
+/PlayerData.luau
+/default.json
+/default.project.json
+/src/PlayerData*
+/README.md

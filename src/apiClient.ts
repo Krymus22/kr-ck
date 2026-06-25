@@ -128,18 +128,17 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "ler_arquivo",
       description:
-        "Read file content or list directory.",
+        "Read file content or list directory. Pass 'path' (or 'caminho' alias) with the file path.",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "File or directory path to read." },
-          caminho: { type: "string", description: "Alias for path (backwards compat)." },
+          caminho: { type: "string", description: "Alias for path (PT)." },
           offset: { type: "number", description: "1-indexed start line (optional)." },
           limit: { type: "number", description: "Max lines to return (optional)." },
           grep: { type: "string", description: "Regex pattern to filter lines (optional)." },
           contextLines: { type: "number", description: "Lines of context around grep matches (optional)." },
         },
-        required: ["path"],
       },
     },
   },
@@ -155,6 +154,7 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
         type: "object",
         properties: {
           path: { type: "string", description: "File path to edit." },
+          caminho: { type: "string", description: "Alias for path (PT)." },
           search: { type: "string", description: "Exact string to find and replace." },
           replace: { type: "string", description: "Replacement string." },
           all: { type: "boolean", description: "Replace all occurrences (default: first only)." },
@@ -173,7 +173,6 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             },
           },
         },
-        required: ["path"],
       },
     },
   },
@@ -305,13 +304,14 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "executar_comando",
       description:
-        "Run a shell command.",
+        "Run a shell command. Pass 'comando' (PT) or 'command' (EN) with the shell command.",
       parameters: {
         type: "object",
         properties: {
           comando: { type: "string", description: "The shell command to execute." },
+          command: { type: "string", description: "Alias for comando (EN)." },
+          cwd: { type: "string", description: "Working directory (optional)." },
         },
-        required: ["comando"],
       },
     },
   },

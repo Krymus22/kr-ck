@@ -168,11 +168,12 @@ function checkDesfazerEdicao(args: Record<string, unknown>): PokaYokeResult {
 }
 
 function checkExecutarComando(args: Record<string, unknown>): PokaYokeResult {
-  if (!isNonEmptyString(args.comando)) {
+  // Accept both 'comando' (PT) and 'command' (EN, alias)
+  if (!isNonEmptyString(args.comando ?? args.command)) {
     return {
       ok: false,
       error:
-        `[POKA-YOKE] executar_comando requires "comando" (non-empty string). ` +
+        `[POKA-YOKE] executar_comando requires "comando" (or "command") as a non-empty string. ` +
         `Example: executar_comando({ comando: "npm test" })`,
     };
   }

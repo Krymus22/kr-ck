@@ -335,7 +335,10 @@ describe("apiClient — TOOL_DEFINITIONS", () => {
     const { TOOL_DEFINITIONS } = await import("../apiClient.js");
     const lerArquivo = TOOL_DEFINITIONS.find(t => t.function.name === "ler_arquivo");
     expect(lerArquivo).toBeDefined();
-    expect(lerArquivo!.function.parameters.required).toContain("path");
+    // 'path' is no longer required — both 'path' and 'caminho' are accepted
+    // (caminho is the PT alias; some models prefer it)
+    expect(lerArquivo!.function.parameters.properties).toHaveProperty("path");
+    expect(lerArquivo!.function.parameters.properties).toHaveProperty("caminho");
   });
 
   it.skip("contains aplicar_diff tool (removed)", async () => {

@@ -13,6 +13,7 @@
  * The model MUST call ler_arquivo first to see the actual content.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 import { t } from "./i18n.js";
@@ -88,12 +89,16 @@ export function checkReadBeforeWrite(toolName: string, args: Record<string, unkn
 }
 
 function checkMultiFileRead(args: Record<string, unknown>, toolName: string): { allowed: boolean; message?: string } {
-  const requests = args.requests as Array<{ filePath?: string }> | undefined;
+  const requests = args.requests as Array<{ filePath?: string; createIfMissing?: boolean }> | undefined;
   if (!requests || !Array.isArray(requests)) return { allowed: true };
 
   const unreadPaths: string[] = [];
   for (const req of requests) {
-    if (req.filePath && !hasBeenRead(req.filePath)) {
+    if (!req.filePath) continue;
+    // BUG-GG2: skip read-before-write check for files that don't exist yet
+    // AND have createIfMissing=true — you can't read a file that doesn't exist.
+    if (req.createIfMissing === true && !fs.existsSync(req.filePath)) continue;
+    if (!hasBeenRead(req.filePath)) {
       unreadPaths.push(path.resolve(req.filePath));
     }
   }
@@ -108,6 +113,13 @@ function checkSingleFileRead(args: Record<string, unknown>, toolName: string): {
   const filePath = asString(args.caminho ?? args.path ?? args.filePath ?? "");
   if (!filePath) return { allowed: true };
   if (hasBeenRead(filePath)) return { allowed: true };
+
+  // BUG-GG2: skip read-before-write check for files that don't exist yet
+  // AND have createIfMissing=true — you can't read a file that doesn't exist.
+  // This was blocking the IA from creating new files, causing loops.
+  if (args.createIfMissing === true && !fs.existsSync(filePath)) {
+    return { allowed: true };
+  }
 
   const resolved = path.resolve(filePath);
   const msg =

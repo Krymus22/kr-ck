@@ -342,7 +342,11 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   "executar_comando": async (args) => {
-    const result = await executarComando({ comando: asString(args.comando) });
+    // Accept both 'comando' (PT, original) and 'command' (EN, alias)
+    const result = await executarComando({
+      comando: asString(args.comando ?? args.command),
+      cwd: args.cwd as string | undefined,
+    });
     return { resultStr: result, usedHeal: false };
   },
 
