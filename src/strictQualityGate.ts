@@ -223,13 +223,49 @@ function shouldSkipGate(cfg: QualityGateConfig, filesTouched: string[]): GateRes
   return null;
 }
 
-/** Run tsc + lint and return any errors collected. */
+/** Run tsc + lint + rojo build (roblox) and return any errors collected. */
 async function collectValidatorErrors(cfg: QualityGateConfig): Promise<string[]> {
   const projectRoot = findProjectRoot();
   const errors: string[] = [];
   errors.push(...(await runTscCheck(cfg, projectRoot)));
   errors.push(...(await runLintCheck(cfg, projectRoot)));
+  errors.push(...(await runRojoBuildCheck(cfg, projectRoot)));
   return errors;
+}
+
+/**
+ * ROJO BUILD GATE: If the project has a default.project.json (Roblox project),
+ * run `rojo build` to verify it compiles. Blocks finish if the build fails.
+ * This catches Luau syntax errors, missing modules, and invalid project structure.
+ */
+async function runRojoBuildCheck(cfg: QualityGateConfig, projectRoot: string): Promise<string[]> {
+  // Only run if there's a Roblox project file
+  const projectFile = path.join(projectRoot, "default.project.json");
+  if (!fs.existsSync(projectFile)) return [];
+
+  // Check if rojo binary is available
+  try {
+    const { execSync } = require("node:child_process");
+    execSync("which rojo 2>/dev/null || where rojo 2>/dev/null", {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    // rojo not found — warn but don't block (can't verify build without it)
+    log.warn("[STRICT_GATE] Rojo build gate skipped — 'rojo' binary not found. Install rojo to enable build verification.");
+    return [];
+  }
+
+  log.debug(`[STRICT_GATE] Running rojo build in ${projectRoot}`);
+  const buildResult = await runCommandAsync("rojo", ["build", "--output", "/tmp/rojo-build-test.rbxlx", projectFile], projectRoot, 60_000);
+  if (!buildResult.ok) {
+    return [`=== Rojo build errors ===\nThe Roblox project failed to build. This means there are syntax errors, missing modules, or invalid project structure.\n${buildResult.output}\nFix these errors before finishing.`];
+  }
+
+  // Clean up the test build file
+  try { fs.unlinkSync("/tmp/rojo-build-test.rbxlx"); } catch { /* ignore */ }
+  return [];
 }
 
 async function runTscCheck(cfg: QualityGateConfig, projectRoot: string): Promise<string[]> {

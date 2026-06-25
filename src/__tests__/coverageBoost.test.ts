@@ -75,13 +75,14 @@ describe("luauValidator - coverage boost", () => {
     expect(result.rulesApplied).toEqual([]);
   });
 
-  it("should skip rules when tool is not installed", async () => {
+  it("should BLOCK when blocking tool is not installed (BUG-VALIDATORS)", async () => {
     const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
     const result = await validateLuauBeforeWrite("/test.luau", "local x = 1", [
       { tool: "nonexistent_tool_xyz", filePattern: "*.luau", blocking: true },
     ], tmpDir);
-    expect(result.ok).toBe(true);
-    expect(result.rulesSkipped.length).toBeGreaterThan(0);
+    // BUG-VALIDATORS: blocking rules now BLOCK when binary is missing
+    expect(result.ok).toBe(false);
+    expect(result.blockingError).toContain("not found");
   });
 
   it("should handle custom command rules", async () => {

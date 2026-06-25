@@ -95,13 +95,28 @@ describe("luauValidator", () => {
       expect(result.rulesApplied).toEqual([]);
     });
 
-    it("should skip rules when tool is not installed", async () => {
+    it("should BLOCK when blocking tool is not installed (BUG-VALIDATORS)", async () => {
       const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
       // Use a tool name that definitely isn't installed
       const result = await validateLuauBeforeWrite(
         "/path/to/test.luau",
         "local x = 1",
         [{ tool: "nonexistent_tool_xyz", filePattern: "*.luau", blocking: true }],
+        tmpProject
+      );
+      // BUG-VALIDATORS: blocking rules now BLOCK when binary is missing,
+      // instead of skipping. This prevents buggy code from being written
+      // without validation.
+      expect(result.ok).toBe(false);
+      expect(result.blockingError).toContain("not found");
+    });
+
+    it("should skip non-blocking rules when tool is not installed", async () => {
+      const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
+      const result = await validateLuauBeforeWrite(
+        "/path/to/test.luau",
+        "local x = 1",
+        [{ tool: "nonexistent_tool_xyz", filePattern: "*.luau", blocking: false }],
         tmpProject
       );
       expect(result.ok).toBe(true);

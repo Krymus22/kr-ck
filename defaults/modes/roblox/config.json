@@ -76,12 +76,12 @@
     {
       "tool": "stylua_format",
       "filePattern": "*.luau",
-      "blocking": false
+      "blocking": true
     },
     {
       "tool": "stylua_format",
       "filePattern": "*.lua",
-      "blocking": false
+      "blocking": true
     }
   ],
   "systemPrompt": ""

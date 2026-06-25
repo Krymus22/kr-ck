@@ -549,6 +549,18 @@ export function setActiveMode(name: string | null): void {
         process.env.ADVANCED_THINKING = mode.advancedThinking ? "true" : "false";
       }
     }
+
+    // BUG-VALIDATORS: When roblox mode is activated, check that required
+    // tools (selene, stylua) are installed. Without them, the fileValidator
+    // blocks all .luau writes — warn the user proactively.
+    if (name === "roblox") {
+      try {
+        const { warnIfMissingTools } = require("./ensureRobloxTools.js");
+        warnIfMissingTools();
+      } catch {
+        // best-effort — don't crash if module not available
+      }
+    }
   } else {
     log.info(`modes: active mode cleared`);
     // Reset env vars to defaults

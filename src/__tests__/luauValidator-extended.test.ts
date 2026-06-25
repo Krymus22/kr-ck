@@ -365,13 +365,26 @@ describe("luauValidator (extended)", () => {
       expect(result.ok).toBe(true);
     });
 
-    it("pula regra quando tool não está instalada", async () => {
+    it("BLOQUEIA regra blocking quando tool não está instalada (BUG-VALIDATORS)", async () => {
       const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
       // selene marcado como missing (default)
       const result = await validateLuauBeforeWrite(
         "/proj/no-tool.luau",
         "local x = 1\n",
         [{ tool: "selene_lint", filePattern: "*.luau", blocking: true }],
+        tmpProject
+      );
+      // BUG-VALIDATORS: blocking rules now BLOCK when binary is missing
+      expect(result.ok).toBe(false);
+      expect(result.blockingError).toContain("not found");
+    });
+
+    it("pula regra non-blocking quando tool não está instalada", async () => {
+      const { validateLuauBeforeWrite } = await import("./../luauValidator.js");
+      const result = await validateLuauBeforeWrite(
+        "/proj/no-tool.luau",
+        "local x = 1\n",
+        [{ tool: "selene_lint", filePattern: "*.luau", blocking: false }],
         tmpProject
       );
       expect(result.ok).toBe(true);

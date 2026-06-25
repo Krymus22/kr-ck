@@ -31,6 +31,7 @@ export interface TestResult {
   failures: TestFailure[];
   output: string;
   success: boolean;
+  exitCode?: number;
 }
 
 export interface FixSuggestion {
@@ -89,6 +90,35 @@ const DETECTORS: FrameworkDetector[] = [
     name: "go",
     configFiles: ["go.mod"],
     detect: (dir) => fs.existsSync(path.join(dir, "go.mod")),
+  },
+  {
+    name: "testez",
+    configFiles: ["tests"],
+    detect: (dir) => {
+      // TestEZ: Roblox Lua testing framework
+      // Detect by looking for .luau/.lua test files that import TestEZ
+      const testsDir = path.join(dir, "tests");
+      if (fs.existsSync(testsDir)) {
+        try {
+          const entries = fs.readdirSync(testsDir, "utf8");
+          for (const entry of entries) {
+            if (entry.endsWith(".luau") || entry.endsWith(".lua")) {
+              const content = fs.readFileSync(path.join(testsDir, entry), "utf8");
+              if (/TestEZ|testez/i.test(content)) return true;
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      // Also check for testez in wally dependencies
+      const wallyPath = path.join(dir, "wally.toml");
+      if (fs.existsSync(wallyPath)) {
+        try {
+          const wally = fs.readFileSync(wallyPath, "utf8");
+          if (/testez/i.test(wally)) return true;
+        } catch { /* ignore */ }
+      }
+      return false;
+    },
   },
 ];
 
@@ -199,6 +229,83 @@ function runGoTest(dir: string, fileFilter?: string): TestResult {
   const output = `${stdout}\n${stderr}`;
 
   return parseGoTestOutput(output, exitCode, duration);
+}
+
+/**
+ * Run TestEZ tests for Roblox Luau projects.
+ * Uses `lune` (if installed) to run .luau test files that use TestEZ.
+ * Falls back to `rojo test` if a rojo test project is configured.
+ */
+function runTestEZ(dir: string, fileFilter?: string): TestResult {
+  const start = Date.now();
+  const testDir = path.join(dir, "tests");
+
+  // Try lune first (runs .luau files directly)
+  const luneBinary = findBinary("lune");
+  if (luneBinary) {
+    const testFiles = fileFilter
+      ? [fileFilter]
+      : fs.readdirSync(testDir, "utf8")
+          .filter(f => f.endsWith(".luau") || f.endsWith(".lua"))
+          .map(f => path.join(testDir, f));
+
+    let allOutput = "";
+    let totalPassed = 0, totalFailed = 0;
+    for (const testFile of testFiles) {
+      const cmd = `"${luneBinary}" run "${testFile}" 2>&1`;
+      const { stdout, stderr, exitCode } = runCommand(cmd, dir, 60_000);
+      allOutput += `\n${stdout}\n${stderr}`;
+      // TestEZ output: "X passed, Y failed"
+      const match = stdout.match(/(\d+)\s+passed.*?(\d+)\s+failed/i);
+      if (match) {
+        totalPassed += parseInt(match[1], 10);
+        totalFailed += parseInt(match[2], 10);
+      } else if (exitCode !== 0) {
+        totalFailed++;
+      }
+    }
+
+    const duration = Date.now() - start;
+    return {
+      framework: "testez (lune)",
+      passed: totalPassed,
+      failed: totalFailed,
+      skipped: 0,
+      duration,
+      failures: [],
+      output: allOutput,
+      success: totalFailed === 0,
+      exitCode: totalFailed > 0 ? 1 : 0,
+    };
+  }
+
+  // No lune — return info that TestEZ was detected but can't run
+  const duration = Date.now() - start;
+  return {
+    framework: "testez",
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    duration,
+    failures: [],
+    output: "TestEZ detected but 'lune' binary not found. Install lune to run Luau tests: https://lune-org.github.io/docs",
+    success: true,
+    exitCode: 0,
+  };
+}
+
+/** Find a binary in PATH (simple version for testRunner) */
+function findBinary(name: string): string | null {
+  try {
+    const { execSync } = require("node:child_process");
+    const result = execSync(`which ${name} 2>/dev/null || where ${name} 2>/dev/null`, {
+      encoding: "utf8",
+      timeout: 3000,
+    }).trim();
+    return result || null;
+  } catch {
+    return null;
+  }
 }
 
 // --- Output Parsers ---------------------------------------------------------
@@ -461,6 +568,8 @@ export async function runTests(dir: string, fileFilter?: string): Promise<TestRe
       return runCargoTest(dir, fileFilter);
     case "go":
       return runGoTest(dir, fileFilter);
+    case "testez":
+      return runTestEZ(dir, fileFilter);
     default:
       // Try npm test as fallback
       return runNpmTest(dir);

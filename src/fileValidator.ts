@@ -381,6 +381,14 @@ export async function validateFile(
       const built = await buildCommandForRule(rule, tmpFile, activeMode);
       if ("error" in built) {
         result.rulesSkipped.push(`${rule.tool} (${built.error})`);
+        // BUG-VALIDATORS: If the rule is blocking but the binary is missing,
+        // BLOCK the write instead of skipping. This prevents buggy Luau code
+        // from being written without validation in roblox mode.
+        if (rule.blocking) {
+          result.ok = false;
+          result.blockingError = `${rule.tool} is configured as blocking but binary not found: ${built.error}. Install it or remove the blocking flag from mode config.`;
+          return result;
+        }
         log.warn(`[FILE_VALIDATOR] ${rule.tool} PULADO — ${built.error}`);
         continue;
       }
