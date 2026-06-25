@@ -130,7 +130,7 @@ export const config = {
   ),
 
   /** Threshold (0.0-1.0) of context window that triggers auto-compact. */
-  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.85),
+  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.75),
 
   /** Threshold (0.0-1.0) of context window that warns user with yellow bar. */
   contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.6),

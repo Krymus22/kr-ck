@@ -51,7 +51,7 @@ vi.mock("../config.js", () => ({
     model: "test-model",
     contextWindowTokens: 128000,
     contextWarnThreshold: 0.5,
-    contextCompactThreshold: 0.85,
+    contextCompactThreshold: 0.75,
     costPerKPrompt: 0.01,
     costPerKCompletion: 0.03,
     maxHealRetries: 2,
@@ -616,8 +616,8 @@ describe("Context management", () => {
 
     await runAgentLoop("test");
 
-    // smartCompact foi chamado com 85% do contextWindow (128000 * 0.85 = 108800)
-    expect(mockedSmartCompact).toHaveBeenCalledWith(108800);
+    // smartCompact foi chamado com 75% do contextWindow (128000 * 0.75 = 96000)
+    expect(mockedSmartCompact).toHaveBeenCalledWith(96000);
   });
 
   it("history.optimizeContext é chamado antes de cada chamada ao chat", async () => {

@@ -1343,9 +1343,7 @@ async function handleChatResponse(
 
 /** Pre-turn maintenance: context compaction + checkpoint write. */
 async function runPreTurnMaintenance(): Promise<void> {
-  // Compaction threshold from config (default 85%, was 75% — too aggressive).
-  // With real context windows (kimi 256k → triggers at 217k, llama 128k → 108k),
-  // compaction only triggers after a LOT of conversation, not constantly.
+  // Compaction threshold from config (default 75% — matches Claude Code).
   // Override via CONTEXT_COMPACT_THRESHOLD env var (0.0-1.0).
   const compactionThreshold = config.contextWindowTokens * config.contextCompactThreshold;
   const compaction = smartCompact(compactionThreshold);
