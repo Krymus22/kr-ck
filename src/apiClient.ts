@@ -409,13 +409,20 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "explorar_subagente",
       description:
-        "Delegate task to a read-only sub-agent.",
+        "Delegate EXPLORATION/RESEARCH tasks to a read-only sub-agent. " +
+        "USE THIS when you need to: explore a codebase, understand how something works, " +
+        "find all files matching a pattern, investigate a bug's root cause, " +
+        "or gather information BEFORE making changes. " +
+        "The sub-agent runs in parallel and has its own context window, " +
+        "so it can do deep exploration WITHOUT polluting your main context. " +
+        "Example: 'Find all places where UserService is called and explain the data flow'. " +
+        "Returns a summary of findings. Does NOT edit files.",
       parameters: {
         type: "object",
         properties: {
-          questao: { type: "string", description: "Specific question the sub-agent should answer." },
+          questao: { type: "string", description: "Specific question the sub-agent should answer. Be detailed: 'Find all callers of function X and explain how data flows through them'." },
           cwd: { type: "string", description: "Base directory for exploration (default: current cwd)." },
-          max_tool_calls: { type: "number", description: "Max tool calls for sub-agent (default: 8)." },
+          max_tool_calls: { type: "number", description: "Max tool calls for sub-agent (default: 8, max: 20)." },
         },
         required: ["questao"],
       },
