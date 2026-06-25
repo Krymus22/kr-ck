@@ -73,23 +73,19 @@ describe("toolReduction (extended)", () => {
   });
 
   describe("filterToolsByIntent — intents específicas (git, explore)", () => {
-    it("git intent: inclui ferramentas git_* e exclui ferramentas de escrita", async () => {
+    it("git intent: inclui executar_comando e exclui ferramentas de escrita", async () => {
       const { filterToolsByIntent } = await import("./../toolReduction.js");
       const tools = [
-        { type: "function" as const, function: { name: "git_commit", parameters: {} } },
-        { type: "function" as const, function: { name: "git_status", parameters: {} } },
-        { type: "function" as const, function: { name: "git_log", parameters: {} } },
-        { type: "function" as const, function: { name: "aplicar_diff", parameters: {} } },
         { type: "function" as const, function: { name: "executar_comando", parameters: {} } },
+        { type: "function" as const, function: { name: "editar_arquivo", parameters: {} } }, // excluído
+        { type: "function" as const, function: { name: "ler_arquivo", parameters: {} } }, // core, sempre incluído
       ];
       const filtered = filterToolsByIntent(tools, "git");
       const names = filtered.map((t) => t.function.name);
-      expect(names).toContain("git_commit");
-      expect(names).toContain("git_status");
-      expect(names).toContain("git_log");
       expect(names).toContain("executar_comando");
-      // aplicar_diff não está na lista git nem é core nem é tool:*
-      expect(names).not.toContain("aplicar_diff");
+      expect(names).toContain("ler_arquivo"); // core tool
+      // editar_arquivo não está na lista git nem é core
+      expect(names).not.toContain("editar_arquivo");
     });
 
     it.skip("explore intent: inclui parse_ast e buscar_web", async () => {
@@ -108,36 +104,35 @@ describe("toolReduction (extended)", () => {
       expect(names).not.toContain("git_commit");
     });
 
-    it("write intent: inclui aplicar_diff, editar_arquivo, desfazer_edicao", async () => {
+    it("write intent: inclui editar_arquivo, editar_multi_arquivos, desfazer_edicao", async () => {
       const { filterToolsByIntent } = await import("./../toolReduction.js");
       const tools = [
-        { type: "function" as const, function: { name: "aplicar_diff", parameters: {} } },
         { type: "function" as const, function: { name: "editar_arquivo", parameters: {} } },
+        { type: "function" as const, function: { name: "editar_multi_arquivos", parameters: {} } },
         { type: "function" as const, function: { name: "desfazer_edicao", parameters: {} } },
-        { type: "function" as const, function: { name: "listar_backups", parameters: {} } },
-        { type: "function" as const, function: { name: "git_commit", parameters: {} } }, // excluído
+        { type: "function" as const, function: { name: "executar_comando", parameters: {} } }, // excluído
       ];
       const filtered = filterToolsByIntent(tools, "write");
       const names = filtered.map((t) => t.function.name);
-      expect(names).toContain("aplicar_diff");
       expect(names).toContain("editar_arquivo");
+      expect(names).toContain("editar_multi_arquivos");
       expect(names).toContain("desfazer_edicao");
-      expect(names).toContain("listar_backups");
-      expect(names).not.toContain("git_commit");
+      // executar_comando não está na lista write
+      expect(names).not.toContain("executar_comando");
     });
 
-    it("search intent: inclui buscar_arquivos, buscar_conteudo, parse_ast", async () => {
+    it("search intent: inclui buscar_arquivos, buscar_texto, parse_ast", async () => {
       const { filterToolsByIntent } = await import("./../toolReduction.js");
       const tools = [
         { type: "function" as const, function: { name: "buscar_arquivos", parameters: {} } },
-        { type: "function" as const, function: { name: "buscar_conteudo", parameters: {} } },
+        { type: "function" as const, function: { name: "buscar_texto", parameters: {} } },
         { type: "function" as const, function: { name: "parse_ast", parameters: {} } },
         { type: "function" as const, function: { name: "editar_arquivo", parameters: {} } }, // excluído
       ];
       const filtered = filterToolsByIntent(tools, "search");
       const names = filtered.map((t) => t.function.name);
       expect(names).toContain("buscar_arquivos");
-      expect(names).toContain("buscar_conteudo");
+      expect(names).toContain("buscar_texto");
       expect(names).toContain("parse_ast");
       expect(names).not.toContain("editar_arquivo");
     });
@@ -159,8 +154,8 @@ describe("toolReduction (extended)", () => {
         { type: "function" as const, function: { name: "pensar", parameters: {} } },
         { type: "function" as const, function: { name: "ler_arquivo", parameters: {} } },
         { type: "function" as const, function: { name: "atualizar_estado", parameters: {} } },
-        { type: "function" as const, function: { name: "criar_plano", parameters: {} } },
-        { type: "function" as const, function: { name: "marcar_passo", parameters: {} } },
+        { type: "function" as const, function: { name: "ler_estado", parameters: {} } },
+        { type: "function" as const, function: { name: "marcar_feito", parameters: {} } },
       ];
       for (const intent of ["read", "write", "search", "test", "git", "explore"] as const) {
         const filtered = filterToolsByIntent(tools, intent);
@@ -168,8 +163,8 @@ describe("toolReduction (extended)", () => {
         expect(names).toContain("pensar");
         expect(names).toContain("ler_arquivo");
         expect(names).toContain("atualizar_estado");
-        expect(names).toContain("criar_plano");
-        expect(names).toContain("marcar_passo");
+        expect(names).toContain("ler_estado");
+        expect(names).toContain("marcar_feito");
       }
     });
   });

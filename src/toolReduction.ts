@@ -99,17 +99,15 @@ const CORE_TOOLS = new Set([
   "atualizar_estado",
   "ler_estado",
   "marcar_feito",
-  "criar_plano",
-  "marcar_passo",
 ]);
 
 const INTENT_TOOL_MAP: Record<TaskIntent, Set<string>> = {
-  read: new Set(["ler_arquivo", "ler_arquivo_avancado", "parse_ast", "buscar_arquivos", "buscar_conteudo", "pensar"]),
-  write: new Set(["ler_arquivo", "aplicar_diff", "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao", "listar_backups", "pensar", "atualizar_estado", "criar_plano", "marcar_passo"]),
-  search: new Set(["buscar_arquivos", "buscar_conteudo", "ler_arquivo", "parse_ast", "pensar"]),
+  read: new Set(["ler_arquivo", "parse_ast", "buscar_arquivos", "buscar_texto", "pensar"]),
+  write: new Set(["ler_arquivo", "editar_arquivo", "editar_multi_arquivos", "desfazer_edicao", "pensar", "atualizar_estado"]),
+  search: new Set(["buscar_arquivos", "buscar_texto", "buscar_web", "ler_arquivo", "parse_ast", "pensar"]),
   test: new Set(["executar_testes", "executar_comando", "sugerir_fixes", "ler_arquivo", "pensar"]),
-  git: new Set(["git_status", "git_diff", "git_log", "git_commit", "git_blame", "git_show", "git_branch", "git_checkout", "executar_comando"]),
-  explore: new Set(["ler_arquivo", "buscar_arquivos", "buscar_conteudo", "parse_ast", "executar_paralelo", "pesquisar_api_atualizada", "pensar"]),
+  git: new Set(["executar_comando", "ler_arquivo", "pensar"]),
+  explore: new Set(["explorar_subagente", "ler_arquivo", "buscar_arquivos", "buscar_texto", "parse_ast", "buscar_web", "ler_url", "pensar"]),
   general: new Set(),  // Empty = include all
 };
 

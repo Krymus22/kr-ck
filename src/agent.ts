@@ -1025,11 +1025,10 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
 
 const READ_ONLY_TOOLS = new Set([
   "ler_arquivo", "buscar_arquivos", "buscar_texto",
-  "git_status", "git_log", "git_diff", "parse_ast",
+  "buscar_web", "ler_url", "parse_ast",
   // IDEIA 5: explorar_subagente is read-only (only reads code, never edits)
   // and benefits from parallel execution with other read-only tools.
   "explorar_subagente",
-  // Multi-key pool status is read-only and side-effect-free.
   // Task state read is read-only.
   "ler_estado",
 ]);
@@ -1280,12 +1279,55 @@ async function handleChatResponse(
         try {
           JSON.parse(tc.function.arguments);
         } catch {
-          log.warn(`[SANITIZE] Tool ${tc.function.name} had malformed JSON args — replacing with valid JSON`);
+          // BUG-PP++: Try to recover a valid JSON prefix from the malformed string.
+          // Some models (diffusiongemma, llama) emit JSON like:
+          //   {"path": "/tmp"}{}        (extra "{}" appended)
+          //   {"path": "/tmp"}<|channel> (trailing tokens)
+          //   {"path": "/tmp"}\n\n       (trailing whitespace/newlines that break parser)
+          // Strategy: find the longest valid JSON prefix by scanning for the last
+          // `}` that produces a valid JSON.parse, then use that as the args.
           const rawArgs = tc.function.arguments;
-          tc.function.arguments = JSON.stringify({
-            _malformed_json: rawArgs.slice(0, 500),
-            _error: "Previous arguments were malformed JSON. Please retry with valid JSON."
-          });
+          let recovered: string | null = null;
+
+          // Strategy 1: find the first complete JSON object (balanced braces)
+          let depth = 0;
+          let inString = false;
+          let escape = false;
+          let endIdx = -1;
+          for (let i = 0; i < rawArgs.length; i++) {
+            const ch = rawArgs[i];
+            if (escape) { escape = false; continue; }
+            if (ch === "\\") { escape = true; continue; }
+            if (ch === '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (ch === "{") depth++;
+            else if (ch === "}") {
+              depth--;
+              if (depth === 0) {
+                // Found a complete top-level object — try to parse it
+                try {
+                  JSON.parse(rawArgs.slice(0, i + 1));
+                  recovered = rawArgs.slice(0, i + 1);
+                  endIdx = i;
+                  break;
+                } catch {
+                  // not valid JSON, keep scanning
+                }
+              }
+            }
+          }
+
+          if (recovered) {
+            log.debug(`[SANITIZE] Tool ${tc.function.name} recovered valid JSON prefix from malformed args`);
+            tc.function.arguments = recovered;
+          } else {
+            // Could not recover — replace with error placeholder
+            log.warn(`[SANITIZE] Tool ${tc.function.name} had malformed JSON args — replacing with error placeholder`);
+            tc.function.arguments = JSON.stringify({
+              _malformed_json: rawArgs.slice(0, 500),
+              _error: "Previous arguments were malformed JSON. Please retry with valid JSON."
+            });
+          }
         }
       }
     }

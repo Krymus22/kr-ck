@@ -54,9 +54,9 @@ describe("toolReduction", () => {
       { type: "function" as const, function: { name: "aplicar_diff", parameters: {} } },
       { type: "function" as const, function: { name: "editar_arquivo", parameters: {} } },
       { type: "function" as const, function: { name: "executar_testes", parameters: {} } },
-      { type: "function" as const, function: { name: "git_commit", parameters: {} } },
+      { type: "function" as const, function: { name: "executar_comando", parameters: {} } },
       { type: "function" as const, function: { name: "pensar", parameters: {} } },
-      { type: "function" as const, function: { name: "buscar_conteudo", parameters: {} } },
+      { type: "function" as const, function: { name: "buscar_texto", parameters: {} } },
       { type: "function" as const, function: { name: "buscar_arquivos", parameters: {} } },
       { type: "function" as const, function: { name: "tool:rojo_build", parameters: {} } },
     ];
@@ -70,15 +70,15 @@ describe("toolReduction", () => {
     it("should reduce tools for read intent", async () => {
       const { filterToolsByIntent } = await import("./../toolReduction.js");
       const filtered = filterToolsByIntent(mockTools, "read");
-      // Should include: ler_arquivo, pensar, buscar_texto, tool:rojo_build (external)
-      // Should exclude: aplicar_diff, editar_arquivo, executar_testes, git_commit
+      // Should include: ler_arquivo, pensar, buscar_texto, buscar_arquivos, tool:rojo_build (external)
+      // Should exclude: editar_arquivo, executar_testes, executar_comando
       const names = filtered.map((t) => t.function.name);
       expect(names).toContain("ler_arquivo");
       expect(names).toContain("pensar");
-      expect(names).toContain("buscar_conteudo");
+      expect(names).toContain("buscar_texto");
       expect(names).toContain("tool:rojo_build");
-      expect(names).not.toContain("aplicar_diff");
-      expect(names).not.toContain("git_commit");
+      expect(names).not.toContain("editar_arquivo");
+      expect(names).not.toContain("executar_comando");
     });
 
     it("should reduce tools for test intent", async () => {
