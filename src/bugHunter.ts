@@ -50,6 +50,144 @@ export interface BugHuntResult {
   completed: boolean;
 }
 
+// IDEIA A: Memória entre rounds — track previous findings to compare
+let previousFindings: BugFinding[] = [];
+
+/** Reset Bug Hunter state for a new turn (called by agent.ts on turn start) */
+export function resetBugHunterState(): void {
+  previousFindings = [];
+  fileSnapshots.clear();
+}
+
+// IDEIA E: Track file contents before edits for diff
+const fileSnapshots = new Map<string, string>();
+
+/**
+ * IDEIA E: Capture a snapshot of a file before it's edited.
+ * Called by the agent before editar_arquivo executes.
+ */
+export function snapshotFileBeforeEdit(filePath: string): void {
+  try {
+    const resolved = require("node:path").resolve(filePath);
+    if (require("node:fs").existsSync(resolved)) {
+      fileSnapshots.set(resolved, require("node:fs").readFileSync(resolved, "utf8"));
+    }
+  } catch { /* ignore */ }
+}
+
+/**
+ * IDEIA E: Generate a diff of what changed in a file after editing.
+ * Returns a human-readable diff string.
+ */
+export function generateDiffAfterEdit(filePath: string): string {
+  try {
+    const resolved = require("node:path").resolve(filePath);
+    const before = fileSnapshots.get(resolved);
+    if (!before) return ""; // no snapshot — file was new
+
+    const after = require("node:fs").existsSync(resolved)
+      ? require("node:fs").readFileSync(resolved, "utf8")
+      : "";
+
+    if (before === after) return ""; // no changes
+
+    // Simple line-by-line diff
+    const beforeLines = before.split("\n");
+    const afterLines = after.split("\n");
+    const maxLen = Math.max(beforeLines.length, afterLines.length);
+
+    const changes: string[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      const b = beforeLines[i] ?? "";
+      const a = afterLines[i] ?? "";
+      if (b !== a) {
+        if (b && !a) changes.push(`  - L${i+1}: ${b.trim().slice(0, 100)}`);
+        else if (!b && a) changes.push(`  + L${i+1}: ${a.trim().slice(0, 100)}`);
+        else {
+          changes.push(`  - L${i+1}: ${b.trim().slice(0, 100)}`);
+          changes.push(`  + L${i+1}: ${a.trim().slice(0, 100)}`);
+        }
+      }
+    }
+
+    if (changes.length === 0) return "";
+    return `[DIFF] ${filePath.split("/").pop()} (${changes.length} lines changed):\n${changes.join("\n")}`;
+  } catch { return ""; }
+}
+
+/**
+ * IDEIA D: Run the project between Bug Hunter rounds.
+ * Tries to run "npx tsx src/index.ts" or "npm test" and returns the result.
+ */
+async function runProjectVerification(projectDir: string): Promise<string> {
+  try {
+    const { execSync } = require("node:child_process");
+    // Try npx tsx src/index.ts first
+    try {
+      const out = execSync("npx tsx src/index.ts 2>&1", {
+        cwd: projectDir, timeout: 30000, encoding: "utf8"
+      });
+      return out.trim().slice(0, 500) || "(no output)";
+    } catch {
+      // Try npm test
+      try {
+        const out = execSync("npm test 2>&1", {
+          cwd: projectDir, timeout: 30000, encoding: "utf8"
+        });
+        return out.trim().slice(0, 500) || "(no output)";
+      } catch {
+        return "(could not run project)";
+      }
+    }
+  } catch {
+    return "(could not run project)";
+  }
+}
+
+/**
+ * IDEIA A: Compare current findings with previous round's findings.
+ * Returns: fixed bugs, persisting bugs, and new bugs.
+ */
+function compareFindings(current: BugFinding[], previous: BugFinding[]): {
+  fixed: BugFinding[];
+  persisting: BugFinding[];
+  newBugs: BugFinding[];
+} {
+  const fixed: BugFinding[] = [];
+  const persisting: BugFinding[] = [];
+  const newBugs: BugFinding[] = [];
+
+  // For each previous bug, check if it still exists (by file + description similarity)
+  for (const prev of previous) {
+    const stillExists = current.some(curr =>
+      curr.file === prev.file &&
+      (curr.description === prev.description ||
+       curr.description.includes(prev.description.slice(0, 40)) ||
+       prev.description.includes(curr.description.slice(0, 40)))
+    );
+    if (stillExists) {
+      persisting.push(prev);
+    } else {
+      fixed.push(prev);
+    }
+  }
+
+  // For each current bug, check if it's new (not in previous)
+  for (const curr of current) {
+    const existed = previous.some(prev =>
+      prev.file === curr.file &&
+      (prev.description === curr.description ||
+       prev.description.includes(curr.description.slice(0, 40)) ||
+       curr.description.includes(prev.description.slice(0, 40)))
+    );
+    if (!existed) {
+      newBugs.push(curr);
+    }
+  }
+
+  return { fixed, persisting, newBugs };
+}
+
 /**
  * Run the Bug Hunter sub-agent.
  *
@@ -167,11 +305,27 @@ export async function runBugHunter(
     const findings = parseFindings(finalContent);
     const criticalAndHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
     const shouldBlock = criticalAndHigh.length > 0;
-    const message = formatBugHuntMessage(findings, shouldBlock);
+
+    // IDEIA A: Compare with previous round
+    let comparison: { fixed: BugFinding[]; persisting: BugFinding[]; newBugs: BugFinding[] } | null = null;
+    if (previousFindings.length > 0) {
+      comparison = compareFindings(findings, previousFindings);
+      log.info(`[BUG_HUNTER] Comparison: ${comparison.fixed.length} fixed, ${comparison.persisting.length} persisting, ${comparison.newBugs.length} NEW`);
+    }
+
+    // IDEIA D: Run project between rounds (if blocking)
+    let projectOutput = "";
+    if (shouldBlock && filesModified.length > 0) {
+      const projectDir = filesModified[0] ? require("node:path").dirname(filesModified[0]).replace("/src", "") : process.cwd();
+      log.info(`[BUG_HUNTER] Running project verification...`);
+      projectOutput = await runProjectVerification(projectDir);
+      log.info(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
+    }
+
+    const message = formatBugHuntMessage(findings, shouldBlock, comparison, projectOutput);
 
     if (shouldBlock) {
       log.warn(`[BUG_HUNTER] Found ${criticalAndHigh.length} critical/high bug(s) — BLOCKING finish`);
-      // Log each finding so we can see EXACTLY what bugs were found
       for (const f of findings) {
         const icon = f.severity === "critical" ? "🔴" : f.severity === "high" ? "🟠" : f.severity === "medium" ? "🟡" : "🔵";
         log.warn(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
@@ -183,6 +337,9 @@ export async function runBugHunter(
         log.info(`[BUG_HUNTER] [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
       }
     }
+
+    // IDEIA A: Save findings for next round comparison
+    previousFindings = [...findings];
 
     return { shouldBlock, findings, message, completed: true };
   } finally {
@@ -380,7 +537,12 @@ function parseFindings(content: string): BugFinding[] {
 /**
  * Format the bug hunt message to inject into the agent's context.
  */
-function formatBugHuntMessage(findings: BugFinding[], shouldBlock: boolean): string {
+function formatBugHuntMessage(
+  findings: BugFinding[],
+  shouldBlock: boolean,
+  comparison?: { fixed: BugFinding[]; persisting: BugFinding[]; newBugs: BugFinding[] } | null,
+  projectOutput?: string
+): string {
   if (findings.length === 0) {
     return `[BUG_HUNTER] ✓ No bugs found. Code passed critical review.`;
   }
@@ -392,6 +554,42 @@ function formatBugHuntMessage(findings: BugFinding[], shouldBlock: boolean): str
   );
   lines.push("");
 
+  // IDEIA A: Show comparison with previous round
+  if (comparison) {
+    lines.push(`## Round Comparison`);
+    lines.push(`✓ FIXED: ${comparison.fixed.length} bug(s) were correctly fixed`);
+    for (const f of comparison.fixed) {
+      lines.push(`  - [${f.severity.toUpperCase()}] ${f.file} — ${f.description.slice(0, 80)}`);
+    }
+    lines.push(`⚠ PERSISTING: ${comparison.persisting.length} bug(s) still exist — your previous fix did NOT work`);
+    for (const f of comparison.persisting) {
+      lines.push(`  - [${f.severity.toUpperCase()}] ${f.file} — ${f.description.slice(0, 80)}`);
+    }
+    lines.push(`✗ NEW: ${comparison.newBugs.length} bug(s) were INTRODUCED by your fix — you broke something!`);
+    for (const f of comparison.newBugs) {
+      lines.push(`  - [${f.severity.toUpperCase()}] ${f.file} — ${f.description.slice(0, 80)}`);
+    }
+    lines.push("");
+    if (comparison.newBugs.length > 0) {
+      lines.push(`⚠ WARNING: You introduced ${comparison.newBugs.length} NEW bug(s) while fixing others.`);
+      lines.push(`This usually happens when you edit without re-reading the file first, or when you change`);
+      lines.push(`too many things at once. Fix ONE bug at a time, re-read after each edit.`);
+      lines.push("");
+    }
+  }
+
+  // IDEIA D: Show project output
+  if (projectOutput && projectOutput !== "(could not run project)") {
+    lines.push(`## Project Run Result`);
+    lines.push(`\`\`\``);
+    lines.push(projectOutput.slice(0, 300));
+    lines.push(`\`\`\``);
+    lines.push("");
+  }
+
+  // List all findings
+  lines.push(`## All Findings (${findings.length} total)`);
+  lines.push("");
   for (const f of findings) {
     const icon = f.severity === "critical" ? "🔴" :
                  f.severity === "high" ? "🟠" :
@@ -404,7 +602,15 @@ function formatBugHuntMessage(findings: BugFinding[], shouldBlock: boolean): str
   }
 
   if (shouldBlock) {
-    lines.push("Fix ALL [CRITICAL] and [HIGH] issues above, then the Bug Hunter will re-review.");
+    // IDEIA B + C: Instructions for fixing
+    lines.push(`## How to fix these bugs:`);
+    lines.push(`1. Fix ONE bug at a time — don't try to fix multiple in a single edit.`);
+    lines.push(`2. READ the file FIRST (ler_arquivo) to see the current content before editing.`);
+    lines.push(`3. Edit with editar_arquivo (NOT cat > or executar_comando).`);
+    lines.push(`4. After each fix, RE-READ the file to verify the edit is correct.`);
+    lines.push(`5. Run the project (executar_comando "npx tsx src/index.ts") to verify nothing broke.`);
+    lines.push(`6. The Bug Hunter will re-review after you finish. It will tell you which bugs were`);
+    lines.push(`   fixed, which are persisting, and which are NEW (introduced by your fixes).`);
   }
 
   return lines.join("\n");

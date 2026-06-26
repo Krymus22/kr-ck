@@ -779,6 +779,15 @@ async function dispatchToolCall(
   // -- Track reads + touched files ---------------------------------------
   trackFileAccess(name, finalArgs);
 
+  // IDEIA E: Snapshot file before edit (for Bug Hunter diff)
+  if (WRITE_FILE_TOOLS.has(name)) {
+    try {
+      const { snapshotFileBeforeEdit } = await import("./bugHunter.js");
+      const filePath = asString(finalArgs.caminho ?? finalArgs.path ?? finalArgs.filePath ?? "");
+      if (filePath) snapshotFileBeforeEdit(filePath);
+    } catch { /* ignore */ }
+  }
+
   // -- Cache check -------------------------------------------------------
   const cached = shouldCacheResult(name) ? readOnlyCache.get(name, finalArgs) : null;
   if (cached !== null) {
@@ -850,8 +859,20 @@ async function dispatchToolCall(
 
   // -- IDEIA 7: After successful file edits, suggest generating a test ---
   // Skip Luau/Roblox and other unsupported extensions explicitly.
+  // IDEIA E: Also show diff of what changed after edit.
   if (WRITE_FILE_TOOLS.has(name) && !resultStrSafe.startsWith("[ERRO") && !resultStrSafe.startsWith("[BLOQUEADO")) {
     const editedPath = asString(finalArgs.caminho ?? finalArgs.path ?? finalArgs.filePath ?? "");
+
+    // IDEIA E: Generate diff after edit and append to result
+    if (editedPath) {
+      try {
+        const { generateDiffAfterEdit } = await import("./bugHunter.js");
+        const diff = generateDiffAfterEdit(editedPath);
+        if (diff) {
+          result.resultStr += `\n\n${diff}`;
+        }
+      } catch { /* ignore */ }
+    }
     if (editedPath) {
       const testSuggestion = generateTestSuggestionForFile(editedPath);
       if (testSuggestion) {
@@ -1371,6 +1392,12 @@ async function handleChatResponse(
   turnStopHits = 0;
   goalVerifierBlocksThisTurn = 0;
   bugHunterBlocksThisTurn = 0;
+
+  // Reset Bug Hunter previous findings for new turn
+  try {
+    const { resetBugHunterState } = await import("./bugHunter.js");
+    resetBugHunterState();
+  } catch { /* ignore */ }
 
   fireTrigger("on_task");
 
