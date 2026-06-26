@@ -225,15 +225,35 @@ export async function runBugHunter(
     log.info(`[BUG_HUNTER] Starting critical review of ${filesModified.length} file(s)`);
 
     const MAX_HUNTER_TURNS = 10; // safety limit
+    const MAX_HUNTER_API_RETRIES = 3; // retry API calls within each turn
     let finalContent = "";
 
     for (let turn = 0; turn < MAX_HUNTER_TURNS; turn++) {
       let response;
-      try {
-        response = await chat(messages, undefined, undefined, undefined, readOnlyTools);
-      } catch (err) {
-        log.warn(`[BUG_HUNTER] LLM call failed: ${(err as Error).message}`);
-        return { shouldBlock: false, findings: [], message: "", completed: false };
+      let apiSuccess = false;
+
+      // Retry API calls (ETIMEDOUT etc) — same pattern as main agent
+      for (let apiRetry = 0; apiRetry < MAX_HUNTER_API_RETRIES; apiRetry++) {
+        try {
+          response = await chat(messages, undefined, undefined, undefined, readOnlyTools);
+          apiSuccess = true;
+          break;
+        } catch (err) {
+          const errMsg = (err as Error).message;
+          log.warn(`[BUG_HUNTER] LLM call failed (attempt ${apiRetry + 1}/${MAX_HUNTER_API_RETRIES}): ${errMsg.slice(0, 100)}`);
+          if (apiRetry < MAX_HUNTER_API_RETRIES - 1) {
+            // Exponential backoff: 2s, 4s
+            const waitMs = (apiRetry + 1) * 2000;
+            log.warn(`[BUG_HUNTER] Retrying in ${waitMs}ms...`);
+            await new Promise(r => setTimeout(r, waitMs));
+          }
+        }
+      }
+
+      if (!apiSuccess || !response) {
+        log.warn(`[BUG_HUNTER] All API retries exhausted — skipping review this round`);
+        // Don't block finish if we can't review — better to let IA finish than hang
+        return { shouldBlock: false, findings: [], message: "[BUG_HUNTER] Review skipped — API unavailable. Code not reviewed.", completed: false };
       }
 
       const choice = response.choices?.[0];
