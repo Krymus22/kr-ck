@@ -803,6 +803,26 @@ async function dispatchToolCall(
     try { currentOnToolResult(name, ok, resultStrSafe); } catch { /* ignore */ }
   }
 
+  // DEDUP-EXEC: detect repeated EXECUTION errors (not just gate blocks).
+  // If the same tool keeps failing with the same error (e.g. "SEARCH not found"
+  // with the same search string), abort after 3 attempts. This catches loops
+  // that pass the gate but fail at execution — the gate-based dedup can't see these.
+  {
+    const resultStrSafe = result.resultStr ?? "";
+    const isExecError = resultStrSafe.startsWith("[ERROR]") || resultStrSafe.startsWith("[ERRO");
+    if (isExecError) {
+      // Use tool name + error signature (first 200 chars of error) as key
+      const errSignature = `${name}:EXEC:${resultStrSafe.slice(0, 200)}`;
+      blockedCallCounter.set(errSignature, (blockedCallCounter.get(errSignature) ?? 0) + 1);
+      const execAttemptNum = blockedCallCounter.get(errSignature)!;
+      if (execAttemptNum >= 3) {
+        const stopMsg = t("abort.stop_duplicate", name, execAttemptNum);
+        log.warn(`[DEDUP-EXEC] Tool ${name} failed ${execAttemptNum}x with same error — forcing stop`);
+        result.resultStr = stopMsg;
+      }
+    }
+  }
+
   // -- IDEIA 1: Auto-inject TASK_STATE context before next decision ------
   // Anthropic's Fable 5 reads its own notes before each decision; we
   // replicate this by appending a compact state snapshot to write/command
