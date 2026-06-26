@@ -171,8 +171,17 @@ export async function runBugHunter(
 
     if (shouldBlock) {
       log.warn(`[BUG_HUNTER] Found ${criticalAndHigh.length} critical/high bug(s) — BLOCKING finish`);
+      // Log each finding so we can see EXACTLY what bugs were found
+      for (const f of findings) {
+        const icon = f.severity === "critical" ? "🔴" : f.severity === "high" ? "🟠" : f.severity === "medium" ? "🟡" : "🔵";
+        log.warn(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
+        log.warn(`[BUG_HUNTER]   Fix: ${f.suggestion}`);
+      }
     } else {
       log.success(`[BUG_HUNTER] No critical/high bugs found (${findings.length} medium/low findings)`);
+      for (const f of findings) {
+        log.info(`[BUG_HUNTER] [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
+      }
     }
 
     return { shouldBlock, findings, message, completed: true };
