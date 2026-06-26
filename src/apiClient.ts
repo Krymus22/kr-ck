@@ -878,10 +878,27 @@ async function handleTransientNetworkError(
   }
 
   const newAttempt = attempt + 1;
+  const errCode = getErrCode(err);
+
+  // ETIMEDOUT / ECONNRESET: try a DIFFERENT API key immediately (no backoff)
+  // instead of waiting. The NVIDIA API is often unstable per-key, so switching
+  // to another key in the pool gives a better chance of success.
+  if (TRANSIENT_NETWORK_CODES.has(errCode) && getPoolSize() > 1) {
+    const availKeys = getAvailableKeyCount();
+    if (availKeys > 0) {
+      log.warn(
+        `Erro de rede (${errCode}). ` +
+        `Tentando outra key do pool imediatamente (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES}, ${availKeys} keys disponíveis)...`
+      );
+      // No sleep — try immediately with a different key
+      return { retried: true, newAttempt };
+    }
+  }
+
   // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 30s, 30s, 30s...
   const waitMs = Math.min(Math.pow(2, newAttempt - 1) * 1000, 30000);
   log.warn(
-    `Erro de rede (${getErrCode(err)}). ` +
+    `Erro de rede (${errCode}). ` +
     `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES})...`
   );
   await sleep(waitMs);
