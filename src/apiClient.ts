@@ -442,7 +442,7 @@ export type ChatResponse = OpenAI.Chat.Completions.ChatCompletion;
  */
 const MAX_RETRY_AFTER_S     = 90;
 const MAX_429_RETRIES       = 4;
-const MAX_NETWORK_RETRIES   = 8;   // ECONNRESET etc. - more generous, fast retry
+const MAX_NETWORK_RETRIES   = 15;  // ECONNRESET/ETIMEDOUT etc. - generous for unstable APIs
 
 const TRANSIENT_NETWORK_CODES = new Set([
   "ECONNRESET", "ETIMEDOUT", "ENOTFOUND",
@@ -857,7 +857,8 @@ async function handle5xxRetryableError(
   }
 
   const newAttempt = attempt + 1;
-  const waitMs = Math.min(newAttempt * 500, 3000);
+  // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 30s, 30s, 30s...
+  const waitMs = Math.min(Math.pow(2, newAttempt - 1) * 1000, 30000);
   const apiErr = err instanceof OpenAI.APIError ? err : null;
   const status = apiErr?.status ?? (err as { status?: number })?.status ?? "?";
   log.warn(
@@ -877,7 +878,8 @@ async function handleTransientNetworkError(
   }
 
   const newAttempt = attempt + 1;
-  const waitMs = Math.min(newAttempt * 500, 3000);
+  // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 30s, 30s, 30s...
+  const waitMs = Math.min(Math.pow(2, newAttempt - 1) * 1000, 30000);
   log.warn(
     `Erro de rede (${getErrCode(err)}). ` +
     `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_NETWORK_RETRIES})...`

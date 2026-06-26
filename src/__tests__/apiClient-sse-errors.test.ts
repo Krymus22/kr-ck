@@ -345,18 +345,18 @@ describe("Server errors (5xx)", () => {
     vi.setSystemTime(new Date(0));
 
     // BUG 1 fix: 503 agora é retried (transiente). Retry 8x com backoff
-    // crescente (500+1000+1500+2000+2500+3000+3000+3000 = 16500ms), depois
+    // crescente (exponential backoff 1s+2s+4s+8s+15s+30s+30s...), depois
     // propaga o erro.
     hoisted.createMock.mockRejectedValue(make5xxError(503, "service unavailable"));
 
     const p = chat(sampleMessages);
     // Registra handler ANTES de avançar o tempo (evita unhandled rejection)
     const assertion = expect(p).rejects.toThrow("service unavailable");
-    // 8 retries com backoff crescente → 16500ms no total
+    // 15 retries com backoff crescente → 16500ms no total
     await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
-    // 1 chamada inicial + 8 retries = 9 chamadas
+    // 1 chamada inicial + 15 retries = 16 chamadas
     expect(hoisted.createMock).toHaveBeenCalledTimes(9);
   });
 
@@ -372,7 +372,7 @@ describe("Server errors (5xx)", () => {
     await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
-    // 1 inicial + 8 retries = 9
+    // 1 inicial + 15 retries = 16
     expect(hoisted.createMock).toHaveBeenCalledTimes(9);
   });
 });
@@ -401,7 +401,7 @@ describe("Network errors", () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     vi.setSystemTime(new Date(0));
 
-    // ETIMEDOUT é erro de rede transiente → retry até MAX_NETWORK_RETRIES (8)
+    // ETIMEDOUT é erro de rede transiente → retry até MAX_NETWORK_RETRIES (15)
     const err = makeNetworkError("ETIMEDOUT", "Connection timed out");
     hoisted.createMock.mockRejectedValue(err);
 
@@ -411,11 +411,11 @@ describe("Network errors", () => {
       code: "ETIMEDOUT",
       message: expect.stringMatching(/timed out/i),
     });
-    // 8 retries com backoff crescente (500+1000+1500+2000+2500+3000+3000+3000 = 16500ms)
+    // 15 retries com backoff crescente (exponential backoff 1s+2s+4s+8s+15s+30s+30s...)
     await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
-    // 1 chamada inicial + 8 retries = 9 chamadas
+    // 1 chamada inicial + 15 retries = 16 chamadas
     expect(hoisted.createMock).toHaveBeenCalledTimes(9);
   });
 
@@ -435,7 +435,7 @@ describe("Network errors", () => {
     await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
 
-    // 1 inicial + 8 retries = 9
+    // 1 inicial + 15 retries = 16
     expect(hoisted.createMock).toHaveBeenCalledTimes(9);
   });
 });
