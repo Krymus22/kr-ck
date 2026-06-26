@@ -63,60 +63,109 @@ export async function runBugHunter(
   userRequest: string,
   agentResponse: string
 ): Promise<BugHuntResult> {
-  // Only run if files were modified
   if (filesModified.length === 0) {
     return { shouldBlock: false, findings: [], message: "", completed: false };
   }
 
-  // Surface activity in TUI
   const done = pushActivity("bug_hunter", `reviewing ${filesModified.length} file(s)`);
 
   try {
-    // Build the context for the Bug Hunter
     const context = buildBugHunterContext(filesModified, userRequest, agentResponse);
-
-    // Build the system prompt — this is what makes it a "caçador de bugs"
     const systemPrompt = buildBugHunterSystemPrompt();
+    const readOnlyTools = buildReadOnlyTools();
 
-    const messages = [
-      { role: "system" as const, content: systemPrompt },
-      { role: "user" as const, content: context },
+    // BUG FIX: The Bug Hunter needs a MINI AGENT LOOP, not a single chat() call.
+    // When tools are provided, the model responds with tool_calls (not content)
+    // because it wants to READ the files first. Without a loop, we get
+    // content=null → "Empty response". Now we loop: model reads files, we
+    // execute the tool calls, send results back, until model gives final verdict.
+    const messages: any[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: context },
     ];
 
     log.info(`[BUG_HUNTER] Starting critical review of ${filesModified.length} file(s)`);
 
-    // Call the LLM with read-only tools (ler_arquivo, buscar_texto, parse_ast)
-    // so the hunter can actually READ the files and verify claims
-    const readOnlyTools = buildReadOnlyTools();
+    const MAX_HUNTER_TURNS = 10; // safety limit
+    let finalContent = "";
 
-    let response;
-    try {
-      response = await chat(messages, undefined, undefined, undefined, readOnlyTools);
-    } catch (err) {
-      log.warn(`[BUG_HUNTER] LLM call failed: ${(err as Error).message}`);
-      return {
-        shouldBlock: false,
-        findings: [],
-        message: "",
-        completed: false,
-      };
+    for (let turn = 0; turn < MAX_HUNTER_TURNS; turn++) {
+      let response;
+      try {
+        response = await chat(messages, undefined, undefined, undefined, readOnlyTools);
+      } catch (err) {
+        log.warn(`[BUG_HUNTER] LLM call failed: ${(err as Error).message}`);
+        return { shouldBlock: false, findings: [], message: "", completed: false };
+      }
+
+      const choice = response.choices?.[0];
+      if (!choice) break;
+
+      const msg = choice.message;
+      const content = msg?.content ?? "";
+      const toolCalls = msg?.tool_calls;
+
+      // If model wants to use tools (read files), execute them and continue
+      if (toolCalls && toolCalls.length > 0 && choice.finish_reason === "tool_calls") {
+        // Add the assistant message with tool_calls to history
+        messages.push({ role: "assistant", content: content || null, tool_calls: toolCalls });
+
+        // Execute each tool call
+        for (const tc of toolCalls) {
+          const toolName = tc.function?.name ?? "";
+          let args: any = {};
+          try { args = JSON.parse(tc.function?.arguments ?? "{}"); } catch { /* ignore */ }
+
+          let toolResult = "";
+          if (toolName === "ler_arquivo") {
+            try {
+              const { readFileAdvanced } = await import("./fileRead.js");
+              toolResult = readFileAdvanced({
+                path: args.path ?? args.caminho ?? "",
+                offset: args.offset,
+                limit: args.limit,
+              });
+            } catch (e) { toolResult = `[ERROR] Could not read: ${(e as Error).message}`; }
+          } else if (toolName === "buscar_texto") {
+            try {
+              const { grepSearch, formatGrepResults } = await import("./contentSearch.js");
+              const matches = grepSearch({
+                pattern: args.pattern ?? "",
+                path: args.path,
+              });
+              toolResult = formatGrepResults(matches);
+            } catch (e) { toolResult = `[ERROR] Search failed: ${(e as Error).message}`; }
+          } else if (toolName === "parse_ast") {
+            try {
+              const { parseFile } = await import("./lspAst.js");
+              const result = await parseFile(args.path ?? "");
+              toolResult = `Language: ${result.language}\nSymbols: ${result.symbols.length}\n` +
+                result.symbols.map((s: any) => `  ${s.type} ${s.name} (line ${s.line})`).join("\n");
+            } catch (e) { toolResult = `[ERROR] Parse failed: ${(e as Error).message}`; }
+          }
+
+          messages.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
+          log.debug(`[BUG_HUNTER] Tool ${toolName} executed → ${toolResult.length} chars`);
+        }
+
+        // Continue the loop — model will process tool results and either
+        // call more tools or give final verdict
+        continue;
+      }
+
+      // No tool calls — this is the final verdict
+      finalContent = content;
+      break;
     }
 
-    const content = response.choices?.[0]?.message?.content ?? "";
-    if (!content || content.length < 20) {
-      log.warn("[BUG_HUNTER] Empty or too-short response from hunter");
-      return {
-        shouldBlock: false,
-        findings: [],
-        message: "",
-        completed: false,
-      };
+    if (!finalContent || finalContent.length < 20) {
+      log.warn("[BUG_HUNTER] Empty or too-short response from hunter after loop");
+      return { shouldBlock: false, findings: [], message: "", completed: false };
     }
 
-    // Parse the findings from the response
-    const findings = parseFindings(content);
+    // Parse the findings from the final response
+    const findings = parseFindings(finalContent);
     const criticalAndHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
-
     const shouldBlock = criticalAndHigh.length > 0;
     const message = formatBugHuntMessage(findings, shouldBlock);
 
@@ -126,12 +175,7 @@ export async function runBugHunter(
       log.success(`[BUG_HUNTER] No critical/high bugs found (${findings.length} medium/low findings)`);
     }
 
-    return {
-      shouldBlock,
-      findings,
-      message,
-      completed: true,
-    };
+    return { shouldBlock, findings, message, completed: true };
   } finally {
     done();
   }
