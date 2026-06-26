@@ -1163,9 +1163,9 @@ async function sendAndProcess(
   onThinking?: () => void,
   onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void
 ): Promise<string> {
-  if (depth > 50) {
-    throw new Error("Agent loop exceeded maximum depth (50). Possible runaway detected.");
-  }
+  // No depth limit — the dedup detector (blockedCallCounter) already prevents
+  // infinite loops by aborting after 3 identical blocked tool calls.
+  // This allows complex multi-step tasks without artificial limits.
 
   await runPreTurnMaintenance();
   history.optimizeContext();
