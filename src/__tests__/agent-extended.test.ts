@@ -299,6 +299,16 @@ vi.mock("../goalVerifier.js", () => ({
   formatGoalVerification: vi.fn(() => ""),
 }));
 
+// Bug Hunter mock: returns no bugs (clean pass) by default
+vi.mock("../bugHunter.js", () => ({
+  runBugHunter: vi.fn(async () => ({
+    shouldBlock: false,
+    findings: [],
+    message: "",
+    completed: true,
+  })),
+}));
+
 vi.mock("../failureMemory.js", () => ({
   recordFailure: vi.fn(),
   getRecentFailures: vi.fn(() => null),

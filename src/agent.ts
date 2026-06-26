@@ -116,10 +116,8 @@ let turnTouchedFiles: Set<string> = new Set();
 let turnStopHits = 0;
 /** Counter of goal verifier blocks this turn (avoids infinite goal-verifier loops) */
 let goalVerifierBlocksThisTurn = 0;
-/** Counter of bug hunter blocks this turn (avoids infinite bug-hunter loops) */
+/** Counter of bug hunter rounds this turn (max 5 rounds per turn) */
 let bugHunterBlocksThisTurn = 0;
-/** Max bug hunter blocks per turn (after this, let it finish even with bugs) */
-const MAX_BUG_HUNTER_BLOCKS = 2;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
@@ -746,11 +744,9 @@ async function dispatchToolCall(
       try { currentOnToolResult(name, false, gateBlock); } catch { /* ignore */ }
     }
 
-    // BUG-PP+ : detect duplicate blocked tool calls (same tool + same args).
-    // If the IA keeps calling the same tool with the same (bad) args, the agent loop
-    // would otherwise spin until max depth (20) — wasting 3-5 minutes of API calls.
-    // After 2 identical blocked calls, return a stronger error telling the IA to STOP
-    // and respond to the user with what it has so far.
+    // DEDUP: detect duplicate blocked tool calls (same tool + same args).
+    // After 2 identical failures: WARN the IA to try a different approach.
+    // After 3 identical failures: STOP and force the IA to respond to the user.
     const argSignature = `${name}:${toolCall.function.arguments}`;
     blockedCallCounter.set(argSignature, (blockedCallCounter.get(argSignature) ?? 0) + 1);
     const attemptNum = blockedCallCounter.get(argSignature)!;
@@ -758,6 +754,17 @@ async function dispatchToolCall(
       const stopMsg = t("abort.stop_duplicate", name, attemptNum);
       log.warn(`[DEDUP] Tool ${name} blocked ${attemptNum}x with same args — forcing stop`);
       return { resultStr: stopMsg, usedHeal: false };
+    }
+    if (attemptNum >= 2) {
+      // 2nd failure — warn the IA to change strategy before we force stop
+      const warnMsg =
+        `[WARNING] You already tried "${name}" with these EXACT same arguments and it failed. ` +
+        `Do NOT retry with the same arguments. Try a DIFFERENT approach: ` +
+        `re-read the file (ler_arquivo) to see the ACTUAL current content, ` +
+        `then adjust your search string or use createIfMissing. ` +
+        `If you can't fix it, explain the issue to the user.`;
+      log.warn(`[DEDUP] Tool ${name} blocked ${attemptNum}x — warning IA to change approach`);
+      return { resultStr: warnMsg, usedHeal: false };
     }
 
     return { resultStr: gateBlock, usedHeal: false };
@@ -804,14 +811,12 @@ async function dispatchToolCall(
   }
 
   // DEDUP-EXEC: detect repeated EXECUTION errors (not just gate blocks).
-  // If the same tool keeps failing with the same error (e.g. "SEARCH not found"
-  // with the same search string), abort after 3 attempts. This catches loops
-  // that pass the gate but fail at execution — the gate-based dedup can't see these.
+  // After 2 identical failures: WARN the IA to try a different approach.
+  // After 3 identical failures: STOP and force the IA to respond to the user.
   {
     const resultStrSafe = result.resultStr ?? "";
     const isExecError = resultStrSafe.startsWith("[ERROR]") || resultStrSafe.startsWith("[ERRO");
     if (isExecError) {
-      // Use tool name + error signature (first 200 chars of error) as key
       const errSignature = `${name}:EXEC:${resultStrSafe.slice(0, 200)}`;
       blockedCallCounter.set(errSignature, (blockedCallCounter.get(errSignature) ?? 0) + 1);
       const execAttemptNum = blockedCallCounter.get(errSignature)!;
@@ -819,6 +824,14 @@ async function dispatchToolCall(
         const stopMsg = t("abort.stop_duplicate", name, execAttemptNum);
         log.warn(`[DEDUP-EXEC] Tool ${name} failed ${execAttemptNum}x with same error — forcing stop`);
         result.resultStr = stopMsg;
+      } else if (execAttemptNum >= 2) {
+        // 2nd failure — warn the IA to change strategy
+        result.resultStr +=
+          `\n\n[WARNING] This is the ${execAttemptNum}nd time "${name}" failed with this EXACT same error. ` +
+          `Do NOT retry with the same arguments. Try a DIFFERENT approach: ` +
+          `re-read the file (ler_arquivo) to see the ACTUAL current content, ` +
+          `then adjust your search string. If you can't fix it, explain the issue to the user.`;
+        log.warn(`[DEDUP-EXEC] Tool ${name} failed ${execAttemptNum}x — warning IA to change approach`);
       }
     }
   }
@@ -1633,26 +1646,49 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
 
   // BUG_HUNTER: Run independent critical code review before finishing.
   // This is a sub-agent with CLEAN context that hunts for bugs actively.
-  // If it finds CRITICAL or HIGH severity bugs, it BLOCKS finish.
+  //
+  // LOOP BEHAVIOR: When the Bug Hunter finds CRITICAL or HIGH bugs:
+  //   1. It reports ALL findings to the main IA
+  //   2. The IA is forced to fix them (finish is blocked)
+  //   3. After fixing, the IA tries to finish again
+  //   4. Bug Hunter runs AGAIN on the fixed code
+  //   5. This repeats until Bug Hunter finds NO critical/high bugs
+  //   6. Safety limit: max 5 rounds to prevent infinite loops
   try {
     const { runBugHunter } = await import("./bugHunter.js");
-    if (turnTouchedFiles.size > 0 && turnStopHits === 1 && bugHunterBlocksThisTurn < MAX_BUG_HUNTER_BLOCKS) {
+    const MAX_BUG_HUNTER_ROUNDS = 5;
+    if (turnTouchedFiles.size > 0 && bugHunterBlocksThisTurn < MAX_BUG_HUNTER_ROUNDS) {
       const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
       const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
+
+      log.info(`[BUG_HUNTER] Starting round ${bugHunterBlocksThisTurn + 1}/${MAX_BUG_HUNTER_ROUNDS} — reviewing ${turnTouchedFiles.size} file(s)`);
       const result = await runBugHunter(
         [...turnTouchedFiles],
         userRequest,
         message.content ?? ""
       );
+
       if (result.shouldBlock && result.completed) {
+        // Bug Hunter found CRITICAL or HIGH bugs — block finish and report ALL to the IA
         bugHunterBlocksThisTurn++;
-        log.warn(`[BUG_HUNTER] Blocking finish (block ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_BLOCKS}) — critical bugs found`);
+        log.warn(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_ROUNDS}: found critical/high bugs — BLOCKING finish, reporting to IA for fixing`);
         history.addSystemMessage(result.message);
-        return true;  // Block finish, force IA to fix bugs
+        return true;  // Block finish — IA must fix bugs, then Bug Hunter will run again
       } else if (result.completed && result.findings.length > 0) {
-        // Non-blocking findings — still inject as advisory
+        // Only MEDIUM/LOW findings — inject as advisory but allow finish
+        log.info(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn + 1}: only medium/low findings — advisory only, allowing finish`);
         history.addSystemMessage(result.message);
+      } else if (result.completed) {
+        // No bugs found — clean pass!
+        log.success(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn + 1}: ✓ NO BUGS FOUND — code passed critical review`);
+        if (bugHunterBlocksThisTurn > 0) {
+          history.addSystemMessage(`[BUG_HUNTER] ✓ All previously identified bugs have been fixed. Code passed critical review on round ${bugHunterBlocksThisTurn + 1}.`);
+        }
       }
+    } else if (bugHunterBlocksThisTurn >= 5) {
+      // Safety: after 5 rounds, let it finish even if bugs remain
+      log.warn(`[BUG_HUNTER] Max rounds (5) reached — allowing finish despite potential bugs`);
+      history.addSystemMessage(`[BUG_HUNTER] Max review rounds (5) reached. The code may still have issues — please review manually.`);
     }
   } catch (err) {
     log.debug(`[BUG_HUNTER] Skipped: ${(err as Error).message}`);
