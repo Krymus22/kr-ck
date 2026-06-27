@@ -164,7 +164,32 @@ export async function editFile(
   let impactHint = "";
   try {
     const { analyzeImpact, formatImpactHint } = await import("./impactAnalyzer.js");
-    const report = await analyzeImpact(resolved);
+    // CRITICAL FIX: use the directory of the file being edited as projectRoot,
+    // NOT process.cwd(). When the test script does process.chdir(), cwd is
+    // the claude-killer dir, not the project being edited. This caused
+    // impactAnalyzer to search 200+ files of claude-killer itself, polluting
+    // context with irrelevant matches.
+    // Walk up from the file to find a reasonable project root (closest
+    // package.json or src/ dir, or just the file's parent directory).
+    const nodePath = await import("node:path");
+    let projectRoot = nodePath.dirname(resolved);
+    // Walk up max 3 levels looking for package.json or src/
+    let dir = projectRoot;
+    for (let i = 0; i < 4; i++) {
+      const nodeFs = await import("node:fs");
+      if (nodeFs.existsSync(nodePath.join(dir, "package.json"))) {
+        projectRoot = dir;
+        break;
+      }
+      if (nodePath.basename(dir) === "src") {
+        projectRoot = nodePath.dirname(dir);
+        break;
+      }
+      const parent = nodePath.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    const report = await analyzeImpact(resolved, projectRoot);
     impactHint = formatImpactHint(report);
     if (impactHint) {
       log.info(`[IMPACT] ${impactHint}`);

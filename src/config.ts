@@ -129,8 +129,12 @@ export const config = {
     getModelContextWindow(process.env.MODEL ?? "moonshotai/kimi-k2.6"),
   ),
 
-  /** Threshold (0.0-1.0) of context window that triggers auto-compact. */
-  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.75),
+  /** Threshold (0.0-1.0) of context window that triggers auto-compact.
+   *  Default 0.65 (was 0.75) — more aggressive to prevent OOM kills on long
+   *  multi-turn sessions. When context reaches this %, the agent pauses
+   *  (after completing the current tool call / thinking / write) and runs
+   *  SYNCHRONOUS compaction before continuing. */
+  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.65),
 
   /** Threshold (0.0-1.0) of context window that warns user with yellow bar. */
   contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.6),

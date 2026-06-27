@@ -102,16 +102,16 @@ describe("contextCompaction — extended", () => {
   // ─── smartCompact / shouldCompact (2) ──────────────────────────────────────
 
   describe("smartCompact — extras", () => {
-    it("retorna {compacted:false, savedTokens:0} quando abaixo do limite", () => {
+    it("retorna {compacted:false, savedTokens:0} quando abaixo do limite", async () => {
       historyMock.estimateTokens.mockReturnValue(100);
-      const r = smartCompact(50_000);
+      const r = await smartCompact(50_000);
       expect(r.compacted).toBe(false);
       expect(r.savedTokens).toBe(0);
     });
 
-    it("retorna resultado booleano/numérico válido mesmo com histórico vazio", () => {
+    it("retorna resultado booleano/numérico válido mesmo com histórico vazio", async () => {
       historyMock.estimateTokens.mockReturnValue(0);
-      const r = smartCompact(1);
+      const r = await smartCompact(1);
       expect(typeof r.compacted).toBe("boolean");
       expect(typeof r.savedTokens).toBe("number");
     });

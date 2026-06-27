@@ -1430,12 +1430,15 @@ async function handleChatResponse(
 
 /** Pre-turn maintenance: context compaction + checkpoint write. */
 async function runPreTurnMaintenance(): Promise<void> {
-  // Compaction threshold from config (default 75% — matches Claude Code).
+  // Compaction threshold from config (default 65% — more aggressive than before).
   // Override via CONTEXT_COMPACT_THRESHOLD env var (0.0-1.0).
+  // CRITICAL: smartCompact is now ASYNC and BLOCKING. The agent PAUSES here
+  // until compaction completes. This prevents OOM kills from running compaction
+  // in parallel with the main chat() call.
   const compactionThreshold = config.contextWindowTokens * config.contextCompactThreshold;
-  const compaction = smartCompact(compactionThreshold);
+  const compaction = await smartCompact(compactionThreshold);
   if (compaction.compacted) {
-    log.debug(`Context compacted: saved ${compaction.savedTokens} tokens (threshold was ${Math.round(compactionThreshold)})`);
+    log.info(`[COMPACTION] Context compacted: saved ${compaction.savedTokens} tokens (threshold was ${Math.round(compactionThreshold)})`);
   }
   await maybeWriteCheckpoint();
 }

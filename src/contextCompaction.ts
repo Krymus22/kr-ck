@@ -136,19 +136,27 @@ export function compactIntelligently(messages: any[]): { messages: any[]; applie
 
 export { strategies };
 
-export function smartCompact(maxTokens: number = 50000): { compacted: boolean; savedTokens: number } {
+export async function smartCompact(maxTokens: number = 50000): Promise<{ compacted: boolean; savedTokens: number }> {
   const before = history.estimateTokens();
 
   if (before <= maxTokens) {
     return { compacted: false, savedTokens: 0 };
   }
 
+  log.info(`[COMPACTION] Context at ${before} tokens (threshold ${maxTokens}) — compacting SYNCHRONOUSLY (agent paused)`);
+
   // IDEIA 3: When context is critically full AND effort allows, use the
   // model to produce a high-fidelity summary. This preserves architectural
   // decisions, unresolved bugs, and planned next steps - much better than
   // blind truncation. Mirrors Claude Code's compaction approach.
+  //
+  // CRITICAL FIX: smartCompact is now ASYNC and BLOCKING. Previously it was
+  // sync and kicked off compaction in the background (fire-and-forget), which
+  // meant the agent continued with the un-compacted context AND a parallel
+  // chat() call was running — doubling memory pressure and causing OOM kills.
+  // Now: smartCompact awaits the compaction, the agent PAUSES until it's done.
   if (shouldUseIntelligentCompaction() && before > maxTokens * 1.2) {
-    const modelCompacted = modelBasedCompactionSync();
+    const modelCompacted = await modelBasedCompactionAsync();
     if (modelCompacted.compacted) {
       log.success(`[COMPACTION] Model-based compaction saved ${modelCompacted.savedTokens} tokens`);
       return modelCompacted;
@@ -164,12 +172,17 @@ export function smartCompact(maxTokens: number = 50000): { compacted: boolean; s
   if (history.estimateTokens(compacted as any) > maxTokens) {
     const aggressiveResult = history.compactHistory();
     if (aggressiveResult) {
+      log.success(`[COMPACTION] Aggressive compaction saved ${aggressiveResult.beforeTokens - aggressiveResult.afterTokens} tokens`);
       return { compacted: true, savedTokens: aggressiveResult.beforeTokens - aggressiveResult.afterTokens };
     }
   }
 
   const after = history.estimateTokens(compacted as any);
-  return { compacted: before > after, savedTokens: before - after };
+  const saved = before - after;
+  if (saved > 0) {
+    log.success(`[COMPACTION] Heuristic compaction saved ${saved} tokens`);
+  }
+  return { compacted: before > after, savedTokens: saved };
 }
 
 /**
@@ -185,32 +198,11 @@ export function smartCompact(maxTokens: number = 50000): { compacted: boolean; s
  * Returns a compaction result. If the model call fails, returns { compacted: false }
  * so the caller can fall back to heuristic compaction.
  *
- * Note: this is a SYNCHRONOUS wrapper that kicks off the model call but doesn't
- * await it - actual model-based compaction happens via modelBasedCompactionAsync.
- * The sync version returns the cached result of the last successful async run,
- * or false if none exists yet. This keeps smartCompact's signature synchronous.
+ * CRITICAL FIX: This is now called SYNCHRONOUSLY (awaited) by smartCompact.
+ * Previously it was fire-and-forget (background), which caused OOM kills
+ * because the main chat() call ran in parallel with this one, doubling
+ * memory pressure. Now the agent PAUSES while compaction runs.
  */
-function modelBasedCompactionSync(): { compacted: boolean; savedTokens: number } {
-  // Kick off async compaction in the background - next call to smartCompact
-  // will pick up the result. This avoids blocking the main loop.
-  if (!modelCompactionInProgress) {
-    modelCompactionInProgress = true;
-    modelBasedCompactionAsync()
-      .then((result) => { lastModelCompactionResult = result; })
-      .catch((err) => log.warn(`[COMPACTION] Model-based failed: ${(err as Error).message}`))
-      .finally(() => { modelCompactionInProgress = false; });
-  }
-  if (lastModelCompactionResult) {
-    const r = lastModelCompactionResult;
-    lastModelCompactionResult = null; // consume
-    return r;
-  }
-  return { compacted: false, savedTokens: 0 };
-}
-
-let modelCompactionInProgress = false;
-let lastModelCompactionResult: { compacted: boolean; savedTokens: number } | null = null;
-
 async function modelBasedCompactionAsync(): Promise<{ compacted: boolean; savedTokens: number }> {
   const allMessages = history.getHistory();
   if (allMessages.length < 10) return { compacted: false, savedTokens: 0 };

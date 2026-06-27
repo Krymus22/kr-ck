@@ -192,42 +192,42 @@ describe("smartCompact", () => {
     history.resetHistory();
   });
 
-  it("returns not-compacted when under threshold", () => {
+  it("returns not-compacted when under threshold", async () => {
     history.addUserMessage("short");
-    const result = smartCompact(50000);
+    const result = await smartCompact(50000);
     expect(result.compacted).toBe(false);
     expect(result.savedTokens).toBe(0);
   });
 
-  it("returns compacted when over threshold with enough messages", () => {
+  it("returns compacted when over threshold with enough messages", async () => {
     // Mix of user + tool messages so compaction strategies have
     // something to do (user-only messages aren't compacted by current strategies).
     for (let i = 0; i < 20; i++) {
       history.addUserMessage(`message ${i} with some content to make it longer`);
       history.addToolResult(`tool-${i}`, `tool result ${i} with content `.repeat(10));
     }
-    const result = smartCompact(10);
+    const result = await smartCompact(10);
     // Either compacted (strategies applied) or aggressive compaction kicked in
     expect(result.compacted).toBe(true);
     expect(result.savedTokens).toBeGreaterThanOrEqual(0);
   });
 
-  it("reaches normal return path when compactHistory returns null", () => {
+  it("reaches normal return path when compactHistory returns null", async () => {
     history.resetHistory();
     history.addUserMessage("test1");
     history.addUserMessage("test2");
-    const result = smartCompact(1);
+    const result = await smartCompact(1);
     expect(result).toBeDefined();
     expect(typeof result.compacted).toBe("boolean");
     expect(typeof result.savedTokens).toBe("number");
   });
 
-  it("returns saved tokens when compactIntelligently reduces enough", () => {
+  it("returns saved tokens when compactIntelligently reduces enough", async () => {
     history.resetHistory();
     for (let i = 0; i < 15; i++) {
       history.addUserMessage("x".repeat(500));
     }
-    const result = smartCompact(50000);
+    const result = await smartCompact(50000);
     expect(result.compacted).toBe(false);
     expect(result.savedTokens).toBe(0);
   });

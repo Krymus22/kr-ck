@@ -583,7 +583,7 @@ describe("4. Fluxo com contexto cheio → compact", () => {
     // smartCompact com threshold explícito abaixo do atual para forçar a
     // compactação (roda o cross-module real: smartCompact → history.compactHistory).
     const threshold = Math.floor(tokensAntes * 0.5);
-    const result = smartCompact(threshold);
+    const result = await smartCompact(threshold);
 
     expect(result.compacted).toBe(true);
     expect(result.savedTokens).toBeGreaterThan(0);

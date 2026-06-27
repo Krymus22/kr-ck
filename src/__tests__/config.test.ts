@@ -26,7 +26,7 @@ describe("Config", () => {
 
     expect(config.debug).toBe(false);
     expect(config.diffPreview).toBe(true);
-    expect(config.contextCompactThreshold).toBe(0.75);
+    expect(config.contextCompactThreshold).toBe(0.65);
     expect(config.contextWarnThreshold).toBe(0.6);
   });
 
@@ -42,7 +42,7 @@ describe("Config", () => {
     process.env.NVIDIA_API_KEY = "test-key";
     process.env.CONTEXT_COMPACT_THRESHOLD = "not_a_float";
     const { config } = await import("../config.js");
-    expect(config.contextCompactThreshold).toBe(0.75); // falls back
+    expect(config.contextCompactThreshold).toBe(0.65); // falls back
     delete process.env.CONTEXT_COMPACT_THRESHOLD;
   });
 
