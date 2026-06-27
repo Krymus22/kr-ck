@@ -30,6 +30,9 @@ import { chat } from "./apiClient.js";
 import * as history from "./history.js";
 import * as log from "./logger.js";
 import { pushActivity } from "./activityTracker.js";
+import * as nodePath from "node:path";
+import * as nodeFs from "node:fs";
+import { spawn as nodeSpawn } from "node:child_process";
 
 export interface BugFinding {
   severity: "critical" | "high" | "medium" | "low";
@@ -68,9 +71,9 @@ const fileSnapshots = new Map<string, string>();
  */
 export function snapshotFileBeforeEdit(filePath: string): void {
   try {
-    const resolved = require("node:path").resolve(filePath);
-    if (require("node:fs").existsSync(resolved)) {
-      fileSnapshots.set(resolved, require("node:fs").readFileSync(resolved, "utf8"));
+    const resolved = nodePath.resolve(filePath);
+    if (nodeFs.existsSync(resolved)) {
+      fileSnapshots.set(resolved, nodeFs.readFileSync(resolved, "utf8"));
     }
   } catch { /* ignore */ }
 }
@@ -81,12 +84,12 @@ export function snapshotFileBeforeEdit(filePath: string): void {
  */
 export function generateDiffAfterEdit(filePath: string): string {
   try {
-    const resolved = require("node:path").resolve(filePath);
+    const resolved = nodePath.resolve(filePath);
     const before = fileSnapshots.get(resolved);
     if (!before) return ""; // no snapshot — file was new
 
-    const after = require("node:fs").existsSync(resolved)
-      ? require("node:fs").readFileSync(resolved, "utf8")
+    const after = nodeFs.existsSync(resolved)
+      ? nodeFs.readFileSync(resolved, "utf8")
       : "";
 
     if (before === after) return ""; // no changes
@@ -131,7 +134,7 @@ export async function runProjectVerification(projectDir: string): Promise<string
   // SOLUTION: use spawn with detached:true (creates a new process group),
   // then kill the ENTIRE process group with SIGKILL after timeout. This
   // guarantees all subprocesses die and the function returns.
-  const { spawn } = require("node:child_process");
+  const spawn = nodeSpawn;
 
   function runWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<string> {
     return new Promise((resolve) => {
@@ -151,7 +154,7 @@ export async function runProjectVerification(projectDir: string): Promise<string
         settled = true;
         try {
           // Kill the ENTIRE process group (negative PID)
-          process.kill(-child.pid, "SIGKILL");
+          if (child.pid) process.kill(-child.pid, "SIGKILL");
         } catch { /* ignore */ }
         resolve("(project timed out after " + (timeoutMs / 1000) + "s)");
       }, timeoutMs);
@@ -405,7 +408,7 @@ export async function runBugHunter(
     // IDEIA D: Run project between rounds (if blocking)
     let projectOutput = "";
     if (shouldBlock && filesModified.length > 0) {
-      const projectDir = filesModified[0] ? require("node:path").dirname(filesModified[0]).replace("/src", "") : process.cwd();
+      const projectDir = filesModified[0] ? nodePath.dirname(filesModified[0]).replace("/src", "") : process.cwd();
       console.log(`[BUG_HUNTER] Running project verification...`);
       projectOutput = await runProjectVerification(projectDir);
       console.log(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
