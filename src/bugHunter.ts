@@ -120,30 +120,78 @@ export function generateDiffAfterEdit(filePath: string): string {
  * Tries to run "npx tsx src/index.ts" or "npm test" and returns the result.
  */
 async function runProjectVerification(projectDir: string): Promise<string> {
-  try {
-    const { execSync } = require("node:child_process");
-    // Try npx tsx src/index.ts first — short timeout to avoid hanging
-    try {
-      const out = execSync("npx tsx src/index.ts 2>&1", {
-        cwd: projectDir, timeout: 10000, encoding: "utf8",
-        stdio: ["pipe", "pipe", "pipe"] // don't inherit stdin
+  // CRITICAL FIX: execSync with timeout does NOT work when the child has
+  // subprocesses that inherit stdout/stderr pipes. The event-scheduler project
+  // has TTLManager with setInterval — if index.ts doesn't call stop(), the
+  // Node process stays alive forever. execSync kills the direct child (npx)
+  // with SIGTERM after 10s, but the orphaned subprocesses (tsx → node) keep
+  // the pipes open, so execSync NEVER returns — it hangs forever, ignoring
+  // the timeout.
+  //
+  // SOLUTION: use spawn with detached:true (creates a new process group),
+  // then kill the ENTIRE process group with SIGKILL after timeout. This
+  // guarantees all subprocesses die and the function returns.
+  const { spawn } = require("node:child_process");
+
+  function runWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<string> {
+    return new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+
+      const child = spawn(cmd, args, {
+        cwd: projectDir,
+        detached: true,  // new process group — so we can kill all children
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: true,
       });
-      return out.trim().slice(0, 500) || "(no output)";
-    } catch (e: any) {
-      // If it timed out or failed, try to get partial output
-      if (e.stdout) return ("output: " + e.stdout.toString().trim()).slice(0, 500);
-      if (e.killed) return "(project timed out after 10s)";
-      // Try npm test
-      try {
-        const out = execSync("npm test 2>&1", {
-          cwd: projectDir, timeout: 10000, encoding: "utf8",
-          stdio: ["pipe", "pipe", "pipe"]
-        });
-        return out.trim().slice(0, 500) || "(no output)";
-      } catch {
-        return "(could not run project)";
-      }
+
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try {
+          // Kill the ENTIRE process group (negative PID)
+          process.kill(-child.pid, "SIGKILL");
+        } catch { /* ignore */ }
+        resolve("(project timed out after " + (timeoutMs / 1000) + "s)");
+      }, timeoutMs);
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf8").slice(0, 1024 - stdout.length);
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString("utf8").slice(0, 1024 - stderr.length);
+      });
+
+      child.on("error", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve("(could not run project)");
+      });
+
+      child.on("close", (code: number) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+        if (code === 0) {
+          resolve(combined.slice(0, 500) || "(no output)");
+        } else {
+          resolve(("exit=" + code + " " + combined).slice(0, 500) || "(no output)");
+        }
+      });
+    });
+  }
+
+  try {
+    // Try npx tsx src/index.ts first — 10s timeout, kills entire process group
+    const result = await runWithTimeout("npx", ["tsx", "src/index.ts"], 10000);
+    if (!result.startsWith("(project timed out")) {
+      return result;
     }
+    // If it timed out, return that — don't try npm test (slower, same issue)
+    return result;
   } catch {
     return "(could not run project)";
   }
@@ -341,23 +389,26 @@ export async function runBugHunter(
     }
     const criticalAndHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
     const mediumAndLow = findings.filter(f => f.severity === "medium" || f.severity === "low");
-    const shouldBlock = criticalAndHigh.length > 0;
+    // Block on ANY findings — IA must address medium/low too, not just critical/high.
+    // The agent.ts handler enforces a tighter round cap for medium/only rounds (3 max)
+    // to avoid infinite nitpick loops.
+    const shouldBlock = findings.length > 0;
     console.log(`[BUG_HUNTER] critical/high: ${criticalAndHigh.length}, medium/low: ${mediumAndLow.length}, shouldBlock: ${shouldBlock}`);
 
     // IDEIA A: Compare with previous round
     let comparison: { fixed: BugFinding[]; persisting: BugFinding[]; newBugs: BugFinding[] } | null = null;
     if (previousFindings.length > 0) {
       comparison = compareFindings(findings, previousFindings);
-      log.info(`[BUG_HUNTER] Comparison: ${comparison.fixed.length} fixed, ${comparison.persisting.length} persisting, ${comparison.newBugs.length} NEW`);
+      console.log(`[BUG_HUNTER] Comparison: ${comparison.fixed.length} fixed, ${comparison.persisting.length} persisting, ${comparison.newBugs.length} NEW`);
     }
 
     // IDEIA D: Run project between rounds (if blocking)
     let projectOutput = "";
     if (shouldBlock && filesModified.length > 0) {
       const projectDir = filesModified[0] ? require("node:path").dirname(filesModified[0]).replace("/src", "") : process.cwd();
-      log.info(`[BUG_HUNTER] Running project verification...`);
+      console.log(`[BUG_HUNTER] Running project verification...`);
       projectOutput = await runProjectVerification(projectDir);
-      log.info(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
+      console.log(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
     }
 
     const message = formatBugHuntMessage(findings, shouldBlock, comparison, projectOutput);
@@ -620,9 +671,11 @@ function formatBugHuntMessage(
 
   const lines: string[] = [];
   lines.push(shouldBlock
-    ? `[BUG_HUNTER] ✗ CRITICAL ISSUES FOUND — you MUST fix these before finishing:`
-    : `[BUG_HUNTER] Review complete. Minor issues found (non-blocking):`
+    ? `[BUG_HUNTER] ✗ ISSUES FOUND — you MUST fix or dismiss EACH finding before finishing:`
+    : `[BUG_HUNTER] Review complete. No issues found.`
   );
+  lines.push("");
+  lines.push(`IMPORTANT: You are NOT allowed to finish until every finding below is either FIXED (with a real code change) or EXPLICITLY DISMISSED with a valid reason (e.g., "false positive because X"). Saying "looks fine" without addressing each finding = blocking.`);
   lines.push("");
 
   // IDEIA A: Show comparison with previous round
@@ -674,14 +727,19 @@ function formatBugHuntMessage(
 
   if (shouldBlock) {
     // IDEIA B + C: Instructions for fixing
-    lines.push(`## How to fix these bugs:`);
-    lines.push(`1. Fix ONE bug at a time — don't try to fix multiple in a single edit.`);
+    lines.push(`## How to address these findings:`);
+    lines.push(`1. Fix ONE finding at a time — don't try to fix multiple in a single edit.`);
     lines.push(`2. READ the file FIRST (ler_arquivo) to see the current content before editing.`);
     lines.push(`3. Edit with editar_arquivo (NOT cat > or executar_comando).`);
-    lines.push(`4. After each fix, RE-READ the file to verify the edit is correct.`);
-    lines.push(`5. Run the project (executar_comando "npx tsx src/index.ts") to verify nothing broke.`);
-    lines.push(`6. The Bug Hunter will re-review after you finish. It will tell you which bugs were`);
-    lines.push(`   fixed, which are persisting, and which are NEW (introduced by your fixes).`);
+    lines.push(`4. For each finding: either FIX it (with a real code change) or DISMISS it with a concrete reason.`);
+    lines.push(`   - Valid dismiss: "false positive — line 42 already handles nil case"`);
+    lines.push(`   - Invalid dismiss: "looks fine", "should work", "minor issue".`);
+    lines.push(`5. If you dismiss, you MUST cite the line/code that proves it's a false positive.`);
+    lines.push(`6. After fixing, run the project (executar_comando "npx tsx src/index.ts") to verify nothing broke.`);
+    lines.push(`7. The Bug Hunter will re-review after you finish. It will tell you which findings were`);
+    lines.push(`   FIXED, which are PERSISTING, and which are NEW (introduced by your fixes).`);
+    lines.push(`8. For MEDIUM/LOW findings: prioritize fixing the ones that affect correctness or usability.`);
+    lines.push(`   Style/naming nits can be dismissed if the code is otherwise correct.`);
   }
 
   return lines.join("\n");

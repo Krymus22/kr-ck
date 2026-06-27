@@ -118,6 +118,7 @@ let turnStopHits = 0;
 let goalVerifierBlocksThisTurn = 0;
 /** Counter of bug hunter rounds this turn (max 5 rounds per turn) */
 let bugHunterBlocksThisTurn = 0;
+let bugHunterMediumLowRounds = 0;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
 
@@ -1221,8 +1222,20 @@ async function sendAndProcess(
   // infinite loops by aborting after 3 identical blocked tool calls.
   // This allows complex multi-step tasks without artificial limits.
 
-  await runPreTurnMaintenance();
-  history.optimizeContext();
+  // CRITICAL FIX: runPreTurnMaintenance must NEVER crash the agent.
+  // It contains writeCheckpoint (file I/O) and chat() calls (API).
+  // Any error here would propagate up to runAgentLoop's try/finally (no catch),
+  // killing the process via unhandled rejection.
+  try {
+    await runPreTurnMaintenance();
+  } catch (err) {
+    log.warn(`[PRE_TURN_MAINTENANCE] Failed (non-fatal): ${(err as Error).message}`);
+  }
+  try {
+    history.optimizeContext();
+  } catch (err) {
+    log.warn(`[OPTIMIZE_CONTEXT] Failed (non-fatal): ${(err as Error).message}`);
+  }
 
   // Always send ALL tools — no tool reduction.
   // Tool reduction was removed because it filtered tools the IA might need.
@@ -1385,6 +1398,7 @@ async function handleChatResponse(
   turnStopHits = 0;
   goalVerifierBlocksThisTurn = 0;
   bugHunterBlocksThisTurn = 0;
+  bugHunterMediumLowRounds = 0;
 
   // Reset Bug Hunter previous findings for new turn
   try {
@@ -1427,18 +1441,22 @@ async function runPreTurnMaintenance(): Promise<void> {
 }
 
 async function maybeWriteCheckpoint(): Promise<void> {
-  const currentTokens = history.estimateTokens?.() ?? 0;
-  if (!shouldWriteCheckpoint(currentTokens) || currentTokens <= lastCheckpointTokens + 1000) return;
-  const checkpoint = createCheckpoint(
-    sessionStartTime,
-    history.getHistory().map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
-    sessionFileChanges,
-    sessionToolsUsed
-  );
-  const { writeCheckpoint } = await import("./memory.js");
-  writeCheckpoint(memoryConfig, checkpoint);
-  lastCheckpointTokens = currentTokens;
-  log.debug(`Checkpoint saved at ${currentTokens} tokens`);
+  try {
+    const currentTokens = history.estimateTokens?.() ?? 0;
+    if (!shouldWriteCheckpoint(currentTokens) || currentTokens <= lastCheckpointTokens + 1000) return;
+    const checkpoint = createCheckpoint(
+      sessionStartTime,
+      history.getHistory().map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
+      sessionFileChanges,
+      sessionToolsUsed
+    );
+    const { writeCheckpoint } = await import("./memory.js");
+    writeCheckpoint(memoryConfig, checkpoint);
+    lastCheckpointTokens = currentTokens;
+    log.debug(`Checkpoint saved at ${currentTokens} tokens`);
+  } catch (err) {
+    log.warn(`[CHECKPOINT_WRITE] Failed (non-fatal): ${(err as Error).message}`);
+  }
 }
 
 function fireTrigger(name: "always" | "on_task"): void {
@@ -1679,41 +1697,70 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   try {
     const { runBugHunter } = await import("./bugHunter.js");
     const MAX_BUG_HUNTER_ROUNDS = 10;
+    // For medium/low-only rounds, cap at 3 to avoid nitpick loops
+    const MAX_MEDIUM_LOW_ROUNDS = 3;
     if (turnTouchedFiles.size > 0 && bugHunterBlocksThisTurn < MAX_BUG_HUNTER_ROUNDS) {
       const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
       const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
 
-      log.info(`[BUG_HUNTER] Starting round ${bugHunterBlocksThisTurn + 1}/${MAX_BUG_HUNTER_ROUNDS} — reviewing ${turnTouchedFiles.size} file(s)`);
+      console.log(`[BUG_HUNTER] Starting round ${bugHunterBlocksThisTurn + 1}/${MAX_BUG_HUNTER_ROUNDS} — reviewing ${turnTouchedFiles.size} file(s)`);
       const result = await runBugHunter(
         [...turnTouchedFiles],
         userRequest,
         message.content ?? ""
       );
 
+      // DEBUG: explicit log so we can see what Bug Hunter returned
+      console.log(`[BUG_HUNTER] Result: shouldBlock=${result.shouldBlock}, completed=${result.completed}, findings=${result.findings.length}, messageLen=${result.message?.length ?? 0}`);
+      if (result.findings.length > 0) {
+        const ch = result.findings.filter(f => f.severity === "critical" || f.severity === "high").length;
+        const ml = result.findings.filter(f => f.severity === "medium" || f.severity === "low").length;
+        console.log(`[BUG_HUNTER] Breakdown: critical/high=${ch}, medium/low=${ml}`);
+      }
+
       if (result.shouldBlock && result.completed) {
-        // Bug Hunter found CRITICAL or HIGH bugs — block finish and report ALL to the IA
-        bugHunterBlocksThisTurn++;
-        log.warn(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_ROUNDS}: found critical/high bugs — BLOCKING finish, reporting to IA for fixing`);
-        history.addSystemMessage(result.message);
-        return true;  // Block finish — IA must fix bugs, then Bug Hunter will run again
-      } else if (result.completed && result.findings.length > 0) {
-        // Only MEDIUM/LOW findings — inject as advisory but allow finish
-        log.info(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn + 1}: only medium/low findings — advisory only, allowing finish`);
-        history.addSystemMessage(result.message);
-      } else if (result.completed) {
+        // Bug Hunter found ANY findings (critical/high OR medium/low) — block finish
+        const hasCriticalHigh = result.findings.some(f => f.severity === "critical" || f.severity === "high");
+        const hasMediumLow = result.findings.some(f => f.severity === "medium" || f.severity === "low");
+        console.log(`[BUG_HUNTER] Handler: shouldBlock=true, completed=true, hasCriticalHigh=${hasCriticalHigh}, hasMediumLow=${hasMediumLow}, bugHunterMediumLowRounds=${bugHunterMediumLowRounds}`);
+
+        if (hasCriticalHigh) {
+          bugHunterBlocksThisTurn++;
+          console.log(`[BUG_HUNTER] ACTION: blocking finish for critical/high (round ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_ROUNDS})`);
+          console.log(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn}/${MAX_BUG_HUNTER_ROUNDS}: found critical/high bugs — BLOCKING finish, reporting to IA for fixing`);
+          history.addSystemMessage(result.message);
+          return true;  // Block finish — IA must fix bugs, then Bug Hunter will run again
+        } else if (hasMediumLow && bugHunterMediumLowRounds < MAX_MEDIUM_LOW_ROUNDS) {
+          // Only medium/low — block but with tighter cap
+          bugHunterBlocksThisTurn++;
+          bugHunterMediumLowRounds++;
+          console.log(`[BUG_HUNTER] ACTION: blocking finish for medium/low (round ${bugHunterMediumLowRounds}/${MAX_MEDIUM_LOW_ROUNDS})`);
+          console.log(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn} (medium/low round ${bugHunterMediumLowRounds}/${MAX_MEDIUM_LOW_ROUNDS}): found ${result.findings.length} medium/low findings — BLOCKING finish, reporting to IA for fixing`);
+          history.addSystemMessage(result.message);
+          return true;  // Block finish — IA must address medium/low findings too
+        } else {
+          // Medium/low cap reached — allow finish with advisory
+          console.log(`[BUG_HUNTER] ACTION: medium/low cap reached — allowing finish`);
+          console.log(`[BUG_HUNTER] Medium/low cap (${MAX_MEDIUM_LOW_ROUNDS}) reached — allowing finish with ${result.findings.length} advisory findings`);
+          history.addSystemMessage(`[BUG_HUNTER] Medium/low review cap reached. ${result.findings.length} findings remain unaddressed — please review manually.\n\n${result.message}`);
+        }
+      } else if (result.completed && result.findings.length === 0) {
+        console.log(`[BUG_HUNTER] ACTION: clean pass — no bugs found`);
         // No bugs found — clean pass!
-        log.success(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn + 1}: ✓ NO BUGS FOUND — code passed critical review`);
+        console.log(`[BUG_HUNTER] Round ${bugHunterBlocksThisTurn + 1}: ✓ NO BUGS FOUND — code passed critical review`);
         if (bugHunterBlocksThisTurn > 0) {
           history.addSystemMessage(`[BUG_HUNTER] ✓ All previously identified bugs have been fixed. Code passed critical review on round ${bugHunterBlocksThisTurn + 1}.`);
         }
+      } else {
+        console.log(`[BUG_HUNTER] ACTION: no action (shouldBlock=${result.shouldBlock}, completed=${result.completed}, findings=${result.findings.length})`);
       }
-    } else if (bugHunterBlocksThisTurn >= 5) {
-      // Safety: after 5 rounds, let it finish even if bugs remain
-      log.warn(`[BUG_HUNTER] Max rounds (5) reached — allowing finish despite potential bugs`);
-      history.addSystemMessage(`[BUG_HUNTER] Max review rounds (5) reached. The code may still have issues — please review manually.`);
+    } else if (bugHunterBlocksThisTurn >= MAX_BUG_HUNTER_ROUNDS) {
+      // Safety: after max rounds, let it finish even if bugs remain
+      console.log(`[BUG_HUNTER] Max rounds (${MAX_BUG_HUNTER_ROUNDS}) reached — allowing finish despite potential bugs`);
+      history.addSystemMessage(`[BUG_HUNTER] Max review rounds (${MAX_BUG_HUNTER_ROUNDS}) reached. The code may still have issues — please review manually.`);
     }
   } catch (err) {
-    log.debug(`[BUG_HUNTER] Skipped: ${(err as Error).message}`);
+    console.log(`[BUG_HUNTER] Skipped (error in handler): ${(err as Error).message}`);
   }
 
   // IDEIA 14: Inject failure memory before finishing (for next turn's awareness)
@@ -1850,6 +1897,12 @@ export async function runAgentLoop(
   let result: string;
   try {
     result = await sendAndProcess(0, onStreamStart, onToken, onThinking, onUsage);
+  } catch (err) {
+    // CRITICAL FIX: any error from sendAndProcess (API failure, checkpoint write, etc)
+    // must NOT kill the process. Return the error message as the result so the
+    // caller (test script or TUI) can handle it gracefully.
+    log.error(`[AGENT_LOOP] Fatal error: ${(err as Error).message}`);
+    result = `[ERROR] Agent loop failed: ${(err as Error).message}. Please try again.`;
   } finally {
     // Always clear callbacks to prevent leaks across turns
     currentOnToolCall = undefined;

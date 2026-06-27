@@ -22,10 +22,15 @@ import { getModelInfo } from "./modelRegistry.js";
 // This prevents intermediate load balancers/proxies from killing
 // the connection while the model is still "thinking" but hasn't
 // started emitting tokens yet (cold-start / warm-up phase).
+//
+// CRITICAL FIX: timeout must NOT be 0 (infinite). If NVIDIA's API accepts
+// the TCP connection but never responds (load balancer issue, server hang),
+// the socket would hang forever, freezing the entire agent loop.
+// 5 min matches the OpenAI client timeout — if no response by then, abort.
 const keepAliveAgent = new https.Agent({
   keepAlive: true,
   keepAliveMsecs: 1_000,   // probe every 1 second (extra aggressive to prevent proxy cuts)
-  timeout: 0,               // no socket-level timeout
+  timeout: 5 * 60 * 1000,  // 5 min socket timeout — matches OpenAI client timeout
   maxSockets: 10,           // allow slightly more concurrent sockets if needed
   scheduling: "lifo",       // re-use the most recently used connections to keep them warm
 });
@@ -533,7 +538,20 @@ function createStreamRequest(
     requestBody.chat_template_kwargs = { thinking_mode: "enabled" };
   }
 
-  return c.chat.completions.create(requestBody);
+  // CRITICAL FIX: AbortController with hard timeout.
+  // If NVIDIA accepts TCP but never streams any data (server hang, LB issue),
+  // the OpenAI client timeout (5 min) covers this, but we add an explicit
+  // AbortController as defense-in-depth. If the request hasn't started
+  // streaming within 4 minutes, abort and let the retry logic handle it.
+  const controller = new AbortController();
+  const timeoutMs = 4 * 60 * 1000; // 4 min — slightly less than client's 5 min
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const promise = c.chat.completions.create(requestBody, { signal: controller.signal });
+  // Clear the timeout when the promise settles (success or error)
+  promise.finally(() => clearTimeout(timer));
+
+  return promise;
 }
 
 // BUG FIX (BUG 5): processReasoningChunk antes retornava `!wasFirst` (boolean
