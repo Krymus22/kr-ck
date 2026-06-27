@@ -71,30 +71,41 @@ export function getEffortPromptSnippet(): string {
   switch (currentLevel) {
     case "low":
       return `## EFFORT LEVEL: LOW
-Responda direto e conciso. Use pensar() APENAS for tarefas complexas (multi-arquivo, algoritmos, debugging).
-Não valide cada passo - foque em velocidade.
-Pule auto-testes pós-diff a menos que o usuário peça.`;
+Always use pensar() before acting — even a 1-sentence thought: "vou fazer X porque Y".
+Responda direto e conciso. Foque em velocidade mas NÃO pule o pensar().
+Categorias: pre_edit (antes de editar), pre_response (antes de responder), planning (antes de começar).`;
 
     case "medium":
       return `## EFFORT LEVEL: MEDIUM (default)
-Use pensar() for tarefas não-triviais (escritas, edições, comandos que mudam estado).
-Raciocínio curto e focado: 1-3 frases no pensar().
+Use pensar() before any action (edit, command, respond). 2-3 frases: o que, por quê, o que pode dar errado.
+Categorias obrigatórias:
+- pre_edit: antes de editar arquivo (responda o checklist anti-bug)
+- pre_research: antes de pesquisar API
+- pre_response: antes de responder ao usuário (honestidade)
+- planning: antes de começar uma tarefa
 Verifique tipos e erros óbvios antes de escrever código.`;
 
     case "high":
       return `## EFFORT LEVEL: HIGH
-Use pensar() antes de CADA escrita (aplicar_diff, editar_arquivo, desfazer_edicao).
-No pensar(), verifique explicitamente: tipos, dependências, edge cases, regressões.
-Raciocínio médio: 3-6 frases. Sempre considere o que pode dar errado.
-Após editar, rode testes/tsc for validar.`;
+Use pensar() before EVERY action with the correct category. 4-6 frases, responda o checklist completo.
+Categorias obrigatórias:
+- planning: antes de começar (liste arquivos, ordem, riscos)
+- pre_edit: antes de editar (checklist anti-bug: leu? search existe? quebugs? edge cases? Bug Hunter aprovaria?)
+- pre_research: antes de pesquisar (o que sei, o que preciso confirmar)
+- pre_response: antes de responder (verifiquei? estou sendo honesto?)
+- debugging: investigando bugs
+Após editar, rode testes/tsc para validar.
+Considere delegar exploração para sub-agentes.`;
 
     case "max":
       return `## EFFORT LEVEL: MAX
-Use pensar() antes de CADA tool call que muda estado (write, edit, command, rollback).
-No pensar(), estruture: (1) o que vou fazer, (2) por quê, (3) o que li do arquivo, (4) edge cases, (5) alternativas consideradas, (6) impacto em outros arquivos.
-Raciocínio longo e detalhado: 6+ frases quando apropriado.
-Antes de finish_reason, valide explicitamente o trabalho feito nesta turn.
-Se não tiver certeza, faça mais research antes de agir.`;
+Use pensar() before EVERY tool call. 6+ frases estruturadas. Responda o checklist completo.
+Estruture: (1) o que vou fazer, (2) por quê, (3) o que li do arquivo, (4) edge cases, (5) alternativas consideradas, (6) impacto em outros arquivos, (7) que bugs o Bug Hunter encontraria.
+Categorias obrigatórias: planning, pre_edit, pre_research, pre_response, debugging, architecture.
+Antes de finish, valide explicitamente o trabalho feito nesta turn.
+Use sub-agentes para explorar em paralelo.
+Se não tiver certeza, faça mais research antes de agir.
+HONESTY OVER AGREEMENT — sempre.`;
 
     default:
       return "";

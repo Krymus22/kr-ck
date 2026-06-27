@@ -184,6 +184,29 @@ const SUB_AGENT_TOOLS = [
       },
     },
   },
+  // Sub-agentes também pensam — pensar() sempre disponível
+  {
+    type: "function" as const,
+    function: {
+      name: "pensar",
+      description: "Structured thinking. Call before exploring, before reporting findings. Think about what you're looking for and what you found.",
+      parameters: {
+        type: "object",
+        properties: {
+          pensamento: {
+            type: "string",
+            description: "Your thought: what am I looking for, what did I find, what's the pattern.",
+          },
+          categoria: {
+            type: "string",
+            description: "Category.",
+            enum: ["planning", "pre_edit", "pre_research", "pre_response", "debugging", "architecture", "general"],
+          },
+        },
+        required: ["pensamento"],
+      },
+    },
+  },
 ];
 
 // --- Args ------------------------------------------------------------------
@@ -383,6 +406,11 @@ async function executeSubAgentTool(name: string, args: any, cwd: string): Promis
           `Symbols: ${result.symbols.length}`,
           ...result.symbols.map((s: any) => `  ${s.type} ${s.name} (line ${s.line})`),
         ].join("\n");
+      }
+      case "pensar": {
+        // Sub-agente pensa também — retorna confirmação simples
+        const cat = args.categoria ?? args.category ?? "general";
+        return `[THINK] ✓ Pensamento registrado (${cat}). Continue sua análise.`;
       }
       default:
         return `[ERROR] Unknown tool: ${name}`;

@@ -1224,17 +1224,10 @@ async function sendAndProcess(
   await runPreTurnMaintenance();
   history.optimizeContext();
 
-  // IDEIA 10: Tool reduction - filter tools by detected intent
+  // Always send ALL tools — no tool reduction.
+  // Tool reduction was removed because it filtered tools the IA might need.
+  // The IA should always have access to all 18 tools.
   let toolsForCall = getMergedTools();
-  try {
-    const { detectIntent, filterToolsByIntent, getFilterSummary } = await import("./toolReduction.js");
-    const userMsg = history.getHistory().find((m) => m.role === "user");
-    const userText = typeof userMsg?.content === "string" ? userMsg.content : "";
-    const intent = detectIntent(userText);
-    toolsForCall = filterToolsByIntent(toolsForCall, intent);
-    const summary = getFilterSummary(getMergedTools().length, toolsForCall.length, intent);
-    log.debug(`[TOOL_REDUCTION] ${summary}`);
-  } catch { /* toolReduction not available */ }
 
   // IDEIA 27+#28: Checkpoint writer - proactive state extraction
   try {
