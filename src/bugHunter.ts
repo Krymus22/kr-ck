@@ -119,7 +119,7 @@ export function generateDiffAfterEdit(filePath: string): string {
  * IDEIA D: Run the project between Bug Hunter rounds.
  * Tries to run "npx tsx src/index.ts" or "npm test" and returns the result.
  */
-async function runProjectVerification(projectDir: string): Promise<string> {
+export async function runProjectVerification(projectDir: string): Promise<string> {
   // CRITICAL FIX: execSync with timeout does NOT work when the child has
   // subprocesses that inherit stdout/stderr pipes. The event-scheduler project
   // has TTLManager with setInterval — if index.ts doesn't call stop(), the
@@ -201,7 +201,7 @@ async function runProjectVerification(projectDir: string): Promise<string> {
  * IDEIA A: Compare current findings with previous round's findings.
  * Returns: fixed bugs, persisting bugs, and new bugs.
  */
-function compareFindings(current: BugFinding[], previous: BugFinding[]): {
+export function compareFindings(current: BugFinding[], previous: BugFinding[]): {
   fixed: BugFinding[];
   persisting: BugFinding[];
   newBugs: BugFinding[];
@@ -594,7 +594,7 @@ function buildReadOnlyTools(): any[] {
 /**
  * Parse findings from the Bug Hunter's response.
  */
-function parseFindings(content: string): BugFinding[] {
+export function parseFindings(content: string): BugFinding[] {
   const findings: BugFinding[] = [];
 
   // Match patterns like:
@@ -659,7 +659,7 @@ function parseFindings(content: string): BugFinding[] {
 /**
  * Format the bug hunt message to inject into the agent's context.
  */
-function formatBugHuntMessage(
+export function formatBugHuntMessage(
   findings: BugFinding[],
   shouldBlock: boolean,
   comparison?: { fixed: BugFinding[]; persisting: BugFinding[]; newBugs: BugFinding[] } | null,
