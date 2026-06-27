@@ -336,6 +336,7 @@ export async function runBugHunter(
       log.warn(`[BUG_HUNTER] Parser found 0 findings! Content preview: ${finalContent.slice(0, 500)}`);
     }
     const criticalAndHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
+    const mediumAndLow = findings.filter(f => f.severity === "medium" || f.severity === "low");
     const shouldBlock = criticalAndHigh.length > 0;
 
     // IDEIA A: Compare with previous round
@@ -364,9 +365,10 @@ export async function runBugHunter(
         log.warn(`[BUG_HUNTER]   Fix: ${f.suggestion}`);
       }
     } else {
-      log.warn(`[BUG_HUNTER] No critical/high bugs found (${findings.length} medium/low findings) — allowing finish`);
+      log.warn(`[BUG_HUNTER] ✓ APPROVED — 0 critical/high bugs. ${mediumAndLow.length} medium/low advisory findings (injected for IA to consider).`);
       for (const f of findings) {
-        log.warn(`[BUG_HUNTER] [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
+        const icon = f.severity === "medium" ? "🟡" : "🔵";
+        log.warn(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
       }
     }
 

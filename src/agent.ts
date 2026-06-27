@@ -1680,10 +1680,12 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
   //   3. After fixing, the IA tries to finish again
   //   4. Bug Hunter runs AGAIN on the fixed code
   //   5. This repeats until Bug Hunter finds NO critical/high bugs
-  //   6. Safety limit: max 5 rounds to prevent infinite loops
+  //   6. Safety limit: max 10 rounds to prevent infinite loops
+  //   7. Medium/low findings are injected as advisory — IA can fix them
+  //      spontaneously but they don't block finish
   try {
     const { runBugHunter } = await import("./bugHunter.js");
-    const MAX_BUG_HUNTER_ROUNDS = 5;
+    const MAX_BUG_HUNTER_ROUNDS = 10;
     if (turnTouchedFiles.size > 0 && bugHunterBlocksThisTurn < MAX_BUG_HUNTER_ROUNDS) {
       const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
       const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
