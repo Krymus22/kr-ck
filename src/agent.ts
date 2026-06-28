@@ -47,7 +47,7 @@ import {
   type FileChange,
   type SessionTrace,
 } from "./memory.js";
-import { runTests, formatTestResult, suggestFixes, formatFixSuggestions } from "./testRunner.js";
+// testRunner is dynamically imported in the Bug Hunter handler to avoid circular deps
 import {
   getRegistry,
   getDetector,
@@ -499,15 +499,24 @@ const toolHandlers: Record<string, ToolHandler> = {
   "executar_testes": async (args) => {
     const dir = asString(args.dir, process.cwd());
     const filePath = args.path ? asString(args.path) : undefined;
-    const result = await runTests(dir, filePath);
-    return { resultStr: formatTestResult(result), usedHeal: false };
+    // Use the testRunner to run tests
+    const { runBugTest, detectLanguage } = await import("./testRunner.js");
+    if (filePath) {
+      const result = runBugTest(filePath, dir);
+      return {
+        resultStr: `Test ${result.passed ? "PASSED" : "FAILED"} (${result.language})\nCommand: ${result.command}\n${result.output}`,
+        usedHeal: false,
+      };
+    }
+    return { resultStr: "No test file specified. Use executar_testes with path argument.", usedHeal: false };
   },
 
   "sugerir_fixes": async (args) => {
     const dir = asString(args.dir, process.cwd());
-    const result = await runTests(dir);
-    const suggestions = suggestFixes(result);
-    return { resultStr: formatFixSuggestions(suggestions), usedHeal: false };
+    return {
+      resultStr: "Fix suggestions: analyze test failures and check the source code for the bug. Use ler_arquivo to read the failing file, then editar_arquivo to fix.",
+      usedHeal: false,
+    };
   },
 
   // --- External Tools ----------------------------------------------------
@@ -1719,6 +1728,41 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
         const ch = result.findings.filter(f => f.severity === "critical" || f.severity === "high").length;
         const ml = result.findings.filter(f => f.severity === "medium" || f.severity === "low").length;
         console.log(`[BUG_HUNTER] Breakdown: critical/high=${ch}, medium/low=${ml}`);
+      }
+
+      // ─── TEST-BASED VERIFICATION ─────────────────────────────────────────
+      // Run tests for findings that have test files. This provides deterministic
+      // pass/fail verification of bug fixes, preventing the "IA introduces new
+      // bugs while fixing old ones" loop.
+      try {
+        const { runTestsForFindings, allCriticalHighTestsPass } = await import("./bugHunter.js");
+        const projectRoot = process.cwd();
+        runTestsForFindings(result.findings, projectRoot);
+
+        const allPass = allCriticalHighTestsPass(result.findings);
+        const testedCount = result.findings.filter(f => f.testStatus === "passed" || f.testStatus === "failed").length;
+        const passedCount = result.findings.filter(f => f.testStatus === "passed").length;
+        const failedCount = result.findings.filter(f => f.testStatus === "failed").length;
+
+        if (testedCount > 0) {
+          console.log(`[BUG_HUNTER] Test verification: ${passedCount}/${testedCount} tests passed, ${failedCount} failed`);
+
+          // Append test results to the message so IA sees them
+          if (failedCount > 0) {
+            const failedFindings = result.findings.filter(f => f.testStatus === "failed");
+            result.message += `\n\n## TEST RESULTS\n${passedCount}/${testedCount} tests PASSED, ${failedCount} FAILED.\n`;
+            result.message += `The following findings have FAILING tests (bug NOT fixed):\n`;
+            for (const f of failedFindings) {
+              result.message += `- [${f.severity.toUpperCase()}] ${f.file} — ${f.description.slice(0, 80)}\n`;
+              result.message += `  Test: ${f.testFile}\n`;
+            }
+            result.message += `\nThese bugs PERSIST. Try a DIFFERENT fix approach.\n`;
+          } else if (passedCount > 0) {
+            result.message += `\n\n## TEST RESULTS\n✓ All ${passedCount} tests PASSED. The bugs covered by tests are FIXED.\n`;
+          }
+        }
+      } catch (err) {
+        console.log(`[BUG_HUNTER] Test verification skipped: ${(err as Error).message}`);
       }
 
       if (result.shouldBlock && result.completed) {
