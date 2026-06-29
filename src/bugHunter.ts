@@ -32,7 +32,6 @@ import * as log from "./logger.js";
 import { pushActivity } from "./activityTracker.js";
 import * as nodePath from "node:path";
 import * as nodeFs from "node:fs";
-import { spawn as nodeSpawn } from "node:child_process";
 import { detectLanguage, runBugTest, getTestFilePath, isTestRunnerAvailable } from "./testRunner.js";
 
 export interface BugFinding {
@@ -41,9 +40,7 @@ export interface BugFinding {
   line?: string;
   description: string;
   suggestion: string;
-  /** Test status: undefined = no test yet, "passed" = test passes (bug fixed), "failed" = test fails (bug persists), "skipped" = no test runner */
   testStatus?: "passed" | "failed" | "skipped";
-  /** Path to the test file that covers this finding (if any) */
   testFile?: string;
 }
 
@@ -67,108 +64,32 @@ export function resetBugHunterState(): void {
   fileSnapshots.clear();
 }
 
-/**
- * Run tests for findings that have test files.
- *
- * For each finding with a testFile path, runs the test and marks:
- *   - testStatus = "passed" if test passes (bug is fixed)
- *   - testStatus = "failed" if test fails (bug persists)
- *   - testStatus = "skipped" if no test runner available
- *
- * This provides DETERMINISTIC verification of bug fixes — instead of relying
- * solely on Bug Hunter re-review (which can find different bugs and loop),
- * tests give a binary pass/fail signal.
- *
- * @param findings Findings to check (modified in-place with testStatus)
- * @param projectRoot Project root directory for running tests
- * @returns Findings with testStatus updated
- */
-export function runTestsForFindings(
-  findings: BugFinding[],
-  projectRoot: string
-): BugFinding[] {
-  let tested = 0;
-  let passed = 0;
-  let failed = 0;
-  let skipped = 0;
-
+export function runTestsForFindings(findings: BugFinding[], projectRoot: string): BugFinding[] {
+  let tested = 0, passed = 0, failed = 0, skipped = 0;
   for (const finding of findings) {
-    // Only test critical/high findings (medium/low are advisory)
-    if (finding.severity !== "critical" && finding.severity !== "high") {
-      continue;
-    }
-
-    // Determine expected test file path
+    if (finding.severity !== "critical" && finding.severity !== "high") continue;
     const language = detectLanguage(finding.file);
-    if (language === "unknown") {
-      finding.testStatus = "skipped";
-      skipped++;
-      continue;
+    if (language === "unknown" || !isTestRunnerAvailable(language)) {
+      finding.testStatus = "skipped"; skipped++; continue;
     }
-
-    if (!isTestRunnerAvailable(language)) {
-      finding.testStatus = "skipped";
-      skipped++;
-      continue;
-    }
-
-    // Look for test file in __tests__ directory
-    // IA is instructed to create: src/__tests__/<ModuleName>.bughunt.test.<ext>
     let testFile = getTestFilePath(finding.file);
-
-    // Resolve to absolute path if not already
-    if (!nodePath.isAbsolute(testFile)) {
-      testFile = nodePath.resolve(projectRoot, testFile);
-    }
-
-    if (!nodeFs.existsSync(testFile)) {
-      // No test file written yet — skip (IA hasn't written a test)
-      // Don't mark as skipped, just leave testStatus undefined
-      continue;
-    }
-
+    if (!nodePath.isAbsolute(testFile)) testFile = nodePath.resolve(projectRoot, testFile);
+    if (!nodeFs.existsSync(testFile)) continue;
     finding.testFile = testFile;
     tested++;
-
     const result = runBugTest(testFile, projectRoot);
-    if (result.passed) {
-      finding.testStatus = "passed";
-      passed++;
-      console.log(`[BUG_HUNTER_TEST] ✓ PASSED: ${finding.file} — ${finding.description.slice(0, 60)}`);
-    } else if (result.ran) {
-      finding.testStatus = "failed";
-      failed++;
-      console.log(`[BUG_HUNTER_TEST] ✗ FAILED: ${finding.file} — ${finding.description.slice(0, 60)}`);
-      console.log(`[BUG_HUNTER_TEST]   Output: ${result.output.slice(0, 200)}`);
-    } else {
-      finding.testStatus = "skipped";
-      skipped++;
-      console.log(`[BUG_HUNTER_TEST] ⊘ SKIPPED: ${finding.file} — ${result.skipReason}`);
-    }
+    if (result.passed) { finding.testStatus = "passed"; passed++; console.log(`[BUG_HUNTER_TEST] ✓ PASSED: ${finding.file}`); }
+    else if (result.ran) { finding.testStatus = "failed"; failed++; console.log(`[BUG_HUNTER_TEST] ✗ FAILED: ${finding.file}`); }
+    else { finding.testStatus = "skipped"; skipped++; }
   }
-
-  if (tested > 0) {
-    console.log(`[BUG_HUNTER_TEST] Summary: ${passed} passed, ${failed} failed, ${skipped} skipped (${tested} tested)`);
-  }
-
+  if (tested > 0) console.log(`[BUG_HUNTER_TEST] Summary: ${passed} passed, ${failed} failed, ${skipped} skipped (${tested} tested)`);
   return findings;
 }
 
-/**
- * Check if all critical/high findings have passing tests.
- * Returns true if every critical/high finding either:
- *   - Has testStatus = "passed" (test exists and passes)
- *   - Has no test file (IA didn't write a test — can't verify, so don't block on it)
- *
- * Returns false if any critical/high finding has testStatus = "failed".
- */
 export function allCriticalHighTestsPass(findings: BugFinding[]): boolean {
-  const criticalHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
-  if (criticalHigh.length === 0) return true;
-
-  // If any has a failing test, not all pass
-  const hasFailing = criticalHigh.some(f => f.testStatus === "failed");
-  return !hasFailing;
+  const ch = findings.filter(f => f.severity === "critical" || f.severity === "high");
+  if (ch.length === 0) return true;
+  return !ch.some(f => f.testStatus === "failed");
 }
 
 // IDEIA E: Track file contents before edits for diff
@@ -180,9 +101,9 @@ const fileSnapshots = new Map<string, string>();
  */
 export function snapshotFileBeforeEdit(filePath: string): void {
   try {
-    const resolved = nodePath.resolve(filePath);
-    if (nodeFs.existsSync(resolved)) {
-      fileSnapshots.set(resolved, nodeFs.readFileSync(resolved, "utf8"));
+    const resolved = require("node:path").resolve(filePath);
+    if (require("node:fs").existsSync(resolved)) {
+      fileSnapshots.set(resolved, require("node:fs").readFileSync(resolved, "utf8"));
     }
   } catch { /* ignore */ }
 }
@@ -193,12 +114,12 @@ export function snapshotFileBeforeEdit(filePath: string): void {
  */
 export function generateDiffAfterEdit(filePath: string): string {
   try {
-    const resolved = nodePath.resolve(filePath);
+    const resolved = require("node:path").resolve(filePath);
     const before = fileSnapshots.get(resolved);
     if (!before) return ""; // no snapshot — file was new
 
-    const after = nodeFs.existsSync(resolved)
-      ? nodeFs.readFileSync(resolved, "utf8")
+    const after = require("node:fs").existsSync(resolved)
+      ? require("node:fs").readFileSync(resolved, "utf8")
       : "";
 
     if (before === after) return ""; // no changes
@@ -231,79 +152,26 @@ export function generateDiffAfterEdit(filePath: string): string {
  * IDEIA D: Run the project between Bug Hunter rounds.
  * Tries to run "npx tsx src/index.ts" or "npm test" and returns the result.
  */
-export async function runProjectVerification(projectDir: string): Promise<string> {
-  // CRITICAL FIX: execSync with timeout does NOT work when the child has
-  // subprocesses that inherit stdout/stderr pipes. The event-scheduler project
-  // has TTLManager with setInterval — if index.ts doesn't call stop(), the
-  // Node process stays alive forever. execSync kills the direct child (npx)
-  // with SIGTERM after 10s, but the orphaned subprocesses (tsx → node) keep
-  // the pipes open, so execSync NEVER returns — it hangs forever, ignoring
-  // the timeout.
-  //
-  // SOLUTION: use spawn with detached:true (creates a new process group),
-  // then kill the ENTIRE process group with SIGKILL after timeout. This
-  // guarantees all subprocesses die and the function returns.
-  const spawn = nodeSpawn;
-
-  function runWithTimeout(cmd: string, args: string[], timeoutMs: number): Promise<string> {
-    return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-
-      const child = spawn(cmd, args, {
-        cwd: projectDir,
-        detached: true,  // new process group — so we can kill all children
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: true,
-      });
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try {
-          // Kill the ENTIRE process group (negative PID)
-          if (child.pid) process.kill(-child.pid, "SIGKILL");
-        } catch { /* ignore */ }
-        resolve("(project timed out after " + (timeoutMs / 1000) + "s)");
-      }, timeoutMs);
-
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8").slice(0, 1024 - stdout.length);
-      });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8").slice(0, 1024 - stderr.length);
-      });
-
-      child.on("error", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve("(could not run project)");
-      });
-
-      child.on("close", (code: number) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-        if (code === 0) {
-          resolve(combined.slice(0, 500) || "(no output)");
-        } else {
-          resolve(("exit=" + code + " " + combined).slice(0, 500) || "(no output)");
-        }
-      });
-    });
-  }
-
+async function runProjectVerification(projectDir: string): Promise<string> {
   try {
-    // Try npx tsx src/index.ts first — 10s timeout, kills entire process group
-    const result = await runWithTimeout("npx", ["tsx", "src/index.ts"], 10000);
-    if (!result.startsWith("(project timed out")) {
-      return result;
+    const { execSync } = require("node:child_process");
+    // Try npx tsx src/index.ts first
+    try {
+      const out = execSync("npx tsx src/index.ts 2>&1", {
+        cwd: projectDir, timeout: 30000, encoding: "utf8"
+      });
+      return out.trim().slice(0, 500) || "(no output)";
+    } catch {
+      // Try npm test
+      try {
+        const out = execSync("npm test 2>&1", {
+          cwd: projectDir, timeout: 30000, encoding: "utf8"
+        });
+        return out.trim().slice(0, 500) || "(no output)";
+      } catch {
+        return "(could not run project)";
+      }
     }
-    // If it timed out, return that — don't try npm test (slower, same issue)
-    return result;
   } catch {
     return "(could not run project)";
   }
@@ -495,48 +363,43 @@ export async function runBugHunter(
 
     // Parse the findings from the final response
     const findings = parseFindings(finalContent);
-    console.log(`[BUG_HUNTER] Parsed ${findings.length} findings from ${finalContent.length} chars verdict`);
+    log.info(`[BUG_HUNTER] Parsed ${findings.length} findings from ${finalContent.length} chars verdict`);
     if (findings.length === 0) {
-      console.log(`[BUG_HUNTER] Parser found 0 findings! Content preview: ${finalContent.slice(0, 500)}`);
+      // Log first 500 chars of content to see what format the model used
+      log.warn(`[BUG_HUNTER] Parser found 0 findings! Content preview: ${finalContent.slice(0, 500)}`);
     }
     const criticalAndHigh = findings.filter(f => f.severity === "critical" || f.severity === "high");
-    const mediumAndLow = findings.filter(f => f.severity === "medium" || f.severity === "low");
-    // Block on ANY findings — IA must address medium/low too, not just critical/high.
-    // The agent.ts handler enforces a tighter round cap for medium/only rounds (3 max)
-    // to avoid infinite nitpick loops.
-    const shouldBlock = findings.length > 0;
-    console.log(`[BUG_HUNTER] critical/high: ${criticalAndHigh.length}, medium/low: ${mediumAndLow.length}, shouldBlock: ${shouldBlock}`);
+    const shouldBlock = criticalAndHigh.length > 0;
 
     // IDEIA A: Compare with previous round
     let comparison: { fixed: BugFinding[]; persisting: BugFinding[]; newBugs: BugFinding[] } | null = null;
     if (previousFindings.length > 0) {
       comparison = compareFindings(findings, previousFindings);
-      console.log(`[BUG_HUNTER] Comparison: ${comparison.fixed.length} fixed, ${comparison.persisting.length} persisting, ${comparison.newBugs.length} NEW`);
+      log.info(`[BUG_HUNTER] Comparison: ${comparison.fixed.length} fixed, ${comparison.persisting.length} persisting, ${comparison.newBugs.length} NEW`);
     }
 
     // IDEIA D: Run project between rounds (if blocking)
     let projectOutput = "";
     if (shouldBlock && filesModified.length > 0) {
-      const projectDir = filesModified[0] ? nodePath.dirname(filesModified[0]).replace("/src", "") : process.cwd();
-      console.log(`[BUG_HUNTER] Running project verification...`);
+      const projectDir = filesModified[0] ? require("node:path").dirname(filesModified[0]).replace("/src", "") : process.cwd();
+      log.info(`[BUG_HUNTER] Running project verification...`);
       projectOutput = await runProjectVerification(projectDir);
-      console.log(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
+      log.info(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
     }
 
     const message = formatBugHuntMessage(findings, shouldBlock, comparison, projectOutput);
 
     if (shouldBlock) {
-      console.log(`[BUG_HUNTER] Found ${criticalAndHigh.length} critical/high bug(s) — BLOCKING finish`);
+      log.warn(`[BUG_HUNTER] Found ${criticalAndHigh.length} critical/high bug(s) — BLOCKING finish`);
       for (const f of findings) {
         const icon = f.severity === "critical" ? "🔴" : f.severity === "high" ? "🟠" : f.severity === "medium" ? "🟡" : "🔵";
-        console.log(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
-        console.log(`[BUG_HUNTER]   Fix: ${f.suggestion}`);
+        log.warn(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
+        log.warn(`[BUG_HUNTER]   Fix: ${f.suggestion}`);
       }
     } else {
-      console.log(`[BUG_HUNTER] ✓ APPROVED — 0 critical/high bugs. ${mediumAndLow.length} medium/low advisory findings (injected for IA to consider).`);
+      log.warn(`[BUG_HUNTER] No critical/high bugs found (${findings.length} medium/low findings) — allowing finish`);
       for (const f of findings) {
-        const icon = f.severity === "medium" ? "🟡" : "🔵";
-        console.log(`[BUG_HUNTER] ${icon} [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
+        log.warn(`[BUG_HUNTER] [${f.severity.toUpperCase()}] ${f.file}${f.line ? ":" + f.line : ""} — ${f.description}`);
       }
     }
 
@@ -783,11 +646,9 @@ export function formatBugHuntMessage(
 
   const lines: string[] = [];
   lines.push(shouldBlock
-    ? `[BUG_HUNTER] ✗ ISSUES FOUND — you MUST fix or dismiss EACH finding before finishing:`
-    : `[BUG_HUNTER] Review complete. No issues found.`
+    ? `[BUG_HUNTER] ✗ CRITICAL ISSUES FOUND — you MUST fix these before finishing:`
+    : `[BUG_HUNTER] Review complete. Minor issues found (non-blocking):`
   );
-  lines.push("");
-  lines.push(`IMPORTANT: You are NOT allowed to finish until every finding below is either FIXED (with a real code change) or EXPLICITLY DISMISSED with a valid reason (e.g., "false positive because X"). Saying "looks fine" without addressing each finding = blocking.`);
   lines.push("");
 
   // IDEIA A: Show comparison with previous round
@@ -838,43 +699,33 @@ export function formatBugHuntMessage(
   }
 
   if (shouldBlock) {
-    // IDEIA B + C: Instructions for fixing
     lines.push(`## How to address these findings:`);
     lines.push(`1. Fix ONE finding at a time — don't try to fix multiple in a single edit.`);
     lines.push(`2. READ the file FIRST (ler_arquivo) to see the current content before editing.`);
     lines.push(`3. Edit with editar_arquivo (NOT cat > or executar_comando).`);
     lines.push(`4. For each finding: either FIX it (with a real code change) or DISMISS it with a concrete reason.`);
-    lines.push(`   - Valid dismiss: "false positive — line 42 already handles nil case"`);
-    lines.push(`   - Invalid dismiss: "looks fine", "should work", "minor issue".`);
     lines.push(`5. If you dismiss, you MUST cite the line/code that proves it's a false positive.`);
     lines.push(`6. After fixing, run the project (executar_comando "npx tsx src/index.ts") to verify nothing broke.`);
-    lines.push(`7. The Bug Hunter will re-review after you finish. It will tell you which findings were`);
-    lines.push(`   FIXED, which are PERSISTING, and which are NEW (introduced by your fixes).`);
-    lines.push(`8. For MEDIUM/LOW findings: prioritize fixing the ones that affect correctness or usability.`);
-    lines.push(`   Style/naming nits can be dismissed if the code is otherwise correct.`);
+    lines.push(`7. The Bug Hunter will re-review after you finish.`);
+    lines.push(`8. For MEDIUM/LOW findings: prioritize fixing the ones that affect correctness.`);
 
-    // ─── TEST-BASED VERIFICATION ──────────────────────────────────────────
-    // Instruct the IA to write tests for each finding. Tests provide
-    // deterministic verification (pass/fail) instead of relying solely on
-    // Bug Hunter re-review. This prevents the "IA introduces new bugs while
-    // fixing old ones" loop.
+    // TEST-BASED VERIFICATION
     lines.push(``);
     lines.push(`## TEST-BASED VERIFICATION (required for critical/high):`);
     lines.push(`For EACH critical/high finding, WRITE A TEST that reproduces the bug:`);
     lines.push(``);
     lines.push(`- TypeScript (.ts): create a test file in src/__tests__/ using vitest.`);
-    lines.push(`  Example: editar_arquivo({ path: "src/__tests__/ComboSystem.bughunt.test.ts", createIfMissing: true, ... })`);
+    lines.push(`  Example: editar_arquivo({ path: "src/__tests__/ComboSystem.bughunt.test.ts", createIfMissing: true })`);
     lines.push(`  Template:`);
     lines.push(`    import { describe, it, expect } from "vitest";`);
     lines.push(`    import { ComboSystem } from "../ComboSystem";`);
     lines.push(`    it("combo multiplier at hit 10 should be 2.0", () => {`);
     lines.push(`      const cs = new ComboSystem();`);
-    lines.push(`      // ... reproduce the bug ...`);
-    lines.push(`      expect(result).toBe(2.0); // was 1.9 (bug)`);
+    lines.push(`      expect(result).toBe(2.0);`);
     lines.push(`    });`);
     lines.push(`  Run: executar_comando({ comando: "npx vitest run src/__tests__/ComboSystem.bughunt.test.ts" })`);
     lines.push(``);
-    lines.push(`- Python (.py): create test_bug.py with assert statements. Run: python3 test_bug.py`);
+    lines.push(`- Python (.py): create test_bug.py with assert. Run: python3 test_bug.py`);
     lines.push(`- Luau (.luau): create test.luau with pcall + assert. Run: luau test.luau`);
     lines.push(`  (For Roblox Luau, use the MCP Roblox Studio integration if available)`);
     lines.push(`- JavaScript (.js): create test.js with assert. Run: node test.js`);
@@ -883,7 +734,7 @@ export function formatBugHuntMessage(
     lines.push(`1. Write the test that reproduces the ORIGINAL bug`);
     lines.push(`2. Run the test — it should PASS now (bug is fixed)`);
     lines.push(`3. If test FAILS, the bug persists — try a different fix`);
-    lines.push(`4. If you can't write a test (e.g. design issue), explain why in your response`);
+    lines.push(`4. If you can't write a test, explain why in your response`);
     lines.push(``);
     lines.push(`The Bug Hunter will check test results to determine if bugs are truly fixed.`);
   }

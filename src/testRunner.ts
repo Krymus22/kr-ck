@@ -740,31 +740,18 @@ export function formatFixSuggestions(suggestions: FixSuggestion[]): string {
 }
 
 // ─── Bug Hunter Test Verification (new) ────────────────────────────────────
-// These functions support the Bug Hunter's test-based verification flow.
-// When the Bug Hunter finds a bug, the IA is instructed to write a test that
-// reproduces it. These functions detect the language, find the test file,
-// and run it to verify if the bug is fixed.
 
 export type BugTestLanguage = "typescript" | "javascript" | "python" | "luau" | "lua" | "unknown";
 
 export interface BugTestResult {
-  /** Whether the test passed (exit code 0) */
   passed: boolean;
-  /** Combined stdout + stderr output (truncated) */
   output: string;
-  /** Language detected */
   language: BugTestLanguage;
-  /** Test runner command that was executed */
   command: string;
-  /** Whether the test was actually run (false = skipped, e.g. no runner) */
   ran: boolean;
-  /** Reason if not ran */
   skipReason?: string;
 }
 
-/**
- * Detect the language of a file based on its extension (for Bug Hunter tests).
- */
 export function detectLanguage(filePath: string): BugTestLanguage {
   const ext = path.extname(filePath).toLowerCase();
   switch (ext) {
@@ -786,9 +773,6 @@ export function detectLanguage(filePath: string): BugTestLanguage {
   }
 }
 
-/**
- * Check if a test runner is available for the given language.
- */
 export function isTestRunnerAvailable(language: BugTestLanguage): boolean {
   try {
     switch (language) {
@@ -813,10 +797,6 @@ export function isTestRunnerAvailable(language: BugTestLanguage): boolean {
   }
 }
 
-/**
- * Get the suggested test file path for a source file.
- * Example: src/ComboSystem.luau → src/__tests__/ComboSystem.bughunt.test.luau
- */
 export function getTestFilePath(sourceFile: string): string {
   const dir = path.dirname(sourceFile);
   const ext = path.extname(sourceFile);
@@ -825,9 +805,6 @@ export function getTestFilePath(sourceFile: string): string {
   return path.join(testDir, `${base}.bughunt.test${ext}`);
 }
 
-/**
- * Get the test command for a given language and test file.
- */
 export function getTestCommand(language: BugTestLanguage, testFile: string, projectRoot: string): string {
   switch (language) {
     case "typescript":
@@ -850,9 +827,6 @@ export function getTestCommand(language: BugTestLanguage, testFile: string, proj
   }
 }
 
-/**
- * Run a test file and return the result (for Bug Hunter verification).
- */
 export function runBugTest(
   testFile: string,
   projectRoot: string,
@@ -861,133 +835,43 @@ export function runBugTest(
   const language = detectLanguage(testFile);
 
   if (language === "unknown") {
-    return {
-      passed: false,
-      output: "",
-      language,
-      command: "",
-      ran: false,
-      skipReason: `Unknown language for file: ${testFile}`,
-    };
+    return { passed: false, output: "", language, command: "", ran: false, skipReason: `Unknown language for file: ${testFile}` };
   }
 
   if (!isTestRunnerAvailable(language)) {
-    return {
-      passed: false,
-      output: "",
-      language,
-      command: "",
-      ran: false,
-      skipReason: `No test runner available for ${language}`,
-    };
+    return { passed: false, output: "", language, command: "", ran: false, skipReason: `No test runner available for ${language}` };
   }
 
   if (!fs.existsSync(testFile)) {
-    return {
-      passed: false,
-      output: "",
-      language,
-      command: "",
-      ran: false,
-      skipReason: `Test file does not exist: ${testFile}`,
-    };
+    return { passed: false, output: "", language, command: "", ran: false, skipReason: `Test file does not exist: ${testFile}` };
   }
 
   const command = getTestCommand(language, testFile, projectRoot);
 
   try {
-    const output = execSync(command, {
-      cwd: projectRoot,
-      encoding: "utf8",
-      timeout: timeoutMs,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return {
-      passed: true,
-      output: (output || "").slice(0, 2000),
-      language,
-      command,
-      ran: true,
-    };
+    const output = execSync(command, { cwd: projectRoot, encoding: "utf8", timeout: timeoutMs, stdio: ["pipe", "pipe", "pipe"] });
+    return { passed: true, output: (output || "").slice(0, 2000), language, command, ran: true };
   } catch (err: any) {
     const stdout = err.stdout ? String(err.stdout) : "";
     const stderr = err.stderr ? String(err.stderr) : "";
     const combined = (stdout + "\n" + stderr).slice(0, 2000);
     const timedOut = err.killed === true || err.signal === "SIGTERM";
-
-    return {
-      passed: false,
-      output: combined,
-      language,
-      command,
-      ran: true,
-      skipReason: timedOut ? `Test timed out after ${timeoutMs}ms` : undefined,
-    };
+    return { passed: false, output: combined, language, command, ran: true, skipReason: timedOut ? `Test timed out after ${timeoutMs}ms` : undefined };
   }
 }
 
-/**
- * Get a template for a test file in the given language.
- */
 export function getTestTemplate(language: BugTestLanguage, sourceFileName: string, bugDescription: string): string {
   const moduleName = path.basename(sourceFileName, path.extname(sourceFileName));
-
   switch (language) {
     case "typescript":
-      return `// Test for bug: ${bugDescription}
-import { describe, it, expect } from "vitest";
-
-describe("${moduleName} - Bug Hunter test", () => {
-  it("should not have the bug: ${bugDescription.slice(0, 100)}", () => {
-    // TODO: import the function/module with the bug
-    // TODO: call it with input that reproduces the bug
-    // TODO: assert the expected (correct) behavior
-    expect(true).toBe(true); // placeholder — replace with real test
-  });
-});
-`;
+      return `// Test for bug: ${bugDescription}\nimport { describe, it, expect } from "vitest";\ndescribe("${moduleName} - Bug Hunter test", () => {\n  it("should not have the bug: ${bugDescription.slice(0, 100)}", () => {\n    expect(true).toBe(true);\n  });\n});\n`;
     case "javascript":
-      return `// Test for bug: ${bugDescription}
-const assert = require("assert");
-try {
-  // TODO: call function with input that reproduces the bug
-  console.log("TEST PASSED (placeholder)");
-  process.exit(0);
-} catch (err) {
-  console.error("TEST FAILED:", err.message);
-  process.exit(1);
-}
-`;
+      return `// Test for bug: ${bugDescription}\nconst assert = require("assert");\ntry {\n  console.log("TEST PASSED (placeholder)");\n  process.exit(0);\n} catch (err) {\n  console.error("TEST FAILED:", err.message);\n  process.exit(1);\n}\n`;
     case "python":
-      return `# Test for bug: ${bugDescription}
-import sys
-def test_bug():
-    # TODO: call function with input that reproduces the bug
-    pass
-if __name__ == "__main__":
-    try:
-        test_bug()
-        print("TEST PASSED")
-        sys.exit(0)
-    except AssertionError as e:
-        print(f"TEST FAILED: {e}")
-        sys.exit(1)
-`;
+      return `# Test for bug: ${bugDescription}\nimport sys\ndef test_bug():\n    pass\nif __name__ == "__main__":\n    try:\n        test_bug()\n        print("TEST PASSED")\n        sys.exit(0)\n    except AssertionError as e:\n        print(f"TEST FAILED: {e}")\n        sys.exit(1)\n`;
     case "luau":
     case "lua":
-      return `-- Test for bug: ${bugDescription}
-local function testBug()
-    return true -- placeholder
-end
-local success, err = pcall(testBug)
-if success then
-    print("TEST PASSED")
-    os.exit(0)
-else
-    print("TEST FAILED: " .. tostring(err))
-    os.exit(1)
-end
-`;
+      return `-- Test for bug: ${bugDescription}\nlocal function testBug()\n    return true\nend\nlocal success, err = pcall(testBug)\nif success then\n    print("TEST PASSED")\n    os.exit(0)\nelse\n    print("TEST FAILED: " .. tostring(err))\n    os.exit(1)\nend\n`;
     default:
       return `// Test for bug: ${bugDescription}\n// Unknown language\n`;
   }
