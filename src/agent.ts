@@ -1682,7 +1682,7 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
         log.debug(`[GOAL_VERIFIER] Skipping — user message is a question, not a task`);
       } else {
         const result = await verifyGoalCompletion(
-          userRequest,
+          userRequest as string,
           [...turnTouchedFiles],
           message.content ?? ""
         );
@@ -1720,7 +1720,7 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
       console.log(`[BUG_HUNTER] Starting round ${bugHunterBlocksThisTurn + 1}/${MAX_BUG_HUNTER_ROUNDS} — reviewing ${turnTouchedFiles.size} file(s)`);
       const result = await runBugHunter(
         [...turnTouchedFiles],
-        userRequest,
+        userRequest as string,
         message.content ?? ""
       );
 
@@ -1829,7 +1829,7 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
       console.log(`[DATAGUARD] Starting data protection review of ${turnTouchedFiles.size} file(s)`);
       const dgResult = await runDataGuard(
         [...turnTouchedFiles],
-        userRequest,
+        userRequest as string,
         message.content ?? ""
       );
 
