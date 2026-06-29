@@ -1413,6 +1413,8 @@ async function handleChatResponse(
   try {
     const { resetBugHunterState } = await import("./bugHunter.js");
     resetBugHunterState();
+    const { resetDataGuardState } = await import("./dataGuard.js");
+    resetDataGuardState();
   } catch { /* ignore */ }
 
   fireTrigger("on_task");
@@ -1808,6 +1810,48 @@ async function handleStopReason(message: { content?: string | null }): Promise<b
     }
   } catch (err) {
     console.log(`[BUG_HUNTER] Skipped (error in handler): ${(err as Error).message}`);
+  }
+
+  // ─── DATAGUARD: Data protection review (runs after Bug Hunter) ──────────
+  // While Bug Hunter hunts for logic bugs, DataGuard hunts for DATA LOSS risks.
+  // It checks for patterns like:
+  //   - SetAsync without GetAsync (overwrites existing data)
+  //   - RemoveAsync without backup (permanent deletion)
+  //   - Missing pcall around DataStore operations
+  //   - RemoteEvent without server-side validation
+  //   - Race conditions (GetAsync+SetAsync instead of UpdateAsync)
+  try {
+    const { runDataGuard } = await import("./dataGuard.js");
+    if (turnTouchedFiles.size > 0) {
+      const userRequestRaw = history.getHistory().find((m) => m.role === "user")?.content;
+      const userRequest = typeof userRequestRaw === "string" ? userRequestRaw : "";
+
+      console.log(`[DATAGUARD] Starting data protection review of ${turnTouchedFiles.size} file(s)`);
+      const dgResult = await runDataGuard(
+        [...turnTouchedFiles],
+        userRequest,
+        message.content ?? ""
+      );
+
+      console.log(`[DATAGUARD] Result: shouldBlock=${dgResult.shouldBlock}, completed=${dgResult.completed}, findings=${dgResult.findings.length}`);
+
+      if (dgResult.shouldBlock && dgResult.completed) {
+        const hasCriticalHigh = dgResult.findings.some(f => f.severity === "critical" || f.severity === "high");
+        if (hasCriticalHigh) {
+          console.log(`[DATAGUARD] Found ${dgResult.findings.length} data protection issue(s) — BLOCKING finish`);
+          history.addSystemMessage(dgResult.message);
+          return true;  // Block finish — IA must fix data risks
+        } else {
+          // Only medium/low — advisory
+          console.log(`[DATAGUARD] Only medium/low data risks — advisory only`);
+          history.addSystemMessage(dgResult.message);
+        }
+      } else if (dgResult.completed && dgResult.findings.length === 0) {
+        console.log(`[DATAGUARD] ✓ NO DATA RISKS — data protection review passed`);
+      }
+    }
+  } catch (err) {
+    console.log(`[DATAGUARD] Skipped (error in handler): ${(err as Error).message}`);
   }
 
   // IDEIA 14: Inject failure memory before finishing (for next turn's awareness)

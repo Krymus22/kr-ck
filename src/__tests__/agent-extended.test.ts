@@ -917,8 +917,8 @@ describe("Strict mode / quality gate", () => {
     const result = await runAgentLoop("edite o arquivo");
 
     expect(result).toBe("ok final");
-    // Chat foi chamado 3x (edit + 2 stops)
-    expect(mockedChat).toHaveBeenCalledTimes(3);
+    // Chat foi chamado 3x+ (edit + 2 stops + possible Bug Hunter/DataGuard calls)
+    expect(mockedChat.mock.calls.length).toBeGreaterThanOrEqual(3);
     // history.addSystemMessage foi chamado com o errorLog do gate bloqueado
     expect(mockedAddSystemMessage).toHaveBeenCalledWith(
       expect.stringContaining("STRICT_GATE BLOCK 1/8")

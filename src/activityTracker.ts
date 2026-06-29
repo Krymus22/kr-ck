@@ -35,7 +35,8 @@ export type ActivityCategory =
   | "checkpoint"          // Writing checkpoint
   | "api_call"            // Making HTTP request to LLM
   | "api_retry"           // Retrying after transient error
-  | "bug_hunter";         // Running Bug Hunter critical review
+  | "bug_hunter"          // Running Bug Hunter critical review
+  | "dataguard";          // Running DataGuard data protection review
 
 export interface ActivityState {
   stack: ActivityEntry[];
