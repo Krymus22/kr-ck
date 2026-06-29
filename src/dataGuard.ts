@@ -377,10 +377,58 @@ export async function runDataGuard(
       if (toolCalls && toolCalls.length > 0 && choice.finish_reason === "tool_calls") {
         messages.push(msg);
         for (const tc of toolCalls) {
+          const toolName = tc.function?.name ?? "";
+          const toolArgs = JSON.parse(tc.function?.arguments ?? "{}");
+          let toolResult = "";
+
+          if (toolName === "ler_arquivo") {
+            const filePath = toolArgs.path || toolArgs.caminho;
+            if (filePath && nodeFs.existsSync(filePath)) {
+              try {
+                const content = nodeFs.readFileSync(filePath, "utf8");
+                const lines = content.split("\n");
+                const offset = toolArgs.offset || 1;
+                const limit = toolArgs.limit || lines.length;
+                const start = Math.max(0, offset - 1);
+                const end = Math.min(start + limit, lines.length);
+                toolResult = lines.slice(start, end)
+                  .map((l, i) => `${start + i + 1}| ${l}`)
+                  .join("\n");
+              } catch (e: any) {
+                toolResult = `Error reading file: ${e.message}`;
+              }
+            } else if (filePath) {
+              // Check if it's a directory
+              try {
+                const entries = nodeFs.readdirSync(filePath, { withFileTypes: true });
+                toolResult = `[DIRECTORY: ${entries.length} items]\n` +
+                  entries.map(e => `${e.isDirectory() ? "[dir]" : "[file]"} ${e.name}`).join("\n");
+              } catch {
+                toolResult = `File not found: ${filePath}`;
+              }
+            } else {
+              toolResult = "No path provided";
+            }
+          } else if (toolName === "buscar_texto") {
+            // Simple grep simulation
+            const pattern = toolArgs.pattern || "";
+            const searchPath = toolArgs.path || ".";
+            try {
+              const { execSync } = await import("node:child_process");
+              toolResult = execSync(`grep -rn "${pattern}" "${searchPath}" 2>/dev/null || echo "(no matches)"`, {
+                encoding: "utf8", timeout: 5000, maxBuffer: 10240
+              }).slice(0, 2000);
+            } catch {
+              toolResult = "(search failed or no matches)";
+            }
+          } else {
+            toolResult = `Unknown tool: ${toolName}`;
+          }
+
           messages.push({
             role: "tool",
             tool_call_id: tc.id,
-            content: `[DATAGUARD: file content available via static scan above]`,
+            content: toolResult.slice(0, 4000),
           });
         }
         continue;

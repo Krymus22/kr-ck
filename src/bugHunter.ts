@@ -101,9 +101,9 @@ const fileSnapshots = new Map<string, string>();
  */
 export function snapshotFileBeforeEdit(filePath: string): void {
   try {
-    const resolved = require("node:path").resolve(filePath);
-    if (require("node:fs").existsSync(resolved)) {
-      fileSnapshots.set(resolved, require("node:fs").readFileSync(resolved, "utf8"));
+    const resolved = nodePath.resolve(filePath);
+    if (nodeFs.existsSync(resolved)) {
+      fileSnapshots.set(resolved, nodeFs.readFileSync(resolved, "utf8"));
     }
   } catch { /* ignore */ }
 }
@@ -114,12 +114,12 @@ export function snapshotFileBeforeEdit(filePath: string): void {
  */
 export function generateDiffAfterEdit(filePath: string): string {
   try {
-    const resolved = require("node:path").resolve(filePath);
+    const resolved = nodePath.resolve(filePath);
     const before = fileSnapshots.get(resolved);
     if (!before) return ""; // no snapshot — file was new
 
-    const after = require("node:fs").existsSync(resolved)
-      ? require("node:fs").readFileSync(resolved, "utf8")
+    const after = nodeFs.existsSync(resolved)
+      ? nodeFs.readFileSync(resolved, "utf8")
       : "";
 
     if (before === after) return ""; // no changes
@@ -398,7 +398,7 @@ export async function runBugHunter(
     // IDEIA D: Run project between rounds (if blocking)
     let projectOutput = "";
     if (shouldBlock && filesModified.length > 0) {
-      const projectDir = filesModified[0] ? require("node:path").dirname(filesModified[0]).replace("/src", "") : process.cwd();
+      const projectDir = filesModified[0] ? nodePath.dirname(filesModified[0]).replace("/src", "") : process.cwd();
       log.info(`[BUG_HUNTER] Running project verification...`);
       projectOutput = await runProjectVerification(projectDir);
       log.info(`[BUG_HUNTER] Project output: ${projectOutput.slice(0, 200)}`);
