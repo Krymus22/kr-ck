@@ -152,29 +152,46 @@ export function generateDiffAfterEdit(filePath: string): string {
  * IDEIA D: Run the project between Bug Hunter rounds.
  * Tries to run "npx tsx src/index.ts" or "npm test" and returns the result.
  */
-async function runProjectVerification(projectDir: string): Promise<string> {
-  try {
-    const { execSync } = require("node:child_process");
-    // Try npx tsx src/index.ts first
-    try {
-      const out = execSync("npx tsx src/index.ts 2>&1", {
-        cwd: projectDir, timeout: 30000, encoding: "utf8"
-      });
-      return out.trim().slice(0, 500) || "(no output)";
-    } catch {
-      // Try npm test
-      try {
-        const out = execSync("npm test 2>&1", {
-          cwd: projectDir, timeout: 30000, encoding: "utf8"
-        });
-        return out.trim().slice(0, 500) || "(no output)";
-      } catch {
-        return "(could not run project)";
-      }
-    }
-  } catch {
-    return "(could not run project)";
-  }
+export async function runProjectVerification(projectDir: string): Promise<string> {
+  const { spawn } = await import("node:child_process");
+
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const child = spawn("npx", ["tsx", "src/index.ts"], {
+      cwd: projectDir,
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: true,
+    });
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch {}
+      resolve("(project timed out after 10s)");
+    }, 10000);
+
+    child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8").slice(0, 1024 - stdout.length); });
+    child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8").slice(0, 1024 - stderr.length); });
+
+    child.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve("(could not run project)");
+    });
+
+    child.on("close", (code: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
+      resolve(combined.slice(0, 500) || "(no output)");
+    });
+  });
 }
 
 /**
@@ -646,9 +663,11 @@ export function formatBugHuntMessage(
 
   const lines: string[] = [];
   lines.push(shouldBlock
-    ? `[BUG_HUNTER] ✗ CRITICAL ISSUES FOUND — you MUST fix these before finishing:`
-    : `[BUG_HUNTER] Review complete. Minor issues found (non-blocking):`
+    ? `[BUG_HUNTER] ✗ ISSUES FOUND — you MUST fix or dismiss EACH finding before finishing:`
+    : `[BUG_HUNTER] Review complete. No issues found.`
   );
+  lines.push("");
+  lines.push(`IMPORTANT: You are NOT allowed to finish until every finding below is either FIXED (with a real code change) or EXPLICITLY DISMISSED with a valid reason (e.g., "false positive because X"). Saying "looks fine" without addressing each finding = blocking.`);
   lines.push("");
 
   // IDEIA A: Show comparison with previous round
