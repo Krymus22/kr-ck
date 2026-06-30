@@ -72,8 +72,19 @@ export interface ResearchError {
 
 const CACHE_TTL_DAYS = 7;
 const MAX_CONTENT_LENGTH = 8000;  // truncate raw content to keep response size manageable
-const SEARCH_TIMEOUT_MS = 15_000;
-const READ_TIMEOUT_MS = 20_000;
+const SEARCH_TIMEOUT_MS = 30_000;   // increased from 15s — DuckDuckGo can be slow
+const READ_TIMEOUT_MS = 30_000;     // increased from 20s — some doc pages are heavy
+const MAX_SEARCH_RETRIES = 3;       // retry DuckDuckGo up to 3 times
+const MAX_READ_RETRIES = 2;         // retry page reads up to 2 times
+const RETRY_DELAY_MS = 2000;        // wait 2s between retries
+
+// Rotating user agents to avoid rate limiting
+const USER_AGENTS = [
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+];
 
 // Official docs sources we trust (in priority order)
 const TRUSTED_SOURCES: Record<string, string[]> = {
@@ -234,45 +245,47 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
     // z-ai CLI not available, fall through
   }
 
-  // Fallback 1: DuckDuckGo HTML search (no API key required, public endpoint)
-  try {
-    const ddgResult = await runCmd(
-      "curl",
-      ["-sL", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
-      SEARCH_TIMEOUT_MS
-    );
-    if (ddgResult.ok && ddgResult.stdout) {
-      const results: SearchResult[] = [];
-      // DuckDuckGo HTML results: <a class="result__a" href="...">title</a>
-      // and <a class="result__snippet" href="...">snippet</a>
-      const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-      const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-      const snippets: string[] = [];
-      let sm;
-      while ((sm = snippetRegex.exec(ddgResult.stdout)) !== null) {
-        snippets.push(sm[1].replace(/<[^>]+>/g, "").trim());
+  // Fallback 1: DuckDuckGo HTML search with RETRY and rotating user-agents
+  for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
+    try {
+      const ua = USER_AGENTS[attempt % USER_AGENTS.length];
+      const ddgResult = await runCmd(
+        "curl",
+        ["-sL", "-A", ua, "--max-time", "25",
+         `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
+        SEARCH_TIMEOUT_MS
+      );
+      if (ddgResult.ok && ddgResult.stdout) {
+        const results: SearchResult[] = [];
+        const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+        const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+        const snippets: string[] = [];
+        let sm;
+        while ((sm = snippetRegex.exec(ddgResult.stdout)) !== null) {
+          snippets.push(sm[1].replace(/<[^>]+>/g, "").trim());
+        }
+        let m;
+        let i = 0;
+        while ((m = linkRegex.exec(ddgResult.stdout)) !== null && i < num) {
+          let url = m[1];
+          const uddgMatch = url.match(/uddg=([^&]+)/);
+          if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
+          if (url.startsWith("//")) url = "https:" + url;
+          const title = m[2].replace(/<[^>]+>/g, "").trim();
+          results.push({ url, title, snippet: snippets[i] ?? "" });
+          i++;
+        }
+        if (results.length > 0) return results;
       }
-      let m;
-      let i = 0;
-      while ((m = linkRegex.exec(ddgResult.stdout)) !== null && i < num) {
-        // DDG wraps URLs in //duckduckgo.com/l/?uddg=<encoded>
-        let url = m[1];
-        const uddgMatch = url.match(/uddg=([^&]+)/);
-        if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
-        if (url.startsWith("//")) url = "https:" + url;
-        const title = m[2].replace(/<[^>]+>/g, "").trim();
-        results.push({
-          url,
-          title,
-          snippet: snippets[i] ?? "",
-        });
-        i++;
+      // No results — wait and retry with different user-agent
+      if (attempt < MAX_SEARCH_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
-      if (results.length > 0) return results;
+    } catch {
+      if (attempt < MAX_SEARCH_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
     }
-  } catch {
-    // DuckDuckGo unavailable, fall through
   }
 
   // Fallback 2: GitHub search API for code-related queries
@@ -338,32 +351,40 @@ export async function webRead(url: string): Promise<string> {
     // ignore
   }
 
-  // Fallback: direct curl fetch + HTML stripping
-  try {
-    const curlResult = await runCmd(
-      "curl",
-      ["-sL", "-A", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-       "--max-time", "15", url],
-      READ_TIMEOUT_MS
-    );
-    if (curlResult.ok && curlResult.stdout) {
-      const html = curlResult.stdout;
-      const text = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&nbsp;/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (text.length > 0) return text.slice(0, MAX_CONTENT_LENGTH);
+  // Fallback: direct curl fetch with RETRY and rotating user-agents
+  for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {
+    try {
+      const ua = USER_AGENTS[attempt % USER_AGENTS.length];
+      const curlResult = await runCmd(
+        "curl",
+        ["-sL", "-A", ua, "--max-time", "25", url],
+        READ_TIMEOUT_MS
+      );
+      if (curlResult.ok && curlResult.stdout) {
+        const html = curlResult.stdout;
+        const text = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (text.length > 0) return text.slice(0, MAX_CONTENT_LENGTH);
+      }
+      // Empty response — retry with different user-agent
+      if (attempt < MAX_READ_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
+    } catch {
+      if (attempt < MAX_READ_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
     }
-  } catch {
-    // ignore
   }
 
   return "";
