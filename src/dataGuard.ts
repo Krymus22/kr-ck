@@ -218,7 +218,7 @@ function buildReadOnlyTools(): any[] {
  * Quick static analysis for common data protection patterns.
  * This runs BEFORE the LLM call to provide context about what patterns exist.
  */
-function quickScanForDataPatterns(filesModified: string[]): string {
+async function quickScanForDataPatterns(filesModified: string[]): Promise<string> {
   const patterns: string[] = [];
 
   const dangerousPatterns = [
@@ -240,8 +240,7 @@ function quickScanForDataPatterns(filesModified: string[]): string {
 
   for (const file of filesModified) {
     try {
-      if (!nodeFs.existsSync(file)) continue;
-      const content = nodeFs.readFileSync(file, "utf8");
+      const content = await nodeFs.promises.readFile(file, "utf8");
       const lines = content.split("\n");
 
       for (const { regex, name, risk } of dangerousPatterns) {
@@ -328,7 +327,7 @@ export async function runDataGuard(
 
   try {
     const systemPrompt = buildDataGuardSystemPrompt();
-    const staticScan = quickScanForDataPatterns(filesModified);
+    const staticScan = await quickScanForDataPatterns(filesModified);
     const context = buildDataGuardContext(filesModified, userRequest, agentResponse);
 
     const messages: any[] = [

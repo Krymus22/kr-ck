@@ -467,12 +467,12 @@ async function manualGrep(pattern: string, root: string, extensions: string[]): 
   const results: string[] = [];
   const visited = new Set<string>();
 
-  function walk(dir: string) {
+  async function walk(dir: string): Promise<void> {
     if (visited.has(dir)) return;
     visited.add(dir);
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -481,14 +481,14 @@ async function manualGrep(pattern: string, root: string, extensions: string[]): 
       if (["node_modules", "dist", "build", "target", "__pycache__"].includes(entry.name)) continue;
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(fullPath);
+        await walk(fullPath);
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name);
         if (!extensions.includes(ext)) continue;
         try {
-          const stat = fs.statSync(fullPath);
+          const stat = await fs.promises.stat(fullPath);
           if (stat.size > MAX_FILE_SIZE_KB * 1024) continue;
-          const content = fs.readFileSync(fullPath, "utf8");
+          const content = await fs.promises.readFile(fullPath, "utf8");
           const lines = content.split("\n");
           for (let i = 0; i < lines.length; i++) {
             if (regex.test(lines[i]!)) {
@@ -502,7 +502,7 @@ async function manualGrep(pattern: string, root: string, extensions: string[]): 
     }
   }
 
-  walk(root);
+  await walk(root);
   return results.join("\n");
 }
 
@@ -529,9 +529,9 @@ export async function analyzeImpact(
     durationMs: 0,
   };
 
-  // Check cache (mtime-based)
+  // Check cache (mtime-based) — ASYNC to avoid blocking event loop
   try {
-    const stat = fs.statSync(targetFile);
+    const stat = await fs.promises.stat(targetFile);
     const cacheKey = targetFile;
     const cached = cache.get(cacheKey);
     if (cached && cached.fileMtime === stat.mtimeMs && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
@@ -541,10 +541,10 @@ export async function analyzeImpact(
     return empty;
   }
 
-  // Read target file content
+  // Read target file content — ASYNC to avoid blocking event loop
   let content: string;
   try {
-    content = fs.readFileSync(targetFile, "utf8");
+    content = await fs.promises.readFile(targetFile, "utf8");
   } catch {
     return empty;
   }

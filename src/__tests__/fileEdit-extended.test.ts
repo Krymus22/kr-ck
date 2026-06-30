@@ -38,17 +38,31 @@ const fsState = vi.hoisted(() => ({
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
+  const writeShouldThrowCheck = () => {
+    if (fsState.writeShouldThrow) {
+      const err = new Error(fsState.writeErrorMessage) as Error & { code?: string };
+      err.code = fsState.writeErrorCode;
+      throw err;
+    }
+  };
   return {
     ...actual,
     writeFileSync: vi.fn((...args: Parameters<typeof fs.writeFileSync>) => {
       fsState.writeFileCallCount++;
-      if (fsState.writeShouldThrow) {
-        const err = new Error(fsState.writeErrorMessage) as Error & { code?: string };
-        err.code = fsState.writeErrorCode;
-        throw err;
-      }
+      writeShouldThrowCheck();
       return (actual.writeFileSync as any)(...args);
     }),
+    promises: {
+      ...actual.promises,
+      writeFile: vi.fn(async (...args: Parameters<typeof fs.promises.writeFile>) => {
+        fsState.writeFileCallCount++;
+        writeShouldThrowCheck();
+        return (actual.promises.writeFile as any)(...args);
+      }),
+      readFile: actual.promises.readFile,
+      access: actual.promises.access,
+      stat: actual.promises.stat,
+    },
   };
 });
 

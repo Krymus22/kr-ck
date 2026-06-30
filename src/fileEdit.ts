@@ -141,12 +141,14 @@ export async function editFile(
 
   try {
     let content = "";
-    if (fs.existsSync(resolved)) {
-      content = fs.readFileSync(resolved, "utf8");
-    } else if (options?.createIfMissing) {
-      // content is already ""
-    } else {
-      return `[ERROR] File not found: ${resolved}`;
+    try {
+      content = await fs.promises.readFile(resolved, "utf8");
+    } catch {
+      if (options?.createIfMissing) {
+        // content is already ""
+      } else {
+        return `[ERROR] File not found: ${resolved}`;
+      }
     }
 
     const original = content;
@@ -293,10 +295,13 @@ export async function editFile(
     }
   }
 
-  // Backup original
-  if (options?.backup && fs.existsSync(resolved)) {
-    const backupPath = resolved + ".bak";
-    fs.writeFileSync(backupPath, original, "utf8");
+  // Backup original — ASYNC to avoid blocking event loop
+  if (options?.backup) {
+    try {
+      await fs.promises.access(resolved);
+      const backupPath = resolved + ".bak";
+      await fs.promises.writeFile(backupPath, original, "utf8");
+    } catch { /* file doesn't exist yet, no backup needed */ }
   }
 
   // --- Sprint 8: before_write hooks (Worker-Thread sandbox) ---
@@ -336,7 +341,7 @@ export async function editFile(
   // Write
   const dir = path.dirname(resolved);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(resolved, result.content, "utf8");
+  await fs.promises.writeFile(resolved, result.content, "utf8");
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
 
