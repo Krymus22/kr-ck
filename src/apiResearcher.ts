@@ -457,9 +457,29 @@ function parseBingNewsResults(htmlRaw: string, num: number): SearchResult[] {
 /**
  * Detect if a query is news-related (should use Bing News instead of regular Bing).
  * Returns true for queries about recent events, announcements, launches, etc.
+ *
+ * ANTI-KEYWORDS: queries containing "documentation", "API", "docs", "reference",
+ * "exemplo", "tutorial" are NEVER treated as news — even if they contain "2026".
+ * This prevents API research queries like "TweenService roblox API documentation 2026"
+ * from being routed to Bing News (which would return articles instead of docs).
  */
 function isNewsQuery(query: string): boolean {
   const q = query.toLowerCase();
+
+  // Anti-keywords: if present, this is a documentation/API search, not news.
+  // These should ALWAYS use regular Bing Web (which prioritizes official docs).
+  const antiKeywords = [
+    "documentation", "documentação", "docs", "reference", "referência",
+    "api ", "api,", "api", "tutorial", "exemplo", "example",
+    "guia", "guide", "how to", "como usar", "como fazer",
+    "signature", "assinatura", "parameter", "parâmetro",
+    "syntax", "sintaxe", "usage", "uso",
+  ];
+  // Check anti-keywords first — if found, NOT a news query
+  for (const ak of antiKeywords) {
+    if (q.includes(ak)) return false;
+  }
+
   const newsKeywords = [
     "news", "latest", "today", "announcement", "announced", "launched",
     "release", "released", "update", "updated", "2026", "2025", "2024",
@@ -470,10 +490,20 @@ function isNewsQuery(query: string): boolean {
   return newsKeywords.some(kw => q.includes(kw));
 }
 
-export async function webSearch(query: string, num: number = 5): Promise<SearchResult[]> {
+export async function webSearch(query: string, num: number = 5, newsMode?: boolean): Promise<SearchResult[]> {
+  // Determine whether to use Bing News. The `newsMode` parameter lets callers
+  // explicitly override the auto-detection:
+  //   - newsMode === true  → always use Bing News (even if isNewsQuery is false)
+  //   - newsMode === false → never use Bing News (even if isNewsQuery is true)
+  //   - newsMode === undefined → auto-detect via isNewsQuery()
+  // This is important because API research queries ("TweenService API docs 2026")
+  // contain "2026" which would trigger news mode, but they should use regular
+  // Bing Web to get official documentation instead of articles.
+  const useNews = newsMode ?? isNewsQuery(query);
+
   // If the query looks like a news search, try Bing News FIRST to get
   // specific articles instead of generic homepages.
-  if (isNewsQuery(query)) {
+  if (useNews) {
     for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
       try {
         // Bing News search with date filter (last 7 days = interval="7")
@@ -927,7 +957,11 @@ export async function researchApi(req: ResearchRequest): Promise<ResearchResult 
 
   // 2. Search the web
   const query = buildSearchQuery(req);
-  const searchResults = await webSearch(query, 5);
+  // CRITICAL: pass newsMode=false explicitly. The query contains the current
+  // year ("2026") which would trigger isNewsQuery() → Bing News. But API
+  // documentation should use regular Bing Web, which prioritizes official
+  // docs sites (create.roblox.com, react.dev, etc.) instead of articles.
+  const searchResults = await webSearch(query, 5, false);
   if (searchResults.length === 0) {
     return {
       error: `No search results found for "${req.apiName}" in ${req.language}`,
