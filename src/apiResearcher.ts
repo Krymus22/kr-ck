@@ -378,7 +378,125 @@ function parseBingResults(htmlRaw: string, num: number): SearchResult[] {
   return results;
 }
 
+/**
+ * Parse Bing NEWS search results.
+ * Bing News (bing.com/news/search) returns results in a different HTML
+ * structure than regular Bing search. Results are in <div class="news-card">
+ * or <div class="t_t"> blocks, with links in <a> tags and snippets in <p>.
+ * This is used when the query looks like a news search (contains "news",
+ * "latest", "today", "announcement", "2026", etc.) to get specific articles
+ * instead of generic homepages.
+ */
+function parseBingNewsResults(htmlRaw: string, num: number): SearchResult[] {
+  const results: SearchResult[] = [];
+  const html = decodeHtmlEntities(htmlRaw);
+
+  // Bing News uses <div class="news-card"> or <div class="t_t"> for results
+  // Try multiple selectors since Bing changes their HTML structure frequently
+
+  // Selector 1: news-card divs
+  const cardBlocks = html.split(/class="news-card"/).slice(1);
+  for (const block of cardBlocks) {
+    if (results.length >= num) break;
+
+    // Extract URL from <a href="...">
+    const linkMatch = block.match(/<a[^>]+href="([^"]+)"[^>]*>/);
+    if (!linkMatch) continue;
+    let url = linkMatch[1];
+    // Bing news links may be wrapped in redirect
+    if (url.includes("bing.com/ck/")) {
+      const uMatch = url.match(/u=([A-Za-z0-9+/=_-]+)/);
+      if (uMatch) {
+        try {
+          let encoded = uMatch[1].replace(/-/g, "+").replace(/_/g, "/");
+          const padding = 4 - (encoded.length % 4);
+          if (padding !== 4) encoded += "=".repeat(padding);
+          url = Buffer.from(encoded, "base64").toString("utf8");
+        } catch { /* ignore */ }
+      }
+    }
+    if (!url.startsWith("http") || url.includes("bing.com/")) continue;
+
+    // Extract title from <a>...</a> or <h3>...</h3>
+    const titleMatch = block.match(/<a[^>]*>([\s\S]*?)<\/a>/) ??
+                       block.match(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/);
+    if (!titleMatch) continue;
+    const title = titleMatch[1].replace(/<[^>]+>/g, "").trim();
+    if (!title || title.length < 5) continue;
+
+    // Extract snippet
+    const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
+    const snippet = snippetMatch
+      ? snippetMatch[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim()
+      : "";
+
+    results.push({ url, title, snippet });
+  }
+
+  // Selector 2: if news-card didn't work, try general link extraction
+  if (results.length === 0) {
+    // Look for all <a> tags with href pointing to external news sites
+    const linkRegex = /<a[^>]+href="(https?:\/\/(?!www\.bing\.com|bing\.com|m\.bing\.com)[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    const seen = new Set<string>();
+    while ((m = linkRegex.exec(html)) !== null && results.length < num) {
+      const url = m[1];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const title = m[2].replace(/<[^>]+>/g, "").trim();
+      if (title.length < 10) continue;
+      // Skip obvious navigation/social links
+      if (/^(Home|Sign in|Login|Subscribe|Follow|Share|Menu)$/i.test(title)) continue;
+      results.push({ url, title, snippet: "" });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Detect if a query is news-related (should use Bing News instead of regular Bing).
+ * Returns true for queries about recent events, announcements, launches, etc.
+ */
+function isNewsQuery(query: string): boolean {
+  const q = query.toLowerCase();
+  const newsKeywords = [
+    "news", "latest", "today", "announcement", "announced", "launched",
+    "release", "released", "update", "updated", "2026", "2025", "2024",
+    "recent", "current", "happening", "this week", "this month",
+    "novo", "nova", "notícia", "noticias", "lançamento", "atualização",
+    "recente", "hoje", "ontem",
+  ];
+  return newsKeywords.some(kw => q.includes(kw));
+}
+
 export async function webSearch(query: string, num: number = 5): Promise<SearchResult[]> {
+  // If the query looks like a news search, try Bing News FIRST to get
+  // specific articles instead of generic homepages.
+  if (isNewsQuery(query)) {
+    for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
+      try {
+        // Bing News search with date filter (last 7 days = interval="7")
+        const newsUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&qft=interval%3d%227%22&form=PTFNR&count=${num}`;
+        const newsResult = await fetchUrl(newsUrl, SEARCH_TIMEOUT_MS);
+        if (newsResult.ok && newsResult.text) {
+          const results = parseBingNewsResults(newsResult.text, num);
+          if (results.length > 0) {
+            console.log(`[WEB_SEARCH] Bing News: ${results.length} results for "${query.slice(0, 50)}"`);
+            return results;
+          }
+        }
+        if (attempt < MAX_SEARCH_RETRIES - 1) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        }
+      } catch {
+        if (attempt < MAX_SEARCH_RETRIES - 1) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        }
+      }
+    }
+  }
+
   // PRIMARY: Bing search via native fetch (no curl dependency, works on Windows + Linux + Mac)
   for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
     try {
@@ -450,7 +568,7 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
         const snippets: string[] = [];
         let sm;
         while ((sm = snippetRegex.exec(ddgResult.text)) !== null) {
-          snippets.push(sm[1].replace(/<[^>]+>/g, "").trim());
+          snippets.push(decodeHtmlEntities(sm[1].replace(/<[^>]+>/g, "").trim()));
         }
         let m;
         let i = 0;
@@ -459,8 +577,8 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
           const uddgMatch = url.match(/uddg=([^&]+)/);
           if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
           if (url.startsWith("//")) url = "https:" + url;
-          const title = m[2].replace(/<[^>]+>/g, "").trim();
-          results.push({ url, title, snippet: snippets[i] ?? "" });
+          const title = decodeHtmlEntities(m[2].replace(/<[^>]+>/g, "").trim());
+          results.push({ url, title, snippet: decodeHtmlEntities(snippets[i] ?? "") });
           i++;
         }
         if (results.length > 0) {
