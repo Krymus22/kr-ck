@@ -491,6 +491,14 @@ interface StreamState {
   /** Repetition detection: tracks recent chunks to detect loops */
   recentChunks: string[];
   repetitionDetected: boolean;
+  /**
+   * <think> tag filtering (real-time).
+   * Some models (Kimi K2.6) embed reasoning as <think>...</think> tags
+   * INSIDE delta.content instead of using delta.reasoning_content.
+   * We filter these during streaming so the user never sees them.
+   */
+  inThinkBlock: boolean;
+  pendingTagBuffer: string;
 }
 
 function createStreamState(): StreamState {
@@ -506,6 +514,8 @@ function createStreamState(): StreamState {
     completionTokens: 0,
     recentChunks: [],
     repetitionDetected: false,
+    inThinkBlock: false,
+    pendingTagBuffer: "",
   };
 }
 
@@ -616,11 +626,32 @@ function processReasoningChunk(
   onThinking?.();
 }
 
+/**
+ * Length of the <think> opening tag.
+ */
+const THINK_OPEN_LEN = 7;  // "<think>".length
+const THINK_CLOSE_LEN = 8; // "</think>".length
+
+/**
+ * Check if `s` ends with a prefix of `tag` (partial tag at end of buffer).
+ * Returns the length of the partial match (1..tag.length-1), or 0 if no match.
+ * Example: partialTagSuffix("hello <thi", "<think>") returns 4 ("<thi" is a prefix).
+ */
+function partialTagSuffix(s: string, tag: string): number {
+  const maxCheck = Math.min(s.length, tag.length - 1);
+  for (let i = maxCheck; i >= 1; i--) {
+    const suffix = s.slice(s.length - i);
+    if (tag.startsWith(suffix)) return i;
+  }
+  return 0;
+}
+
 function processContentChunk(
   state: StreamState,
   content: string,
   onStreamStart?: () => void,
   onToken?: (token: string) => void,
+  onThinking?: () => void,
 ): void {
   if (state.isFirstChunk) {
     state.isFirstChunk = false;
@@ -630,8 +661,85 @@ function processContentChunk(
   // If repetition was already detected, ignore further tokens
   if (state.repetitionDetected) return;
 
-  onToken?.(content);
-  state.totalContent += content;
+  // ── Real-time <think> tag filtering ──────────────────────────────
+  // Some models (Kimi K2.6) embed reasoning as <think>...</think> inside
+  // delta.content. We must filter these DURING streaming, not after,
+  // because onToken sends tokens to the TUI in real-time. If we wait
+  // until buildChatResponse to strip tags, the user has already seen
+  // the reasoning text being "typed" on screen.
+  //
+  // State machine:
+  //   - inThinkBlock=false: scan for "<think>". Emit text before it as
+  //     normal content. Hold potential partial tag at end of buffer.
+  //   - inThinkBlock=true: scan for "</think>". Call onThinking for
+  //     reasoning content (don't emit to user). Hold partial at end.
+  state.pendingTagBuffer += content;
+
+  let emittedContent = "";
+  let hadThinking = false;
+
+  let safety = 1000; // prevent infinite loops on malformed input
+  while (state.pendingTagBuffer.length > 0 && safety-- > 0) {
+    if (!state.inThinkBlock) {
+      const openIdx = state.pendingTagBuffer.indexOf("<think>");
+      if (openIdx === -1) {
+        // No complete opening tag. Check if buffer ends with a partial
+        // "<think>" prefix (e.g. "<thi") and hold it back.
+        const partialLen = partialTagSuffix(state.pendingTagBuffer, "<think>");
+        const safeEnd = state.pendingTagBuffer.length - partialLen;
+        if (safeEnd > 0) {
+          emittedContent += state.pendingTagBuffer.slice(0, safeEnd);
+          state.pendingTagBuffer = state.pendingTagBuffer.slice(safeEnd);
+        }
+        break; // waiting for more content to resolve the partial tag
+      }
+      // Emit everything before the <think> tag as normal content
+      if (openIdx > 0) {
+        emittedContent += state.pendingTagBuffer.slice(0, openIdx);
+      }
+      state.pendingTagBuffer = state.pendingTagBuffer.slice(openIdx + THINK_OPEN_LEN);
+      state.inThinkBlock = true;
+    } else {
+      // Inside <think> block — look for closing </think> tag
+      const closeIdx = state.pendingTagBuffer.indexOf("</think>");
+      if (closeIdx === -1) {
+        // No closing tag yet. The reasoning content in the buffer should
+        // trigger onThinking but NOT be emitted to the user. Hold back
+        // a potential partial "</think>" prefix at the end.
+        const partialLen = partialTagSuffix(state.pendingTagBuffer, "</think>");
+        const safeEnd = state.pendingTagBuffer.length - partialLen;
+        if (safeEnd > 0) {
+          hadThinking = true;
+          state.pendingTagBuffer = state.pendingTagBuffer.slice(safeEnd);
+        }
+        break; // waiting for more content to find closing tag
+      }
+      // Found closing tag — everything up to it is reasoning content
+      if (closeIdx > 0) {
+        hadThinking = true;
+      }
+      state.pendingTagBuffer = state.pendingTagBuffer.slice(closeIdx + THINK_CLOSE_LEN);
+      state.inThinkBlock = false;
+    }
+  }
+
+  // Emit accumulated non-think content to the TUI
+  if (emittedContent) {
+    onToken?.(emittedContent);
+    state.totalContent += emittedContent;
+  } else if (content === "" && !state.inThinkBlock && state.pendingTagBuffer.length === 0) {
+    // Heartbeat passthrough: some providers send empty content chunks as
+    // keep-alive signals. The TUI uses onToken callbacks to update timing
+    // metrics and keep the UI responsive. We must still call onToken("")
+    // for these heartbeats — but ONLY when we're not inside a <think> block
+    // and have no pending partial tag in the buffer.
+    onToken?.("");
+  }
+
+  // Signal thinking indicator for reasoning content
+  if (hadThinking) {
+    onThinking?.();
+  }
 
   // REPETITION DETECTION: check every ~500 chars if the model is looping
   if (state.totalContent.length > 200 && state.totalContent.length % 500 < content.length) {
@@ -643,6 +751,34 @@ function processContentChunk(
         "\n\n[GERAÇÃO INTERROMPIDA: repetição detectada. Tente reformular sua pergunta.]";
       console.log("[REPETITION] Generation aborted — returning partial content");
     }
+  }
+}
+
+/**
+ * Flush any pending non-think content remaining in the tag buffer.
+ * Called at the end of consumeStream to ensure no visible content is lost
+ * when the stream ends with a partial tag prefix in the buffer.
+ *
+ * If we're inside a <think> block when the stream ends, the reasoning
+ * content is discarded (the model never closed its <think> tag).
+ */
+function flushPendingTagBuffer(
+  state: StreamState,
+  onToken?: (token: string) => void,
+): void {
+  if (state.pendingTagBuffer.length === 0) return;
+
+  if (!state.inThinkBlock) {
+    // The pending buffer is a partial <think> prefix that never completed.
+    // Emit it as normal content — it's not actually a think tag.
+    const partial = state.pendingTagBuffer;
+    state.pendingTagBuffer = "";
+    onToken?.(partial);
+    state.totalContent += partial;
+  } else {
+    // Inside a <think> block that never closed — discard reasoning content.
+    state.pendingTagBuffer = "";
+    state.inThinkBlock = false;
   }
 }
 
@@ -719,7 +855,7 @@ function processStreamChunk(
   // também sejam processados. O acúmulo em totalContent não é afetado porque
   // somar "" é no-op.
   if (typeof delta.content === "string") {
-    processContentChunk(state, delta.content, onStreamStart, onToken);
+    processContentChunk(state, delta.content, onStreamStart, onToken, onThinking);
   }
 
   if (choice.finish_reason) state.finishReason = choice.finish_reason;
@@ -748,15 +884,19 @@ async function consumeStream(
     }
     processStreamChunk(chunk, state, onStreamStart, onToken, onThinking);
   }
+  // Flush any pending content left in the tag buffer (partial tags that
+  // never completed, or leftover from a think block that never closed).
+  flushPendingTagBuffer(state, onToken);
 }
 
 function buildChatResponse(state: StreamState): ChatResponse {
   const toolCallsList = Object.values(state.toolCallsAccumulator);
 
-  // CRITICAL: Strip <think>...</think> tags from content.
-  // Some models (Kimi K2.6) embed reasoning as <think> tags inside delta.content
-  // instead of using delta.reasoning_content. This leaks internal reasoning into
-  // the conversation, causing confusion, repetition loops, and bad tool calls.
+  // SAFETY NET: Strip any <think>...</think> tags that may have leaked through.
+  // The primary filtering now happens in processContentChunk (real-time during
+  // streaming), so totalContent should never contain <think> tags. This regex
+  // cleanup is kept as a defense-in-depth for edge cases (e.g., uppercase
+  // <THINK> variants that the streaming filter doesn't catch).
   let content = state.totalContent || null;
   if (content) {
     // Remove complete <think>...</think> blocks
