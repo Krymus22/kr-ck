@@ -490,7 +490,399 @@ function isNewsQuery(query: string): boolean {
   return newsKeywords.some(kw => q.includes(kw));
 }
 
+// ─── Searx Local Integration ────────────────────────────────────────────────
+
+/**
+ * Cache for Searx availability check. We only probe once per session.
+ * Values: "unknown" (not checked), "running" (available), "down" (not available)
+ */
+let searxStatus: "unknown" | "running" | "down" = "unknown";
+let searxUrl = "";
+
+/**
+ * Check if Searx is running locally (Python: port 8888, Docker: port 8080).
+ * Caches the result so we only probe once per session.
+ *
+ * Searx must be configured with JSON format enabled in settings.yml:
+ *   search:
+ *     formats:
+ *       - html
+ *       - json
+ */
+async function checkSearxAvailable(): Promise<boolean> {
+  if (searxStatus === "running") return true;
+  if (searxStatus === "down") return false;
+
+  // Try Python default (8888) then Docker default (8080)
+  const candidates = [
+    "http://localhost:8888",
+    "http://localhost:8080",
+    "http://127.0.0.1:8888",
+    "http://127.0.0.1:8080",
+  ];
+
+  for (const base of candidates) {
+    try {
+      const testUrl = `${base}/search?q=test&format=json`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const resp = await fetch(testUrl, {
+        signal: controller.signal,
+        headers: { "Accept": "application/json" },
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = await resp.json() as any;
+        if (data && typeof data === "object" && "results" in data) {
+          searxStatus = "running";
+          searxUrl = base;
+          console.log(`[WEB_SEARCH] Searx detected at ${base}`);
+          return true;
+        }
+      }
+    } catch {
+      // Not running on this port, try next
+    }
+  }
+
+  searxStatus = "down";
+  return false;
+}
+
+/**
+ * Search using local Searx instance.
+ * Searx aggregates Google + Bing + DuckDuckGo + 70+ other engines.
+ * Returns JSON with { results: [{ url, title, content, engine, score }] }
+ */
+async function searchWithSearx(query: string, num: number): Promise<SearchResult[]> {
+  if (searxStatus !== "running") return [];
+
+  try {
+    const searchUrl = `${searxUrl}/search?q=${encodeURIComponent(query)}&format=json&pageno=1`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    const resp = await fetch(searchUrl, {
+      signal: controller.signal,
+      headers: { "Accept": "application/json" },
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) return [];
+    const data = await resp.json() as any;
+    if (!data?.results || !Array.isArray(data.results)) return [];
+
+    const results: SearchResult[] = data.results
+      .slice(0, num)
+      .filter((r: any) => r.url && r.title)
+      .map((r: any) => ({
+        url: r.url as string,
+        title: decodeHtmlEntities(String(r.title).replace(/<[^>]+>/g, "").trim()),
+        snippet: decodeHtmlEntities(String(r.content ?? "").replace(/<[^>]+>/g, "").trim()),
+      }));
+
+    if (results.length > 0) {
+      console.log(`[WEB_SEARCH] Searx: ${results.length} results for "${query.slice(0, 50)}" (engines: ${data.unresponsive_engines?.length ?? 0} down)`);
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+// ─── Official API Integrations ──────────────────────────────────────────────
+
+/**
+ * Detect if a query is code-related and should use official APIs.
+ * Returns the type of API to use, or null if not applicable.
+ *
+ * Official APIs are 100% free, stable, and more precise than scraping:
+ *   - GitHub: for repositories, code, libraries
+ *   - StackOverflow: for "how to", examples, error messages
+ *   - NPM: for npm packages
+ *   - MDN: for web API docs (JavaScript, CSS, HTML)
+ */
+type OfficialApiType = "github" | "stackoverflow" | "npm" | "mdn" | null;
+
+function detectOfficialApi(query: string): OfficialApiType {
+  const q = query.toLowerCase();
+
+  // NPM package: "npm express", "npmjs react", "package lodash"
+  if (/\bnpm\b/.test(q) || q.includes("npmjs") || q.includes("node package")) {
+    return "npm";
+  }
+
+  // MDN: "mdn array.map", "javascript fetch", "css flexbox", "html canvas"
+  if (q.includes("mdn") ||
+      (/\b(javascript|js|typescript|css|html|dom|web api)\b/.test(q) &&
+       !q.includes("roblox") && !q.includes("lua"))) {
+    return "mdn";
+  }
+
+  // StackOverflow: "how to", "error", "exception", "stackoverflow", questions
+  if (q.includes("stackoverflow") ||
+      q.includes("how to") || q.includes("como fazer") ||
+      q.includes("como usar") || q.includes("error ") ||
+      q.includes("exception") || q.includes("undefined is not")) {
+    return "stackoverflow";
+  }
+
+  // GitHub: "github", "repository", "library", "framework"
+  if (q.includes("github") || q.includes("repository") ||
+      q.includes("repositório") || q.includes("library") ||
+      q.includes("biblioteca") || q.includes("framework")) {
+    return "github";
+  }
+
+  return null;
+}
+
+/**
+ * Search GitHub repositories via official API (no auth needed, 60 req/hour).
+ * https://docs.github.com/en/rest/search
+ */
+async function searchGitHubApi(query: string, num: number): Promise<SearchResult[]> {
+  try {
+    // Extract search terms — remove "github", "repository", etc.
+    const searchTerms = query
+      .replace(/\b(github|repository|repositório|library|biblioteca|framework)\b/gi, "")
+      .trim();
+    if (!searchTerms) return [];
+
+    const apiUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(searchTerms)}&sort=stars&order=desc&per_page=${num}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    const resp = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "claude-killer/1.0",
+      },
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) return [];
+    const data = await resp.json() as any;
+    if (!data?.items || !Array.isArray(data.items)) return [];
+
+    const results: SearchResult[] = data.items.slice(0, num).map((r: any) => ({
+      url: r.html_url as string,
+      title: r.full_name as string,
+      snippet: `${r.description ?? ""} ⭐ ${r.stargazers_count ?? 0} stars · ${r.language ?? "N/A"}`,
+    }));
+
+    console.log(`[WEB_SEARCH] GitHub API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Search StackOverflow via official API (no auth needed, unlimited).
+ * https://api.stackexchange.com/docs/search
+ */
+async function searchStackOverflowApi(query: string, num: number): Promise<SearchResult[]> {
+  try {
+    // StackOverflow search: use intitle for title-based search
+    const searchTerms = query
+      .replace(/\b(how to|como fazer|como usar|error|exception|stackoverflow)\b/gi, "")
+      .trim();
+    if (!searchTerms) return [];
+
+    const apiUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=votes&q=${encodeURIComponent(searchTerms)}&site=stackoverflow&pagesize=${num}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    const resp = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: { "Accept": "application/json" },
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) return [];
+    const data = await resp.json() as any;
+    if (!data?.items || !Array.isArray(data.items)) return [];
+
+    const results: SearchResult[] = data.items.slice(0, num).map((r: any) => ({
+      url: r.link as string,
+      title: decodeHtmlEntities(r.title),
+      snippet: `Score: ${r.score} · ${r.answer_count} answers · Tags: ${(r.tags ?? []).slice(0, 5).join(", ")}`,
+    }));
+
+    console.log(`[WEB_SEARCH] StackOverflow API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Search NPM registry for packages (no auth needed, unlimited).
+ * https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md
+ */
+async function searchNpmApi(query: string, num: number): Promise<SearchResult[]> {
+  try {
+    // Extract package name from query
+    const packageName = query
+      .replace(/\b(npm|npmjs|node package|package)\b/gi, "")
+      .trim()
+      .split(/\s+/)[0]; // take first word as package name
+
+    if (!packageName) return [];
+
+    // Try exact package first
+    const exactUrl = `https://registry.npmjs.org/${encodeURIComponent(packageName)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    const resp = await fetch(exactUrl, {
+      signal: controller.signal,
+      headers: { "Accept": "application/json" },
+    });
+    clearTimeout(timer);
+
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      const latest = data["dist-tags"]?.latest;
+      const version = data.versions?.[latest];
+      if (data.name && latest) {
+        return [{
+          url: `https://www.npmjs.com/package/${data.name}`,
+          title: `${data.name} v${latest}`,
+          snippet: `${data.description ?? ""} · License: ${version?.license ?? "N/A"} · Keywords: ${(data.keywords ?? []).slice(0, 5).join(", ")}`,
+        }];
+      }
+    }
+
+    // If exact match fails, use the search endpoint
+    const searchUrl = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${num}`;
+    const controller2 = new AbortController();
+    const timer2 = setTimeout(() => controller2.abort(), SEARCH_TIMEOUT_MS);
+    const resp2 = await fetch(searchUrl, {
+      signal: controller2.signal,
+      headers: { "Accept": "application/json" },
+    });
+    clearTimeout(timer2);
+
+    if (!resp2.ok) return [];
+    const data2 = await resp2.json() as any;
+    if (!data2?.objects) return [];
+
+    const results: SearchResult[] = data2.objects.slice(0, num).map((o: any) => ({
+      url: `https://www.npmjs.com/package/${o.package.name}`,
+      title: `${o.package.name} v${o.package.version}`,
+      snippet: `${o.package.description ?? ""} · Keywords: ${(o.package.keywords ?? []).slice(0, 5).join(", ")}`,
+    }));
+
+    console.log(`[WEB_SEARCH] NPM API: ${results.length} results for "${packageName}"`);
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Search MDN (Mozilla Developer Network) via official API.
+ * Uses the public search endpoint.
+ */
+async function searchMdnApi(query: string, num: number): Promise<SearchResult[]> {
+  try {
+    const searchTerms = query
+      .replace(/\b(mdn|javascript|js|typescript|css|html|dom|web api)\b/gi, "")
+      .trim();
+    if (!searchTerms) return [];
+
+    const apiUrl = `https://developer.mozilla.org/api/v1/search?q=${encodeURIComponent(searchTerms)}&locale=en-US&size=${num}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    const resp = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: { "Accept": "application/json" },
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) return [];
+    const data = await resp.json() as any;
+    if (!data?.documents) return [];
+
+    const results: SearchResult[] = data.documents.slice(0, num).map((d: any) => ({
+      url: d.mdn_url?.startsWith("http") ? d.mdn_url : `https://developer.mozilla.org${d.mdn_url}`,
+      title: d.title,
+      snippet: d.summary ?? "",
+    }));
+
+    console.log(`[WEB_SEARCH] MDN API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Try the appropriate official API based on query type.
+ * Returns empty array if no official API applies or if it fails.
+ */
+async function searchWithOfficialApi(query: string, num: number): Promise<SearchResult[]> {
+  const apiType = detectOfficialApi(query);
+  if (!apiType) return [];
+
+  switch (apiType) {
+    case "github": return searchGitHubApi(query, num);
+    case "stackoverflow": return searchStackOverflowApi(query, num);
+    case "npm": return searchNpmApi(query, num);
+    case "mdn": return searchMdnApi(query, num);
+    default: return [];
+  }
+}
+
 export async function webSearch(query: string, num: number = 5, newsMode?: boolean): Promise<SearchResult[]> {
+  // ════════════════════════════════════════════════════════════════════════
+  // SEARCH PRIORITY (all free, no API keys required):
+  //
+  // 1. Official APIs (GitHub, StackOverflow, NPM, MDN)
+  //    → For code-related queries: 100% stable, 100% free, most precise
+  //    → Only triggers when query matches patterns (e.g., "npm express",
+  //      "how to fix error", "javascript fetch")
+  //
+  // 2. Searx Local (if running)
+  //    → User-installed via `python3 scripts/setup-searx.py`
+  //    → Aggregates Google + Bing + DDG, no rate limits, no blocking
+  //    → Auto-detected on first call (checks localhost:8888 and :8080)
+  //
+  // 3. Bing News (for news queries only)
+  //    → When query contains "news", "latest", "2026", "announcement"
+  //    → AND no anti-keywords ("documentation", "api", "tutorial")
+  //
+  // 4. Bing Web (primary scraping fallback)
+  //    → For general queries and API documentation
+  //
+  // 5. z-ai CLI (only in Super Z environment)
+  //
+  // 6. DuckDuckGo (last resort, often CAPTCHA-blocked)
+  //
+  // 7. GitHub API (old curl-based, kept for backwards compat)
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── Layer 1: Official APIs (highest priority for code queries) ───────────
+  // Only applies when newsMode is not explicitly true (news queries skip this)
+  if (newsMode !== true) {
+    const officialResults = await searchWithOfficialApi(query, num);
+    if (officialResults.length > 0) {
+      return officialResults;
+    }
+  }
+
+  // ── Layer 2: Searx Local (if available) ──────────────────────────────────
+  // Searx aggregates Google + Bing + DDG, giving better quality than scraping.
+  // It's auto-detected — if not running, this is a no-op (skipped after first check).
+  if (newsMode !== true) {  // Searx works for both news and general, but skip for explicit news
+    const searxAvailable = await checkSearxAvailable();
+    if (searxAvailable) {
+      const searxResults = await searchWithSearx(query, num);
+      if (searxResults.length > 0) {
+        return searxResults;
+      }
+    }
+  }
+
   // Determine whether to use Bing News. The `newsMode` parameter lets callers
   // explicitly override the auto-detection:
   //   - newsMode === true  → always use Bing News (even if isNewsQuery is false)
