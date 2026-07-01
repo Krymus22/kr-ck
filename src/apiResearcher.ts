@@ -71,12 +71,12 @@ export interface ResearchError {
 // --- Config -----------------------------------------------------------------
 
 const CACHE_TTL_DAYS = 7;
-const MAX_CONTENT_LENGTH = 8000;  // truncate raw content to keep response size manageable
-const SEARCH_TIMEOUT_MS = 30_000;   // increased from 15s — DuckDuckGo can be slow
-const READ_TIMEOUT_MS = 30_000;     // increased from 20s — some doc pages are heavy
-const MAX_SEARCH_RETRIES = 3;       // retry DuckDuckGo up to 3 times
-const MAX_READ_RETRIES = 2;         // retry page reads up to 2 times
-const RETRY_DELAY_MS = 2000;        // wait 2s between retries
+const MAX_CONTENT_LENGTH = 8000;
+const SEARCH_TIMEOUT_MS = 10_000;   // reduced — fail fast instead of hanging
+const READ_TIMEOUT_MS = 15_000;     // reduced
+const MAX_SEARCH_RETRIES = 2;       // reduced from 3 — 2 attempts is enough
+const MAX_READ_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;        // reduced from 2s — fail faster
 
 // Rotating user agents to avoid rate limiting
 const USER_AGENTS = [
@@ -297,18 +297,27 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
       const ua = USER_AGENTS[attempt % USER_AGENTS.length];
       const bingResult = await runCmd(
         "curl",
-        ["-sL", "-A", ua, "--max-time", "25",
+        ["-sL", "-A", ua, "--max-time", "8",
+         "-H", "Accept: text/html,application/xhtml+xml",
+         "-H", "Accept-Language: en-US,en;q=0.9",
          `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${num}&setlang=en`],
         SEARCH_TIMEOUT_MS
       );
       if (bingResult.ok && bingResult.stdout) {
         const results = parseBingResults(bingResult.stdout, num);
-        if (results.length > 0) return results;
+        if (results.length > 0) {
+          console.log(`[WEB_SEARCH] Bing: ${results.length} results for "${query.slice(0, 50)}"`);
+          return results;
+        }
+        console.log(`[WEB_SEARCH] Bing attempt ${attempt+1}: 0 results (HTML size: ${bingResult.stdout.length})`);
+      } else {
+        console.log(`[WEB_SEARCH] Bing attempt ${attempt+1}: curl failed (ok=${bingResult.ok})`);
       }
       if (attempt < MAX_SEARCH_RETRIES - 1) {
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
-    } catch {
+    } catch (err) {
+      console.log(`[WEB_SEARCH] Bing attempt ${attempt+1}: error ${(err as Error).message?.slice(0, 80)}`);
       if (attempt < MAX_SEARCH_RETRIES - 1) {
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
       }
@@ -340,16 +349,20 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
   }
 
   // Fallback 2: DuckDuckGo (often blocked by CAPTCHA, last resort)
-  for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
-    try {
-      const ua = USER_AGENTS[attempt % USER_AGENTS.length];
-      const ddgResult = await runCmd(
-        "curl",
-        ["-sL", "-A", ua, "--max-time", "25",
-         `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
-        SEARCH_TIMEOUT_MS
-      );
-      if (ddgResult.ok && ddgResult.stdout) {
+  // Only try ONCE — if DDG blocks, retrying won't help
+  try {
+    const ua = USER_AGENTS[0];
+    const ddgResult = await runCmd(
+      "curl",
+      ["-sL", "-A", ua, "--max-time", "8",
+       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
+      SEARCH_TIMEOUT_MS
+    );
+    if (ddgResult.ok && ddgResult.stdout) {
+      // Check for CAPTCHA
+      if (ddgResult.stdout.includes("anomaly-modal") || ddgResult.stdout.includes("Unfortunately, bots")) {
+        console.log("[WEB_SEARCH] DuckDuckGo: CAPTCHA detected, skipping");
+      } else {
         const results: SearchResult[] = [];
         const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
         const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
@@ -369,16 +382,14 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
           results.push({ url, title, snippet: snippets[i] ?? "" });
           i++;
         }
-        if (results.length > 0) return results;
-      }
-      if (attempt < MAX_SEARCH_RETRIES - 1) {
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-      }
-    } catch {
-      if (attempt < MAX_SEARCH_RETRIES - 1) {
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        if (results.length > 0) {
+          console.log(`[WEB_SEARCH] DuckDuckGo: ${results.length} results`);
+          return results;
+        }
       }
     }
+  } catch {
+    // DuckDuckGo unavailable
   }
 
   // Fallback 3: GitHub search API for code-related queries
