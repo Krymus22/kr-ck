@@ -752,6 +752,23 @@ async function consumeStream(
 
 function buildChatResponse(state: StreamState): ChatResponse {
   const toolCallsList = Object.values(state.toolCallsAccumulator);
+
+  // CRITICAL: Strip <think>...</think> tags from content.
+  // Some models (Kimi K2.6) embed reasoning as <think> tags inside delta.content
+  // instead of using delta.reasoning_content. This leaks internal reasoning into
+  // the conversation, causing confusion, repetition loops, and bad tool calls.
+  let content = state.totalContent || null;
+  if (content) {
+    // Remove complete <think>...</think> blocks
+    content = content.replace(/<think>[\s\S]*?<\/think>/gi, "");
+    // Remove unclosed <think> blocks (model still generating reasoning when stream ended)
+    content = content.replace(/<think>[\s\S]*$/gi, "");
+    // Remove stray </think> tags
+    content = content.replace(/<\/think>/gi, "");
+    content = content.trim();
+    if (!content) content = null;
+  }
+
   return {
     id: state.responseId,
     object: "chat.completion",
@@ -762,7 +779,7 @@ function buildChatResponse(state: StreamState): ChatResponse {
         index: 0,
         message: {
           role: "assistant",
-          content: state.totalContent || null,
+          content: content,
           tool_calls: toolCallsList.length > 0 ? toolCallsList : undefined,
           refusal: null,
         },
