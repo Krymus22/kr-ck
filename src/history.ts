@@ -265,7 +265,9 @@ export function getCavemanLevel(): string | null {
  */
 export function getSystemPrompt(): string {
   const skills = getActiveSkills();
-  let basePrompt = BASE_SYSTEM_PROMPT;
+  // Inject current date dynamically (so long-running sessions stay accurate)
+  const today = new Date().toISOString().split("T")[0];
+  let basePrompt = `## Current Date\n\nToday is ${today}. Always use this date when referencing current events, API versions, or searching the web. Your training data may be outdated — verify with buscar_web() before assuming API details.\n\n${BASE_SYSTEM_PROMPT}`;
 
   // IDEIA 4: Append effort-level instructions (Low/Medium/High/Max)
   const effortSnippet = getEffortPromptSnippet();
