@@ -225,54 +225,60 @@ interface SearchResult {
  * puts results in <li class="b_algo"> blocks with <h2><a> for title/link
  * and <p> for snippet.
  */
-function parseBingResults(html: string, num: number): SearchResult[] {
+function parseBingResults(htmlRaw: string, num: number): SearchResult[] {
   const results: SearchResult[] = [];
 
-  // Split by b_algo blocks — each result is in <li class="b_algo">
+  // CRITICAL: Bing returns HTML entities (&amp; instead of &).
+  // Must decode BEFORE parsing, otherwise regex for "u=a1" won't match
+  // because the raw HTML has "&amp;u=a1".
+  const html = htmlRaw
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'");
+
+  // Split by b_algo blocks
   const algoBlocks = html.split(/class="b_algo"/).slice(1);
 
   for (const block of algoBlocks) {
     if (results.length >= num) break;
 
-    // Extract URL: Bing encodes real URL in base64 after &u=a1
-    const urlMatch = block.match(/href="https:\/\/www\.bing\.com\/ck\/a\?[^"]*u=a1([^&"]+)/);
+    // Extract URL: Bing encodes real URL in base64url after &u=a1
+    // Note: Bing uses base64URL (with - and _) not standard base64 (with + and /)
+    const urlMatch = block.match(/u=a1([A-Za-z0-9+/=_-]+)/);
     if (!urlMatch) continue;
+
     let url = "";
     try {
-      // Bing base64: add padding if needed
-      const encoded = urlMatch[1];
-      const padded = encoded + "===".slice((encoded.length + 3) % 4);
-      url = Buffer.from(padded, "base64").toString("utf8");
+      let encoded = urlMatch[1];
+      // Convert base64url to standard base64
+      encoded = encoded.replace(/-/g, "+").replace(/_/g, "/");
+      // Add padding
+      const padding = 4 - (encoded.length % 4);
+      if (padding !== 4) encoded += "=".repeat(padding);
+      url = Buffer.from(encoded, "base64").toString("utf8");
     } catch {
       continue;
     }
     // Skip Bing internal links
     if (!url.startsWith("http") || url.includes("bing.com/")) continue;
 
-    // Extract title: text inside <h2><a ...>TITLE</a></h2>
-    const titleMatch = block.match(/<h2><a[^>]*>([\s\S]*?)<\/a><\/h2>/);
+    // Extract title: <h2 ...><a ...>TITLE</a></h2>
+    const titleMatch = block.match(/<h2[^>]*><a[^>]*>([\s\S]*?)<\/a><\/h2>/);
     if (!titleMatch) continue;
     const title = titleMatch[1]
       .replace(/<[^>]+>/g, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
       .trim();
     if (!title) continue;
 
-    // Extract snippet: text in <p> after the title
+    // Extract snippet: <p> after the title
     const snippetMatch = block.match(/<p[^>]*>([\s\S]*?)<\/p>/);
     let snippet = "";
     if (snippetMatch) {
       snippet = snippetMatch[1]
         .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
         .replace(/&nbsp;/g, " ")
         .replace(/\s+/g, " ")
         .trim();
