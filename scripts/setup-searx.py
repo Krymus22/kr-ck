@@ -170,6 +170,7 @@ def stop_searx():
 
 def main():
     args = sys.argv[1:]
+    non_interactive = "--yes" in args or "-y" in args
 
     if "--check" in args:
         if is_searx_running():
@@ -188,6 +189,40 @@ def main():
     elif "--stop" in args:
         stop_searx()
         sys.exit(0)
+
+    elif "--install" in args or non_interactive:
+        # Non-interactive install mode (used by npm postinstall)
+        # No prompts — installs and starts automatically
+        print("=" * 60)
+        print("  Claude-Killer — Searx Local Search Setup (auto)")
+        print("=" * 60)
+
+        if is_searx_running():
+            print(f"\n✅ Searx is already running at {SEARX_URL}")
+            sys.exit(0)
+
+        if is_searx_installed():
+            print("\n📦 Searx already installed. Starting...")
+            if start_searx():
+                print("\n✅ Searx started successfully.")
+                sys.exit(0)
+            else:
+                print("\n⚠️  Searx installed but failed to start. Will use Bing fallback.")
+                sys.exit(0)  # Don't fail npm install
+
+        # Install
+        print(f"\nInstall location: {SEARX_DIR}")
+        print("Disk usage: ~200MB | RAM: ~50-100MB | Requirements: Python 3.8+, git")
+        print()
+        if install_searx():
+            print("\n🚀 Starting Searx...")
+            start_searx()
+            print("\n✅ Searx installed and started.")
+            print("   Claude-Killer will use it automatically on next launch.")
+            sys.exit(0)
+        else:
+            print("\n⚠️  Searx installation failed. Claude-Killer will use Bing fallback.")
+            sys.exit(0)  # Don't fail npm install — Searx is optional
 
     else:
         # Interactive

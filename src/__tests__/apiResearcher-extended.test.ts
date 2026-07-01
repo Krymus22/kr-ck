@@ -197,7 +197,10 @@ describe("apiResearcher (extended)", () => {
 
       if (!("error" in result)) return; // Bing may return results in CI
       if ("error" in result) {
-        expect(result.error).toMatch(/No search results/i);
+        // Either "No search results" (Bing returned nothing) or
+        // "Could not extract content" (Bing returned results but none readable)
+        // Both are valid error responses — the test just verifies an error is returned.
+        expect(result.error).toMatch(/No search results|Could not extract/i);
         expect(result.apiName).toBe("NonExistentAPI12345");
       }
     });
