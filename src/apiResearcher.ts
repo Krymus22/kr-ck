@@ -178,6 +178,75 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Comprehensive HTML entity decoder.
+ * Handles:
+ *   - Named entities: &amp; &lt; &gt; &quot; &nbsp; &apos; &ccedil; &aacute; etc.
+ *   - Numeric decimal entities: &#231; (ç) &#227; (ã) &#233; (é) etc.
+ *   - Numeric hex entities: &#xE7; &#xE3; &#xE9; etc.
+ *
+ * This replaces the previous incomplete decoder that only handled a handful
+ * of entities, causing bugs like "Fa&#231;a" appearing instead of "Faça".
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  // Basic
+  "amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'",
+  "nbsp": " ", "copy": "©", "reg": "®", "trade": "™", "mdash": "—",
+  "ndash": "–", "hellip": "…", "laquo": "«", "raquo": "»",
+  // Accented chars (Latin-1 Supplement)
+  "agrave": "à", "aacute": "á", "acirc": "â", "atilde": "ã", "auml": "ä",
+  "aring": "å", "aelig": "æ", "ccedil": "ç",
+  "egrave": "è", "eacute": "é", "ecirc": "ê", "euml": "ë",
+  "igrave": "ì", "iacute": "í", "icirc": "î", "iuml": "ï",
+  "ntilde": "ñ",
+  "ograve": "ò", "oacute": "ó", "ocirc": "ô", "otilde": "õ", "ouml": "ö",
+  "ugrave": "ù", "uacute": "ú", "ucirc": "û", "uuml": "ü",
+  "yacute": "ý", "yuml": "ÿ",
+  // Uppercase accented
+  "Agrave": "À", "Aacute": "Á", "Acirc": "Â", "Atilde": "Ã", "Auml": "Ä",
+  "Ccedil": "Ç",
+  "Egrave": "È", "Eacute": "É", "Ecirc": "Ê", "Euml": "Ë",
+  "Iacute": "Í",
+  "Ntilde": "Ñ",
+  "Oacute": "Ó", "Otilde": "Õ",
+  "Uacute": "Ú",
+  // Symbols
+  "deg": "°", "plusmn": "±", "times": "×", "divide": "÷",
+  "euro": "€", "pound": "£", "cent": "¢", "yen": "¥",
+  "bull": "•", "dagger": "†", "Dagger": "‡",
+  "permil": "‰", "prime": "′", "Prime": "″",
+  "lsaquo": "‹", "rsaquo": "›",
+  "infin": "∞", "ne": "≠", "le": "≤", "ge": "≥",
+  "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ",
+  "pi": "π", "Sigma": "Σ", "sum": "∑",
+};
+
+function decodeHtmlEntities(text: string): string {
+  if (!text || !text.includes("&")) return text;
+
+  return text
+    // Numeric decimal entities: &#NNN;
+    .replace(/&#(\d{1,7});/g, (_, dec) => {
+      try {
+        const code = parseInt(dec, 10);
+        if (code > 0 && code <= 0x10FFFF) return String.fromCodePoint(code);
+      } catch { /* ignore */ }
+      return "";
+    })
+    // Numeric hex entities: &#xHH; or &#XHH;
+    .replace(/&#[xX]([0-9a-fA-F]{1,6});/g, (_, hex) => {
+      try {
+        const code = parseInt(hex, 16);
+        if (code > 0 && code <= 0x10FFFF) return String.fromCodePoint(code);
+      } catch { /* ignore */ }
+      return "";
+    })
+    // Named entities: &name;
+    .replace(/&(\w{2,15});/g, (full, name) => {
+      return NAMED_ENTITIES[name] ?? full;
+    });
+}
+
 /** Fetch URL using Node.js native fetch (no curl dependency). */
 async function fetchUrl(url: string, timeoutMs: number = 10000): Promise<{ ok: boolean; text: string; status: number }> {
   try {
@@ -253,13 +322,10 @@ function parseBingResults(htmlRaw: string, num: number): SearchResult[] {
   // CRITICAL: Bing returns HTML entities (&amp; instead of &).
   // Must decode BEFORE parsing, otherwise regex for "u=a1" won't match
   // because the raw HTML has "&amp;u=a1".
-  const html = htmlRaw
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'");
+  // Use comprehensive decoder that handles ALL entity types (named, numeric
+  // decimal, numeric hex) — the old decoder missed numeric entities like
+  // &#231; (ç), causing "Fa&#231;a" to appear instead of "Faça".
+  const html = decodeHtmlEntities(htmlRaw);
 
   // Split by b_algo blocks
   const algoBlocks = html.split(/class="b_algo"/).slice(1);
@@ -459,22 +525,73 @@ function extractTextFromHtml(html: string): string {
   if (!content) content = html;
 
   // Strip scripts, styles, and HTML tags
-  return content
+  let text = content
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
     .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
     .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
     .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, "")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&nbsp;/g, " ");
+  // Comprehensive entity decoding (numeric + named, handles ç ã é etc.)
+  text = decodeHtmlEntities(text);
+  text = text.replace(/\s+/g, " ").trim();
+
+  // If extracted text is too short (JS-rendered SPA with minimal HTML),
+  // try meta tags as fallback. Many news sites (g1.com.br, interestingengineering.com)
+  // render content via JS and only have meta description in the static HTML.
+  if (text.length < 100) {
+    const metaFallback = extractMetaTags(html);
+    if (metaFallback.length > text.length) {
+      return metaFallback;
+    }
+  }
+
+  // Last resort: collect all <p> tags from the full HTML
+  if (text.length < 100) {
+    const paragraphs = html.match(/<p[^>]*>[\s\S]*?<\/p>/gi) ?? [];
+    if (paragraphs.length > 0) {
+      const pText = paragraphs
+        .map(p => p.replace(/<[^>]+>/g, " "))
+        .map(p => decodeHtmlEntities(p))
+        .map(p => p.replace(/\s+/g, " ").trim())
+        .filter(p => p.length > 30)
+        .join(" ");
+      if (pText.length > text.length) return pText;
+    }
+  }
+
+  return text;
+}
+
+/**
+ * Extract text from HTML meta tags (og:description, description, twitter:description).
+ * Used as fallback for JS-rendered sites that have minimal static HTML.
+ */
+function extractMetaTags(html: string): string {
+  const tags: string[] = [];
+
+  // og:description
+  const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
+  if (ogDesc?.[1]) tags.push(decodeHtmlEntities(ogDesc[1]));
+
+  // meta description
+  const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
+  if (metaDesc?.[1]) tags.push(decodeHtmlEntities(metaDesc[1]));
+
+  // twitter:description
+  const twDesc = html.match(/<meta[^>]+name=["']twitter:description["'][^>]+content=["']([^"']+)["']/i);
+  if (twDesc?.[1]) tags.push(decodeHtmlEntities(twDesc[1]));
+
+  // og:title as a last resort
+  const ogTitle = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+  if (ogTitle?.[1]) tags.push(decodeHtmlEntities(ogTitle[1]));
+
+  // <title> tag
+  const titleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  if (titleTag?.[1]) tags.push(decodeHtmlEntities(titleTag[1]));
+
+  return tags.join(" ").trim();
 }
 
 /**
