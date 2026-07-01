@@ -178,6 +178,28 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/** Fetch URL using Node.js native fetch (no curl dependency). */
+async function fetchUrl(url: string, timeoutMs: number = 10000): Promise<{ ok: boolean; text: string; status: number }> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)],
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+    });
+    clearTimeout(timer);
+    const text = await response.text();
+    return { ok: response.ok, text, status: response.status };
+  } catch (err: any) {
+    return { ok: false, text: "", status: 0 };
+  }
+}
+
 /** Run a shell command with timeout. Returns {ok, stdout, stderr}. */
 function runCmd(
   command: string,
@@ -291,32 +313,25 @@ function parseBingResults(htmlRaw: string, num: number): SearchResult[] {
 }
 
 export async function webSearch(query: string, num: number = 5): Promise<SearchResult[]> {
-  // PRIMARY: Bing search (no API key, no CAPTCHA, works on any machine with curl)
+  // PRIMARY: Bing search via native fetch (no curl dependency, works on Windows + Linux + Mac)
   for (let attempt = 0; attempt < MAX_SEARCH_RETRIES; attempt++) {
     try {
-      const ua = USER_AGENTS[attempt % USER_AGENTS.length];
-      const bingResult = await runCmd(
-        "curl",
-        ["-sL", "-A", ua, "--max-time", "8",
-         "-H", "Accept: text/html,application/xhtml+xml",
-         "-H", "Accept-Language: en-US,en;q=0.9",
-         `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${num}&setlang=en`],
-        SEARCH_TIMEOUT_MS
-      );
-      if (bingResult.ok && bingResult.stdout) {
-        const results = parseBingResults(bingResult.stdout, num);
+      const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${num}&setlang=en`;
+      const bingResult = await fetchUrl(searchUrl, SEARCH_TIMEOUT_MS);
+      if (bingResult.ok && bingResult.text) {
+        const results = parseBingResults(bingResult.text, num);
         if (results.length > 0) {
           console.log(`[WEB_SEARCH] Bing: ${results.length} results for "${query.slice(0, 50)}"`);
           return results;
         }
-        // DEBUG: save HTML when parse fails — helps diagnose region differences
+        // DEBUG: save HTML when parse fails
         try {
           const debugFile = path.join(os.tmpdir(), `claude-killer-bing-debug-${Date.now()}.html`);
-          fs.writeFileSync(debugFile, bingResult.stdout.slice(0, 50000));
-          console.log(`[WEB_SEARCH] Bing: 0 results. HTML saved to ${debugFile} (${bingResult.stdout.length} bytes, b_algo: ${(bingResult.stdout.match(/class="b_algo"/g) || []).length})`);
+          fs.writeFileSync(debugFile, bingResult.text.slice(0, 50000));
+          console.log(`[WEB_SEARCH] Bing: 0 results. HTML saved to ${debugFile} (${bingResult.text.length} bytes, b_algo: ${(bingResult.text.match(/class="b_algo"/g) || []).length})`);
         } catch { /* ignore */ }
       } else {
-        console.log(`[WEB_SEARCH] Bing attempt ${attempt+1}: curl failed (ok=${bingResult.ok}, stderr: ${bingResult.stderr?.slice(0, 100)})`);
+        console.log(`[WEB_SEARCH] Bing attempt ${attempt+1}: fetch failed (ok=${bingResult.ok}, status=${bingResult.status})`);
       }
       if (attempt < MAX_SEARCH_RETRIES - 1) {
         await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
@@ -353,19 +368,14 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
     // z-ai CLI not available, fall through
   }
 
-  // Fallback 2: DuckDuckGo (often blocked by CAPTCHA, last resort)
-  // Only try ONCE — if DDG blocks, retrying won't help
+  // Fallback 2: DuckDuckGo via native fetch (last resort)
   try {
-    const ua = USER_AGENTS[0];
-    const ddgResult = await runCmd(
-      "curl",
-      ["-sL", "-A", ua, "--max-time", "8",
-       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`],
+    const ddgResult = await fetchUrl(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
       SEARCH_TIMEOUT_MS
     );
-    if (ddgResult.ok && ddgResult.stdout) {
-      // Check for CAPTCHA
-      if (ddgResult.stdout.includes("anomaly-modal") || ddgResult.stdout.includes("Unfortunately, bots")) {
+    if (ddgResult.ok && ddgResult.text) {
+      if (ddgResult.text.includes("anomaly-modal") || ddgResult.text.includes("Unfortunately, bots")) {
         console.log("[WEB_SEARCH] DuckDuckGo: CAPTCHA detected, skipping");
       } else {
         const results: SearchResult[] = [];
@@ -373,12 +383,12 @@ export async function webSearch(query: string, num: number = 5): Promise<SearchR
         const snippetRegex = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
         const snippets: string[] = [];
         let sm;
-        while ((sm = snippetRegex.exec(ddgResult.stdout)) !== null) {
+        while ((sm = snippetRegex.exec(ddgResult.text)) !== null) {
           snippets.push(sm[1].replace(/<[^>]+>/g, "").trim());
         }
         let m;
         let i = 0;
-        while ((m = linkRegex.exec(ddgResult.stdout)) !== null && i < num) {
+        while ((m = linkRegex.exec(ddgResult.text)) !== null && i < num) {
           let url = m[1];
           const uddgMatch = url.match(/uddg=([^&]+)/);
           if (uddgMatch) url = decodeURIComponent(uddgMatch[1]);
@@ -505,20 +515,12 @@ export async function webRead(url: string): Promise<string> {
     if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   } catch { /* z-ai not available */ }
 
-  // Primary: curl with retry, better headers, and content extraction
+  // Primary: native fetch with retry and content extraction
   for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {
     try {
-      const ua = USER_AGENTS[attempt % USER_AGENTS.length];
-      const curlResult = await runCmd(
-        "curl",
-        ["-sL", "-A", ua,
-         "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-         "-H", "Accept-Language: en-US,en;q=0.9",
-         "--max-time", "25", url],
-        READ_TIMEOUT_MS
-      );
-      if (curlResult.ok && curlResult.stdout) {
-        const text = extractTextFromHtml(curlResult.stdout);
+      const pageResult = await fetchUrl(url, READ_TIMEOUT_MS);
+      if (pageResult.ok && pageResult.text) {
+        const text = extractTextFromHtml(pageResult.text);
         if (text.length > 100) return text.slice(0, MAX_CONTENT_LENGTH);
       }
       if (attempt < MAX_READ_RETRIES - 1) {
@@ -535,15 +537,9 @@ export async function webRead(url: string): Promise<string> {
   const mdUrl = tryMarkdownUrl(url);
   if (mdUrl && mdUrl !== url) {
     try {
-      const ua = USER_AGENTS[0];
-      const mdResult = await runCmd(
-        "curl",
-        ["-sL", "-A", ua, "--max-time", "20", mdUrl],
-        READ_TIMEOUT_MS
-      );
-      if (mdResult.ok && mdResult.stdout && mdResult.stdout.length > 100) {
-        // Markdown is already plain text — return as-is
-        return mdResult.stdout.slice(0, MAX_CONTENT_LENGTH);
+      const mdResult = await fetchUrl(mdUrl, READ_TIMEOUT_MS);
+      if (mdResult.ok && mdResult.text && mdResult.text.length > 100) {
+        return mdResult.text.slice(0, MAX_CONTENT_LENGTH);
       }
     } catch { /* .md not available */ }
   }
