@@ -23,6 +23,8 @@
  */
 
 import type { Message } from "./history.js";
+import { chat } from "./apiClient.js";
+import { config } from "./config.js";
 
 /**
  * Compact a list of messages into an intelligent summary using the LLM.
@@ -52,9 +54,6 @@ export async function llmCompact(
   const summarizationPrompt = buildSummarizationPrompt(conversationText, customInstruction);
 
   try {
-    // Use the same API client the agent uses
-    const { chat } = await import("./apiClient.js");
-
     const response = await chat(
       summarizationPrompt,
       undefined, // onStreamStart
@@ -188,8 +187,6 @@ Generate the summary now:`;
  */
 export async function isLlmCompactionAvailable(): Promise<boolean> {
   try {
-    // Check if API key is configured
-    const { config } = await import("./config.js");
     return !!(config.nvidiaApiKey || process.env.NVIDIA_API_KEY || config.nvidiaApiKeys);
   } catch {
     return false;

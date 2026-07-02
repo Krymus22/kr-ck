@@ -764,6 +764,8 @@ async function searchNpmApi(query: string, num: number): Promise<SearchResult[]>
       const latest = data["dist-tags"]?.latest;
       const version = data.versions?.[latest];
       if (data.name && latest) {
+        lastSearchSource = "Official API (npm)";
+        console.log(`[WEB_SEARCH] NPM API: 1 result (exact) for "${packageName}"`);
         return [{
           url: `https://www.npmjs.com/package/${data.name}`,
           title: `${data.name} v${latest}`,
