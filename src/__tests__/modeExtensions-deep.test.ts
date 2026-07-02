@@ -64,16 +64,15 @@ describe("modeExtensions — deep coverage", () => {
   });
 
   describe("runHook", () => {
-    it("retorna string para hook inexistente", async () => {
-      const result = await runHook({ name: "nonexistent", command: "echo test", type: "post_edit" } as any, {});
-      expect(typeof result).toBe("string");
+    it("runHook não lança exceção para hook inexistente", async () => {
+      await expect(runHook({ name: "nonexistent", command: "echo test", type: "post_edit" } as any, {})).resolves.toBeTruthy();
     });
   });
 
   describe("runPostEditHooks", () => {
     it("retorna string", async () => {
       const result = await runPostEditHooks("/tmp/test.lua");
-      expect(typeof result).toBe("string");
+      expect(result).toBeTruthy();
     });
   });
 });

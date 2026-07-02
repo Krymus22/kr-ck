@@ -19,7 +19,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição de substituição simples", () => {
       const content = "hello world";
       const result = applyEdits(content, [
-        { oldText: "hello", newText: "goodbye" },
+        { search: "hello", replace: "goodbye" },
       ]);
       expect(result.content).toBe("goodbye world");
       expect(result.success).toBe(true);
@@ -28,9 +28,9 @@ describe("fileEdit — deep coverage", () => {
     it("aplica múltiplas edições", () => {
       const content = "foo bar baz";
       const result = applyEdits(content, [
-        { oldText: "foo", newText: "FOO" },
-        { oldText: "bar", newText: "BAR" },
-        { oldText: "baz", newText: "BAZ" },
+        { search: "foo", replace: "FOO" },
+        { search: "bar", replace: "BAR" },
+        { search: "baz", replace: "BAZ" },
       ]);
       expect(result.content).toBe("FOO BAR BAZ");
     });
@@ -38,7 +38,7 @@ describe("fileEdit — deep coverage", () => {
     it("retorna success=false quando oldText não encontrado", () => {
       const content = "hello world";
       const result = applyEdits(content, [
-        { oldText: "nonexistent", newText: "replacement" },
+        { search: "nonexistent", replace: "replacement" },
       ]);
       expect(result.success).toBe(false);
     });
@@ -52,7 +52,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição que adiciona conteúdo no final", () => {
       const content = "line1\nline2";
       const result = applyEdits(content, [
-        { oldText: "line2", newText: "line2\nline3" },
+        { search: "line2", replace: "line2\nline3" },
       ]);
       expect(result.content).toBe("line1\nline2\nline3");
     });
@@ -60,7 +60,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição que remove conteúdo", () => {
       const content = "keep this\nremove this\nkeep this too";
       const result = applyEdits(content, [
-        { oldText: "remove this\n", newText: "" },
+        { search: "remove this\n", replace: "" },
       ]);
       expect(result.content).toBe("keep this\nkeep this too");
     });
@@ -68,7 +68,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição com texto multilinha", () => {
       const content = "function foo()\n  return 1\nend";
       const result = applyEdits(content, [
-        { oldText: "function foo()\n  return 1\nend", newText: "function foo()\n  return 2\nend" },
+        { search: "function foo()\n  return 1\nend", replace: "function foo()\n  return 2\nend" },
       ]);
       expect(result.content).toContain("return 2");
     });
@@ -76,7 +76,7 @@ describe("fileEdit — deep coverage", () => {
     it("não aplica edição quando oldText é string vazia", () => {
       const content = "hello";
       const result = applyEdits(content, [
-        { oldText: "", newText: "prefix" },
+        { search: "", replace: "prefix" },
       ]);
       // Comportamento: pode aplicar no início ou ignorar
       expect(typeof result.content).toBe("string");
@@ -85,7 +85,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição com caracteres especiais", () => {
       const content = "local x = 'hello'";
       const result = applyEdits(content, [
-        { oldText: "'hello'", newText: '"world"' },
+        { search: "'hello'", replace: '"world"' },
       ]);
       expect(result.content).toBe('local x = "world"');
     });
@@ -93,7 +93,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição com quebras de linha Windows (CRLF)", () => {
       const content = "line1\r\nline2";
       const result = applyEdits(content, [
-        { oldText: "line1", newText: "LINE1" },
+        { search: "line1", replace: "LINE1" },
       ]);
       expect(result.content).toContain("LINE1");
     });
@@ -101,7 +101,7 @@ describe("fileEdit — deep coverage", () => {
     it("aplica edição com tabs", () => {
       const content = "\tindented code";
       const result = applyEdits(content, [
-        { oldText: "\tindented", newText: "  indented" },
+        { search: "\tindented", replace: "  indented" },
       ]);
       expect(result.content).toContain("  indented");
     });
@@ -109,11 +109,11 @@ describe("fileEdit — deep coverage", () => {
     it("aplica múltiplas edições sequenciais", () => {
       const content = "a b c d e";
       const result = applyEdits(content, [
-        { oldText: "a", newText: "A" },
-        { oldText: "b", newText: "B" },
-        { oldText: "c", newText: "C" },
-        { oldText: "d", newText: "D" },
-        { oldText: "e", newText: "E" },
+        { search: "a", replace: "A" },
+        { search: "b", replace: "B" },
+        { search: "c", replace: "C" },
+        { search: "d", replace: "D" },
+        { search: "e", replace: "E" },
       ]);
       expect(result.content).toBe("A B C D E");
     });
