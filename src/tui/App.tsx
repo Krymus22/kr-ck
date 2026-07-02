@@ -378,8 +378,21 @@ function handleLangCommand(arg: string | null): CommandResult {
 }
 
 function handleSearxCommand(arg: string | null): CommandResult {
-  const { getSearxStatus } = require("../searxManager.js") as typeof import("../searxManager.js");
-  const status = getSearxStatus();
+  let status: { installed: boolean; running: boolean; weStarted: boolean; pid: number | null; url: string; dir: string };
+  try {
+    const { getSearxStatus } = require("../searxManager.js") as typeof import("../searxManager.js");
+    status = getSearxStatus();
+  } catch (err) {
+    // If searxManager fails to load or getSearxStatus throws (e.g.,
+    // execSync for netstat/lsof fails on some Windows configs), don't
+    // crash the entire CLI — return a safe status.
+    return {
+      handled: true,
+      message: `Searx: erro ao verificar status (${(err as Error).message}).\n` +
+        `O Searx é opcional — a busca funciona via Bing como fallback.\n` +
+        `Para instalar: python3 scripts/setup-searx.py`,
+    };
+  }
 
   if (!arg || arg === "status") {
     const lines = [
@@ -979,7 +992,19 @@ export function App() {
   }, []);
 
   const handleSlashCommandFlow = useCallback((trimmed: string): boolean => {
-    const result = handleSlashCommand(trimmed);
+    let result: CommandResult;
+    try {
+      result = handleSlashCommand(trimmed);
+    } catch (err) {
+      // SAFETY NET: any slash command that throws (e.g., /searx calling
+      // execSync that fails on some Windows configs) should NOT crash
+      // the entire CLI. Show the error as a system message instead.
+      const errMsg = (err as Error).message ?? String(err);
+      setSystemMessages((prev) => [...prev, `Erro no comando "${trimmed}": ${errMsg}`]);
+      isProcessing.current = false;
+      setStatus("idle");
+      return true;
+    }
     if (result.exit) {
       exit();
       return true;

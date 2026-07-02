@@ -14,7 +14,7 @@
  * quality results when available.
  */
 
-import { spawn, execSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -63,24 +63,47 @@ export async function isSearxRunning(): Promise<boolean> {
 /**
  * Check if a Searx process is already running by looking for the port.
  * Uses OS-native commands (lsof on Unix, netstat on Windows).
+ *
+ * ROBUSTNESS: uses spawnSync instead of execSync to avoid shell pipe
+ * issues on some Windows configs. All errors are caught — if the check
+ * fails for any reason, returns false (Searx not running).
  */
 function isSearxProcessRunning(): boolean {
   try {
     if (platform() === "win32") {
-      const out = execSync(`netstat -ano | findstr :${SEARX_PORT}`, {
+      // Windows: use netstat without pipe (more reliable than piped findstr)
+      // spawnSync avoids shell interpretation issues that execSync has
+      const result = spawnSync("netstat", ["-ano"], {
         encoding: "utf8",
         timeout: 3000,
         stdio: ["ignore", "pipe", "ignore"],
+        shell: false,  // don't use shell — avoids pipe/quoting issues
       });
-      return out.includes(`:${SEARX_PORT}`);
+      if (result.status !== 0 || !result.stdout) return false;
+      return result.stdout.includes(`:${SEARX_PORT}`);
     } else {
       // Unix: check if anything is listening on the port
-      execSync(`lsof -i :${SEARX_PORT} -t`, {
+      // Try lsof first, fall back to ss (common on modern Linux)
+      const lsofResult = spawnSync("lsof", ["-i", `:${SEARX_PORT}`, "-t"], {
         encoding: "utf8",
         timeout: 3000,
         stdio: ["ignore", "pipe", "ignore"],
+        shell: false,
       });
-      return true;
+      if (lsofResult.status === 0 && lsofResult.stdout.trim().length > 0) {
+        return true;
+      }
+      // Fallback: ss (iproute2, common on modern Linux)
+      const ssResult = spawnSync("ss", ["-tlnp", `sport = :${SEARX_PORT}`], {
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["ignore", "pipe", "ignore"],
+        shell: false,
+      });
+      if (ssResult.status === 0 && ssResult.stdout.includes(`:${SEARX_PORT}`)) {
+        return true;
+      }
+      return false;
     }
   } catch {
     return false;
@@ -158,7 +181,11 @@ export function autoStopSearx(): void {
   try {
     // Kill the process group (Searx may spawn child processes)
     if (platform() === "win32") {
-      execSync(`taskkill /PID ${searxPid} /T /F`, { stdio: "ignore" });
+      spawnSync("taskkill", ["/PID", String(searxPid), "/T", "/F"], {
+        stdio: "ignore",
+        shell: false,
+        timeout: 5000,
+      });
     } else {
       // Send SIGTERM to the process group (negative PID)
       try {
