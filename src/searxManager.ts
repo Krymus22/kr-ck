@@ -21,7 +21,11 @@ import os from "node:os";
 import { platform } from "node:os";
 
 const SEARX_DIR = path.join(os.homedir(), ".claude-killer", "searxng");
-const SEARX_VENV_PYTHON = path.join(SEARX_DIR, ".venv", "bin", "python");
+// Windows venv puts python at .venv/Scripts/python.exe
+// Unix venv puts python at .venv/bin/python
+const SEARX_VENV_PYTHON = platform() === "win32"
+  ? path.join(SEARX_DIR, ".venv", "Scripts", "python.exe")
+  : path.join(SEARX_DIR, ".venv", "bin", "python");
 const SEARX_SETTINGS = path.join(SEARX_DIR, "settings.yml");
 const SEARX_LOG = path.join(SEARX_DIR, "searx.log");
 const SEARX_PORT = 8888;
