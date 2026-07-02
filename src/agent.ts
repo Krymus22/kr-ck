@@ -412,17 +412,18 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
     const maxResults = (args.maxResults as number) ?? 5;
     try {
-      const { webSearch } = await import("./apiResearcher.js");
+      const { webSearch, getLastSearchSource } = await import("./apiResearcher.js");
       const startTime = Date.now();
       const results = await webSearch(query, maxResults);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const source = getLastSearchSource();
       if (results.length === 0) {
-        return { resultStr: `[INFO] Nenhum resultado encontrado para: "${query}" (busca concluída em ${elapsed}s). Tente reformular a busca com termos mais específicos ou em inglês.`, usedHeal: false };
+        return { resultStr: `[INFO] Nenhum resultado encontrado para: "${query}" (busca concluída em ${elapsed}s via ${source}). Tente reformular a busca com termos mais específicos ou em inglês.`, usedHeal: false };
       }
       const formatted = results.map((r: any, i: number) =>
         `${i + 1}. ${r.title ?? t("ui.untitled")}\n   URL: ${r.url}\n   ${r.snippet ?? r.description ?? ""}`
       ).join("\n\n");
-      return { resultStr: `${t("tool.web_results", results.length, query)}:\n\n${formatted}`, usedHeal: false };
+      return { resultStr: `${t("tool.web_results", results.length, query)}:\n[Source: ${source} | ${elapsed}s]\n\n${formatted}\n\n💡 Dica: Se os resultados não são relevantes, tente adicionar termos específicos (ex: "roblox", "lua") ou usar site:dominio.com para filtrar.`, usedHeal: false };
     } catch (err) {
       return { resultStr: t("tool.web_search_failed", (err as Error).message), usedHeal: false };
     }

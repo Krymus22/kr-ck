@@ -490,7 +490,24 @@ function isNewsQuery(query: string): boolean {
   return newsKeywords.some(kw => q.includes(kw));
 }
 
-// ─── Searx Local Integration ────────────────────────────────────────────────
+// ─── Search Source Tracking (for transparency/debugging) ────────────────────
+
+/**
+ * Tracks which search source was used for the most recent webSearch() call.
+ * This is returned to the IA via getLastSearchSource() so it can diagnose
+ * why results might be bad (e.g., "Bing returned generic anime sites instead
+ * of Roblox game results — try adding 'roblox' to the query").
+ */
+let lastSearchSource = "none";
+
+/**
+ * Returns the source used for the most recent webSearch() call.
+ * Possible values: "Official API (github/stackoverflow/npm/mdn)", "Searx",
+ * "Bing News", "Bing", "z-ai CLI", "DuckDuckGo", "GitHub API", "none".
+ */
+export function getLastSearchSource(): string {
+  return lastSearchSource;
+}
 
 /**
  * Cache for Searx availability check. We only probe once per session.
@@ -582,6 +599,7 @@ async function searchWithSearx(query: string, num: number): Promise<SearchResult
 
     if (results.length > 0) {
       console.log(`[WEB_SEARCH] Searx: ${results.length} results for "${query.slice(0, 50)}" (engines: ${data.unresponsive_engines?.length ?? 0} down)`);
+      lastSearchSource = "Searx";
     }
     return results;
   } catch {
@@ -671,6 +689,7 @@ async function searchGitHubApi(query: string, num: number): Promise<SearchResult
     }));
 
     console.log(`[WEB_SEARCH] GitHub API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    lastSearchSource = "Official API (github)";
     return results;
   } catch {
     return [];
@@ -709,6 +728,7 @@ async function searchStackOverflowApi(query: string, num: number): Promise<Searc
     }));
 
     console.log(`[WEB_SEARCH] StackOverflow API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    lastSearchSource = "Official API (stackoverflow)";
     return results;
   } catch {
     return [];
@@ -773,6 +793,7 @@ async function searchNpmApi(query: string, num: number): Promise<SearchResult[]>
     }));
 
     console.log(`[WEB_SEARCH] NPM API: ${results.length} results for "${packageName}"`);
+    lastSearchSource = "Official API (npm)";
     return results;
   } catch {
     return [];
@@ -810,6 +831,7 @@ async function searchMdnApi(query: string, num: number): Promise<SearchResult[]>
     }));
 
     console.log(`[WEB_SEARCH] MDN API: ${results.length} results for "${searchTerms.slice(0, 50)}"`);
+    lastSearchSource = "Official API (mdn)";
     return results;
   } catch {
     return [];
@@ -904,6 +926,7 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
         if (newsResult.ok && newsResult.text) {
           const results = parseBingNewsResults(newsResult.text, num);
           if (results.length > 0) {
+            lastSearchSource = "Bing News";
             console.log(`[WEB_SEARCH] Bing News: ${results.length} results for "${query.slice(0, 50)}"`);
             return results;
           }
@@ -927,6 +950,7 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
       if (bingResult.ok && bingResult.text) {
         const results = parseBingResults(bingResult.text, num);
         if (results.length > 0) {
+          lastSearchSource = "Bing";
           console.log(`[WEB_SEARCH] Bing: ${results.length} results for "${query.slice(0, 50)}"`);
           return results;
         }
@@ -1005,6 +1029,7 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
         }
         if (results.length > 0) {
           console.log(`[WEB_SEARCH] DuckDuckGo: ${results.length} results`);
+          lastSearchSource = "DuckDuckGo";
           return results;
         }
       }

@@ -1089,8 +1089,22 @@ export function App() {
         finalizeMessage(response, streamStarted);
         syncTodos();
       } catch (err) {
-        setSystemMessages((prev) => [...prev, `Error: ${(err as Error).message}`]);
-        setMessages((prev) => prev.filter((m) => !m.isStreaming));
+        // CRITICAL FIX: show error as a VISIBLE chat message, not just
+        // systemMessages (which may be hidden/scrolled away). Without this,
+        // the user sees the input field reappear with no explanation —
+        // looks like "the CLI died silently".
+        const errMsg = (err as Error).message ?? String(err);
+        const errStack = (err as Error).stack?.split("\n").slice(0, 3).join("\n") ?? "";
+        setMessages((prev) => {
+          // Replace any in-progress streaming message with the error
+          const withoutStreaming = prev.filter((m) => !m.isStreaming);
+          return [...withoutStreaming, {
+            role: "assistant" as const,
+            content: `❌ **Erro na execução:**\n\n\`\`\`\n${errMsg}\n${errStack}\n\`\`\`\n\nO agente foi interrompido. Você pode tentar novamente ou reformular sua mensagem.`,
+            isError: true,
+          }];
+        });
+        setSystemMessages((prev) => [...prev, `Error: ${errMsg}`]);
       } finally {
         isProcessing.current = false;
         setStatus("idle");

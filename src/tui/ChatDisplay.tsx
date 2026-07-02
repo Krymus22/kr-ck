@@ -27,6 +27,8 @@ export interface ChatMessage {
   isResult?: boolean;
   /** For tool messages: whether the tool succeeded (only for isResult=true). */
   ok?: boolean;
+  /** For assistant messages: whether this is an error message (displayed in red). */
+  isError?: boolean;
 }
 
 interface ChatDisplayProps {
@@ -114,8 +116,8 @@ export function ChatDisplay({ messages, maxVisible = 50 }: Readonly<ChatDisplayP
         // assistant - note the leading space in content for alignment
         return (
           <Box key={`${msg.role}-${i}`} flexDirection="column">
-            <Text color={colors.secondary} bold> Claude-Killer:</Text>
-            <Text color={colors.white}> {msg.content}</Text>
+            <Text color={msg.isError ? colors.error : colors.secondary} bold> {msg.isError ? "❌ Erro:" : "Claude-Killer:"}</Text>
+            <Text color={msg.isError ? colors.error : colors.white}> {msg.content}</Text>
             {msg.isStreaming ? null : <Text></Text>}
           </Box>
         );
