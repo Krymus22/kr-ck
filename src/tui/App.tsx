@@ -384,7 +384,7 @@ function handleSearxCommand(_arg: string | null): CommandResult {
   // The /searx command exists only for the user to CHECK if it's working
   // (useful when search results are bad — confirms whether Searx or Bing
   // is being used as the backend).
-  let status: { installed: boolean; running: boolean; weStarted: boolean; pid: number | null; url: string; dir: string };
+  let status: { installed: boolean; running: boolean; method: "docker" | "python" | null; weStarted: boolean; pid: number | null; url: string; dir: string; dockerAvailable: boolean };
   try {
     status = getSearxStatus();
   } catch (err) {
@@ -397,33 +397,53 @@ function handleSearxCommand(_arg: string | null): CommandResult {
 
   const lines = [
     "Searx Local Search (busca via Google + Bing + DDG):",
-    `  Installed : ${status.installed ? "YES ✓" : "NO ✗"}`,
-    `  Running   : ${status.running ? "YES ✓" : "NO ✗"}`,
+    `  Installed : ${status.installed ? "YES" : "NO"}`,
+    `  Running   : ${status.running ? "YES" : "NO"}`,
+    `  Method    : ${status.method ?? "N/A"}`,
+    `  Docker    : ${status.dockerAvailable ? "available" : "not available"}`,
     `  URL       : ${status.url}`,
   ];
 
   if (!status.installed) {
     lines.push(
       "",
-      "📦 Para instalar (busca estável sem lixo):",
-      "  python3 scripts/setup-searx.py",
+      "Para instalar (busca estável sem lixo):",
+    );
+    if (status.dockerAvailable) {
+      lines.push(
+        "  Docker (recomendado):",
+        "    powershell scripts/setup-searx-docker.ps1   (Windows)",
+        "    bash scripts/setup-searx-docker.sh           (Linux/macOS)",
+      );
+    } else {
+      lines.push(
+        "  Windows: instale Docker Desktop primeiro:",
+        "    https://www.docker.com/products/docker-desktop",
+        "  Depois: powershell scripts/setup-searx-docker.ps1",
+        "",
+        "  Linux/macOS (sem Docker):",
+        "    python3 scripts/setup-searx.py",
+      );
+    }
+    lines.push(
       "",
-      "Após instalar, reinicie a CLI. Tudo é automático depois disso:",
-      "  • npm install → instala Searx automaticamente",
-      "  • npm start   → inicia Searx em background",
-      "  • Ctrl+C      → para Searx automaticamente",
+      "Apos instalar, reinicie a CLI. O Searx inicia automaticamente.",
     );
   } else if (!status.running) {
     lines.push(
       "",
-      "⚠️  Searx está instalado mas não está rodando.",
-      "Reinicie a CLI — o Searx inicia automaticamente no startup.",
+      "Searx esta instalado mas nao esta rodando.",
+      "Reinicie a CLI - o Searx inicia automaticamente no startup.",
+      "Ou inicie manualmente:",
+      status.method === "docker"
+        ? "  docker start claude-killer-searxng"
+        : "  python3 scripts/setup-searx.py --start",
     );
   } else {
     lines.push(
       "",
-      "✅ Searx ativo! As buscas estão usando Google + Bing + DDG.",
-      "Se os resultados ainda estão ruins, pode ser cache — aguarde 1 min.",
+      "Searx ativo! As buscas estao usando Google + Bing + DDG.",
+      `Metodo: ${status.method}`,
     );
   }
 

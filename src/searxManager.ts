@@ -1,21 +1,32 @@
 /**
  * searxManager.ts - Auto-start/stop local Searx instance on CLI launch.
  *
- * When the Claude-Killer CLI starts, this module:
- *   1. Checks if Searx is installed (~/.claude-killer/searxng)
- *   2. If installed but not running, starts it in background
- *   3. If not installed, skips silently (no nag, no error)
- *   4. Returns immediately — the actual startup is non-blocking
+ * Supports TWO installation methods:
  *
- * On CLI shutdown, stops the Searx process if we started it.
+ *   1. Docker (preferred, especially for Windows):
+ *      Container name: "claude-killer-searxng"
+ *      Port: 8888 -> 8080 (container internal)
+ *      The container has --restart unless-stopped, so it auto-starts
+ *      when Docker Desktop starts. This module just checks if it's
+ *      running and starts it if needed.
  *
- * This is optional — if Searx is not installed, the CLI works normally
- * using Bing scraping as the search backend. Searx just provides better
- * quality results when available.
+ *   2. Python venv (Linux/macOS fallback when Docker is not available):
+ *      Location: ~/.claude-killer/searxng/.venv
+ *      Started via: python -m searx.webapp
+ *      We track the PID and kill it on shutdown.
+ *
+ * Detection order in isSearxInstalled():
+ *   1. Check if Docker container exists
+ *   2. Check if Python venv exists
+ *   If neither → not installed (skip silently)
+ *
+ * On CLI shutdown, stops the Searx process IF we started it.
+ * Docker containers with --restart unless-stopped are NOT stopped
+ * (they'll auto-restart with Docker Desktop).
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { platform } from "node:os";
@@ -27,67 +38,136 @@ const SEARX_VENV_PYTHON = platform() === "win32"
   ? path.join(SEARX_DIR, ".venv", "Scripts", "python.exe")
   : path.join(SEARX_DIR, ".venv", "bin", "python");
 const SEARX_SETTINGS = path.join(SEARX_DIR, "settings.yml");
-const SEARX_LOG = path.join(SEARX_DIR, "searx.log");
 const SEARX_PORT = 8888;
 const SEARX_URL = `http://localhost:${SEARX_PORT}`;
+const DOCKER_CONTAINER_NAME = "claude-killer-searxng";
 
 /** Track if WE started Searx (so we know if we should stop it) */
 let weStartedSearx = false;
-/** Track the Searx child process PID */
 let searxPid: number | null = null;
+/** "docker" | "python" | null — which method was used to start */
+let searxMethod: "docker" | "python" | null = null;
+
+// ─── Docker helpers ─────────────────────────────────────────────────────────
 
 /**
- * Check if Searx is installed (venv + settings.yml exist).
+ * Check if Docker command is available.
  */
-export function isSearxInstalled(): boolean {
-  return existsSync(SEARX_VENV_PYTHON) && existsSync(SEARX_SETTINGS);
-}
-
-/**
- * Check if Searx is currently running and responding with JSON.
- * Uses a 2-second timeout probe.
- */
-export async function isSearxRunning(): Promise<boolean> {
+function isDockerAvailable(): boolean {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
-    const resp = await fetch(`${SEARX_URL}/search?q=test&format=json`, {
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
+    const result = spawnSync("docker", ["--version"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: false,
     });
-    clearTimeout(timer);
-    if (!resp.ok) return false;
-    const data = await resp.json() as any;
-    return data && typeof data === "object" && "results" in data;
+    return result.status === 0;
   } catch {
     return false;
   }
 }
 
 /**
+ * Check if Docker daemon is running.
+ */
+function isDockerRunning(): boolean {
+  if (!isDockerAvailable()) return false;
+  try {
+    const result = spawnSync("docker", ["info"], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: false,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the Searx Docker container exists.
+ */
+function dockerContainerExists(): boolean {
+  if (!isDockerAvailable()) return false;
+  try {
+    const result = spawnSync("docker", ["inspect", DOCKER_CONTAINER_NAME], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: false,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if the Searx Docker container is running.
+ */
+function dockerContainerRunning(): boolean {
+  if (!dockerContainerExists()) return false;
+  try {
+    const result = spawnSync(
+      "docker",
+      ["inspect", "-f", "{{.State.Running}}", DOCKER_CONTAINER_NAME],
+      {
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["ignore", "pipe", "ignore"],
+        shell: false,
+      }
+    );
+    return result.stdout.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Start the Docker container if it exists but is stopped.
+ */
+function startDockerContainer(): boolean {
+  if (!dockerContainerExists()) return false;
+  if (dockerContainerRunning()) return true;
+  try {
+    const result = spawnSync("docker", ["start", DOCKER_CONTAINER_NAME], {
+      encoding: "utf8",
+      timeout: 10000,
+      stdio: ["ignore", "pipe", "ignore"],
+      shell: false,
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Python helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Check if Searx is installed via Python venv.
+ */
+function pythonSearxInstalled(): boolean {
+  return existsSync(SEARX_VENV_PYTHON) && existsSync(SEARX_SETTINGS);
+}
+
+/**
  * Check if a Searx process is already running by looking for the port.
- * Uses OS-native commands (lsof on Unix, netstat on Windows).
- *
- * ROBUSTNESS: uses spawnSync instead of execSync to avoid shell pipe
- * issues on some Windows configs. All errors are caught — if the check
- * fails for any reason, returns false (Searx not running).
  */
 function isSearxProcessRunning(): boolean {
   try {
     if (platform() === "win32") {
-      // Windows: use netstat without pipe (more reliable than piped findstr)
-      // spawnSync avoids shell interpretation issues that execSync has
       const result = spawnSync("netstat", ["-ano"], {
         encoding: "utf8",
         timeout: 3000,
         stdio: ["ignore", "pipe", "ignore"],
-        shell: false,  // don't use shell — avoids pipe/quoting issues
+        shell: false,
       });
       if (result.status !== 0 || !result.stdout) return false;
       return result.stdout.includes(`:${SEARX_PORT}`);
     } else {
-      // Unix: check if anything is listening on the port
-      // Try lsof first, fall back to ss (common on modern Linux)
       const lsofResult = spawnSync("lsof", ["-i", `:${SEARX_PORT}`, "-t"], {
         encoding: "utf8",
         timeout: 3000,
@@ -97,7 +177,6 @@ function isSearxProcessRunning(): boolean {
       if (lsofResult.status === 0 && lsofResult.stdout.trim().length > 0) {
         return true;
       }
-      // Fallback: ss (iproute2, common on modern Linux)
       const ssResult = spawnSync("ss", ["-tlnp", `sport = :${SEARX_PORT}`], {
         encoding: "utf8",
         timeout: 3000,
@@ -114,42 +193,98 @@ function isSearxProcessRunning(): boolean {
   }
 }
 
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Check if Searx is installed (either via Docker or Python).
+ */
+export function isSearxInstalled(): boolean {
+  // Docker takes priority
+  if (dockerContainerExists()) return true;
+  // Python fallback
+  return pythonSearxInstalled();
+}
+
+/**
+ * Check if Searx is currently running and responding with JSON.
+ */
+export async function isSearxRunning(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    const resp = await fetch(`${SEARX_URL}/search?q=test&format=json`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    });
+    clearTimeout(timer);
+    if (!resp.ok) return false;
+    const data = (await resp.json()) as any;
+    return data && typeof data === "object" && "results" in data;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Start Searx in background if it's installed but not running.
- * Non-blocking — returns immediately after spawning. The actual
- * startup takes 2-5 seconds (Python warmup), but the TUI doesn't wait.
+ * Non-blocking — returns immediately. The actual startup takes 2-5
+ * seconds, but the TUI doesn't wait.
+ *
+ * Logic:
+ *   1. If Docker container exists → start it (fast, ~1s)
+ *   2. If Python venv exists → spawn python -m searx.webapp (slower)
+ *   3. If neither → not installed, skip
  *
  * @returns true if Searx is running (was already or we started it),
  *          false if not installed or failed to start
  */
 export async function autoStartSearx(): Promise<boolean> {
-  // Not installed — skip silently
-  if (!isSearxInstalled()) {
-    return false;
-  }
-
   // Already running — nothing to do
   if (await isSearxRunning()) {
     return true;
   }
 
-  // Another process might be starting it — don't spawn a duplicate
-  if (isSearxProcessRunning()) {
-    // Wait a bit and re-check (the process might be mid-startup)
-    await new Promise(r => setTimeout(r, 2000));
-    if (await isSearxRunning()) {
-      return true;
+  // Method 1: Docker container
+  if (dockerContainerExists()) {
+    if (!dockerContainerRunning()) {
+      console.log(`[claude-killer] Starting Searx Docker container...`);
+      const started = startDockerContainer();
+      if (started) {
+        weStartedSearx = false; // Docker manages itself (--restart unless-stopped)
+        searxMethod = "docker";
+        console.log(`[claude-killer] Searx Docker container started.`);
+        return true;
+      }
+      console.error(`[claude-killer] Failed to start Searx Docker container.`);
+      return false;
     }
-    // Port is in use but not responding — something else is using it
+    // Container is running but Searx isn't responding yet — wait
+    searxMethod = "docker";
+    return true;
+  }
+
+  // Method 2: Python venv
+  if (!pythonSearxInstalled()) {
     return false;
   }
 
-  // Start Searx in background
+  // Another process might be starting it — don't spawn a duplicate
+  if (isSearxProcessRunning()) {
+    await new Promise((r) => setTimeout(r, 2000));
+    if (await isSearxRunning()) {
+      return true;
+    }
+    return false;
+  }
+
+  // Start Searx via Python
   try {
-    const logFd = await import("node:fs/promises").then(fs => fs.open(SEARX_LOG, "w"));
+    const { openSync } = await import("node:fs");
+    const logPath = path.join(SEARX_DIR, "searx.log");
+    const logFd = openSync(logPath, "w");
     const proc = spawn(SEARX_VENV_PYTHON, ["-m", "searx.webapp"], {
       cwd: SEARX_DIR,
-      stdio: ["ignore", logFd.createWriteStream(), logFd.createWriteStream()],
+      stdio: ["ignore", logFd, logFd],
       detached: true,
       env: {
         ...process.env,
@@ -159,17 +294,12 @@ export async function autoStartSearx(): Promise<boolean> {
 
     searxPid = proc.pid ?? null;
     weStartedSearx = true;
-    proc.unref(); // Allow parent to exit independently
+    searxMethod = "python";
+    proc.unref();
 
-    // Don't wait for full startup — the TUI will probe Searx on first search.
-    // If Searx isn't ready yet, the search falls back to Bing automatically.
-    // The probe in checkSearxAvailable() (apiResearcher.ts) will find it once
-    // it's ready (usually within 3-5 seconds of CLI launch).
-
-    console.log(`[claude-killer] Searx starting in background (PID: ${proc.pid})...`);
+    console.log(`[claude-killer] Searx starting via Python (PID: ${proc.pid})...`);
     return true;
   } catch (err) {
-    // Failed to start — not critical, search will use Bing fallback
     console.error(`[claude-killer] Searx auto-start failed: ${(err as Error).message}`);
     return false;
   }
@@ -177,13 +307,16 @@ export async function autoStartSearx(): Promise<boolean> {
 
 /**
  * Stop Searx if we started it. Called on CLI shutdown.
- * If the user started Searx manually (outside the CLI), we leave it running.
+ *
+ * Docker containers with --restart unless-stopped are NOT stopped
+ * (they'll auto-restart with Docker Desktop, which is desired).
+ *
+ * Only Python-started Searx is stopped on shutdown.
  */
 export function autoStopSearx(): void {
-  if (!weStartedSearx || !searxPid) return;
+  if (!weStartedSearx || searxMethod !== "python" || !searxPid) return;
 
   try {
-    // Kill the process group (Searx may spawn child processes)
     if (platform() === "win32") {
       spawnSync("taskkill", ["/PID", String(searxPid), "/T", "/F"], {
         stdio: "ignore",
@@ -191,11 +324,9 @@ export function autoStopSearx(): void {
         timeout: 5000,
       });
     } else {
-      // Send SIGTERM to the process group (negative PID)
       try {
         process.kill(-searxPid, "SIGTERM");
       } catch {
-        // Fallback: kill just the process
         process.kill(searxPid, "SIGTERM");
       }
     }
@@ -206,6 +337,7 @@ export function autoStopSearx(): void {
 
   weStartedSearx = false;
   searxPid = null;
+  searxMethod = null;
 }
 
 /**
@@ -214,17 +346,25 @@ export function autoStopSearx(): void {
 export function getSearxStatus(): {
   installed: boolean;
   running: boolean;
+  method: "docker" | "python" | null;
   weStarted: boolean;
   pid: number | null;
   url: string;
   dir: string;
+  dockerAvailable: boolean;
 } {
+  const dockerExists = dockerContainerExists();
+  const dockerRunning = dockerContainerRunning();
+  const pythonInstalled = pythonSearxInstalled();
+
   return {
-    installed: isSearxInstalled(),
-    running: isSearxProcessRunning(),
+    installed: dockerExists || pythonInstalled,
+    running: dockerRunning || isSearxProcessRunning(),
+    method: dockerExists ? "docker" : (pythonInstalled ? "python" : null),
     weStarted: weStartedSearx,
     pid: searxPid,
     url: SEARX_URL,
     dir: SEARX_DIR,
+    dockerAvailable: isDockerAvailable(),
   };
 }
