@@ -86,11 +86,43 @@ install_searx() {
     fi
 
     if ! check_docker_running; then
-        echo "[FAIL] Docker daemon is not running."
-        echo "       Start Docker service:"
-        echo "         Linux:  sudo systemctl start docker"
-        echo "         macOS:  open Docker Desktop"
-        return 1
+        echo "[INFO] Docker daemon is not running. Attempting to start..."
+
+        # macOS: try to open Docker Desktop
+        if [ "$(uname)" = "Darwin" ]; then
+            if open -a Docker 2>/dev/null; then
+                echo "[START] Docker Desktop launching on macOS..."
+                echo "[WAIT] Waiting for daemon to be ready (up to 90 seconds)..."
+                ready=false
+                for i in $(seq 1 45); do
+                    sleep 2
+                    if check_docker_running; then
+                        echo ""
+                        echo "[OK] Docker daemon is ready (took ~$((i * 2)) seconds)."
+                        ready=true
+                        break
+                    fi
+                    echo -n "."
+                done
+                if [ "${ready}" = "false" ]; then
+                    echo ""
+                    echo "[FAIL] Docker daemon did not start within 90 seconds."
+                    echo "       Start Docker Desktop manually, then re-run this script."
+                    return 1
+                fi
+            else
+                echo "[FAIL] Could not start Docker Desktop."
+                echo "       Start it manually from Applications, then re-run."
+                return 1
+            fi
+        else
+            # Linux: Docker daemon is a systemd service, needs sudo
+            echo "[FAIL] Docker daemon is not running."
+            echo "       On Linux, start it manually:"
+            echo "         sudo systemctl start docker"
+            echo "       Then re-run this script."
+            return 1
+        fi
     fi
 
     echo "[OK] Docker is available and running."

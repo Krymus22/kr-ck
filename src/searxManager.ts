@@ -86,6 +86,115 @@ function isDockerRunning(): boolean {
 }
 
 /**
+ * Try to find and launch Docker Desktop on Windows.
+ * Returns true if the executable was found and launched.
+ */
+function launchDockerDesktopWindows(): boolean {
+  const { existsSync } = require("node:fs") as typeof import("node:fs");
+  const candidates = [
+    "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+    "C:\\Program Files (x86)\\Docker\\Docker\\Docker Desktop.exe",
+    path.join(os.homedir(), "AppData", "Local", "Docker", "Docker Desktop.exe"),
+  ];
+  for (const exe of candidates) {
+    if (existsSync(exe)) {
+      try {
+        spawn(exe, [], {
+          detached: true,
+          stdio: "ignore",
+          shell: false,
+        }).unref();
+        return true;
+      } catch {
+        // Try next candidate
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Try to launch Docker Desktop on macOS.
+ * Uses `open -a Docker` which is the standard way.
+ */
+function launchDockerDesktopMacOS(): boolean {
+  try {
+    spawn("open", ["-a", "Docker"], {
+      detached: true,
+      stdio: "ignore",
+      shell: false,
+    }).unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ensure Docker daemon is running. If Docker is installed but the daemon
+ * is not running, try to start Docker Desktop automatically.
+ *
+ * This handles the common case where the user has Docker Desktop installed
+ * but hasn't launched it yet (or it crashed). Instead of failing, we:
+ *   1. Detect the OS
+ *   2. Launch Docker Desktop (Windows: .exe, macOS: open -a Docker)
+ *   3. Wait up to 90 seconds for the daemon to be ready
+ *   4. Return true if ready, false if timeout/failure
+ *
+ * On Linux, Docker daemon is usually a systemd service. We can't start
+ * it without sudo, so we just return false and let the caller warn.
+ *
+ * @returns true if Docker daemon is running (was already or we started it)
+ */
+async function ensureDockerRunning(): Promise<boolean> {
+  // Already running? Great.
+  if (isDockerRunning()) return true;
+
+  // Docker not installed at all
+  if (!isDockerAvailable()) return false;
+
+  // Docker is installed but daemon not running — try to start it
+  console.log("[claude-killer] Docker daemon not running. Attempting to start Docker Desktop...");
+
+  let launched = false;
+  if (platform() === "win32") {
+    launched = launchDockerDesktopWindows();
+  } else if (platform() === "darwin") {
+    launched = launchDockerDesktopMacOS();
+  } else {
+    // Linux: Docker daemon is a systemd service, needs sudo
+    // We can try `systemctl start docker` but it usually needs root
+    console.log("[claude-killer] On Linux, start Docker daemon manually: sudo systemctl start docker");
+    return false;
+  }
+
+  if (!launched) {
+    console.log("[claude-killer] Could not find Docker Desktop executable.");
+    return false;
+  }
+
+  console.log("[claude-killer] Docker Desktop starting. Waiting for daemon (up to 90s)...");
+
+  // Wait for daemon to be ready — poll every 2 seconds, up to 90 seconds
+  // Docker Desktop can take 30-60 seconds to fully start on slower machines
+  for (let i = 0; i < 45; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    if (isDockerRunning()) {
+      console.log(`[claude-killer] Docker daemon is ready (took ~${(i + 1) * 2}s).`);
+      return true;
+    }
+    // Print progress dots every 10 seconds
+    if (i > 0 && i % 5 === 0) {
+      console.log(`[claude-killer]   still waiting... (${(i + 1) * 2}s)`);
+    }
+  }
+
+  console.log("[claude-killer] Docker daemon did not start within 90 seconds.");
+  console.log("[claude-killer] Please start Docker Desktop manually and re-run.");
+  return false;
+}
+
+/**
  * Check if the Searx Docker container exists.
  */
 function dockerContainerExists(): boolean {
@@ -246,6 +355,19 @@ export async function autoStartSearx(): Promise<boolean> {
 
   // Method 1: Docker container
   if (dockerContainerExists()) {
+    // CRITICAL: Docker Desktop might not be running. Ensure it's started
+    // before trying to interact with the container. This handles the case
+    // where the user boots their machine, Docker Desktop hasn't auto-started
+    // yet, and they launch the CLI. We start Docker Desktop and wait.
+    if (!isDockerRunning()) {
+      const dockerReady = await ensureDockerRunning();
+      if (!dockerReady) {
+        console.error("[claude-killer] Docker daemon is not running. Searx container cannot start.");
+        console.error("[claude-killer] Start Docker Desktop manually, then re-run the CLI.");
+        return false;
+      }
+    }
+
     if (!dockerContainerRunning()) {
       console.log(`[claude-killer] Starting Searx Docker container...`);
       const started = startDockerContainer();

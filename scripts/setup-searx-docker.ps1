@@ -81,13 +81,59 @@ function Install-SearxDocker {
         return $false
     }
 
-    # Check if Docker daemon is running
+    # Check if Docker daemon is running. If not, try to start Docker Desktop
+    # automatically. This handles the common case where the user installed
+    # Docker Desktop but hasn't launched it yet.
     try {
         $null = docker info 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[FAIL] Docker daemon is not running."
-            Write-Host "       Start Docker Desktop and wait for it to be ready."
-            return $false
+            Write-Host "[INFO] Docker daemon is not running. Attempting to start Docker Desktop..."
+
+            # Find Docker Desktop executable
+            $dockerExe = $null
+            $candidates = @(
+                "C:\Program Files\Docker\Docker\Docker Desktop.exe",
+                "C:\Program Files (x86)\Docker\Docker\Docker Desktop.exe",
+                "$env:LOCALAPPDATA\Docker\Docker Desktop.exe"
+            )
+            foreach ($cand in $candidates) {
+                if (Test-Path $cand) {
+                    $dockerExe = $cand
+                    break
+                }
+            }
+
+            if (-not $dockerExe) {
+                Write-Host "[FAIL] Docker Desktop executable not found."
+                Write-Host "       Start Docker Desktop manually, then re-run this script."
+                return $false
+            }
+
+            # Launch Docker Desktop (detached)
+            Write-Host "[START] Launching Docker Desktop..."
+            Start-Process -FilePath $dockerExe
+            Write-Host "[WAIT] Waiting for Docker daemon to be ready (up to 90 seconds)..."
+
+            # Wait for daemon — poll every 2 seconds, up to 90 seconds
+            $ready = $false
+            for ($i = 0; $i -lt 45; $i++) {
+                Start-Sleep -Seconds 2
+                $null = docker info 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host ""
+                    Write-Host "[OK] Docker daemon is ready (took ~$(($i + 1) * 2) seconds)."
+                    $ready = $true
+                    break
+                }
+                Write-Host "." -NoNewline
+            }
+
+            if (-not $ready) {
+                Write-Host ""
+                Write-Host "[FAIL] Docker daemon did not start within 90 seconds."
+                Write-Host "       Start Docker Desktop manually, then re-run this script."
+                return $false
+            }
         }
     } catch {
         Write-Host "[FAIL] Cannot connect to Docker daemon."
