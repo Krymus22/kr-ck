@@ -377,77 +377,59 @@ function handleLangCommand(arg: string | null): CommandResult {
   return { handled: true, message: `Idioma alterado para: ${arg}` };
 }
 
-function handleSearxCommand(arg: string | null): CommandResult {
+function handleSearxCommand(_arg: string | null): CommandResult {
+  // /searx shows status only. Installation and startup are automatic:
+  //   - Install: `npm install` runs postinstall → setup-searx.py --yes
+  //   - Start:   CLI startup calls autoStartSearx() in index.ts
+  //   - Stop:    CLI shutdown calls autoStopSearx() in cleanup
+  // The /searx command exists only for the user to CHECK if it's working
+  // (useful when search results are bad — confirms whether Searx or Bing
+  // is being used as the backend).
   let status: { installed: boolean; running: boolean; weStarted: boolean; pid: number | null; url: string; dir: string };
   try {
     const { getSearxStatus } = require("../searxManager.js") as typeof import("../searxManager.js");
     status = getSearxStatus();
   } catch (err) {
-    // If searxManager fails to load or getSearxStatus throws (e.g.,
-    // execSync for netstat/lsof fails on some Windows configs), don't
-    // crash the entire CLI — return a safe status.
     return {
       handled: true,
       message: `Searx: erro ao verificar status (${(err as Error).message}).\n` +
-        `O Searx é opcional — a busca funciona via Bing como fallback.\n` +
-        `Para instalar: python3 scripts/setup-searx.py`,
+        `O Searx é opcional — a busca funciona via Bing como fallback.`,
     };
   }
 
-  if (!arg || arg === "status") {
-    const lines = [
-      "Searx Local Search:",
-      `  Installed : ${status.installed ? "YES ✓" : "NO ✗"}`,
-      `  Running   : ${status.running ? "YES ✓" : "NO ✗"}`,
-      `  Auto-start: ${status.weStarted ? "started by CLI" : "not started by CLI"}`,
-      `  PID       : ${status.pid ?? "N/A"}`,
-      `  URL       : ${status.url}`,
-      `  Directory : ${status.dir}`,
-    ];
-    if (!status.installed) {
-      lines.push(
-        "",
-        "Para instalar (busca estável via Google + Bing + DDG):",
-        "  python3 scripts/setup-searx.py",
-        "",
-        "Após instalar, reinicie a CLI. O Searx iniciará automaticamente.",
-      );
-    } else if (!status.running) {
-      lines.push("", "Para iniciar agora: /searx start");
-    }
-    return { handled: true, message: lines.join("\n") };
+  const lines = [
+    "Searx Local Search (busca via Google + Bing + DDG):",
+    `  Installed : ${status.installed ? "YES ✓" : "NO ✗"}`,
+    `  Running   : ${status.running ? "YES ✓" : "NO ✗"}`,
+    `  URL       : ${status.url}`,
+  ];
+
+  if (!status.installed) {
+    lines.push(
+      "",
+      "📦 Para instalar (busca estável sem lixo):",
+      "  python3 scripts/setup-searx.py",
+      "",
+      "Após instalar, reinicie a CLI. Tudo é automático depois disso:",
+      "  • npm install → instala Searx automaticamente",
+      "  • npm start   → inicia Searx em background",
+      "  • Ctrl+C      → para Searx automaticamente",
+    );
+  } else if (!status.running) {
+    lines.push(
+      "",
+      "⚠️  Searx está instalado mas não está rodando.",
+      "Reinicie a CLI — o Searx inicia automaticamente no startup.",
+    );
+  } else {
+    lines.push(
+      "",
+      "✅ Searx ativo! As buscas estão usando Google + Bing + DDG.",
+      "Se os resultados ainda estão ruins, pode ser cache — aguarde 1 min.",
+    );
   }
 
-  if (arg === "install") {
-    return {
-      handled: true,
-      message:
-        "Para instalar o Searx, execute no terminal:\n" +
-        "  python3 scripts/setup-searx.py\n\n" +
-        "Após instalar, reinicie a CLI — o Searx iniciará automaticamente.",
-    };
-  }
-
-  if (arg === "start") {
-    const { autoStartSearx } = require("../searxManager.js") as typeof import("../searxManager.js");
-    // Note: autoStartSearx is async but slash command handlers are sync.
-    // We fire-and-forget and tell the user it's starting.
-    autoStartSearx().catch(() => {});
-    return {
-      handled: true,
-      message: status.installed
-        ? "Searx iniciando em background... Use /searx para verificar status."
-        : "Searx não instalado. Use: python3 scripts/setup-searx.py",
-    };
-  }
-
-  if (arg === "stop") {
-    const { autoStopSearx } = require("../searxManager.js") as typeof import("../searxManager.js");
-    autoStopSearx();
-    return { handled: true, message: "Searx parado (se foi iniciado pela CLI)." };
-  }
-
-  return { handled: true, message: "Use: /searx [status|install|start|stop]" };
+  return { handled: true, message: lines.join("\n") };
 }
 
 function handleEffortCommand(arg: string | null): CommandResult {

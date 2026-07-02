@@ -645,12 +645,10 @@ export const COMMAND_I18N: Record<string, Record<Language, CommandI18n>> = {
   },
   "/searx": {
     "pt-BR": {
-      desc: "Status/instalar busca local Searx",
-      subcommands: ["status", "install", "start", "stop"],
+      desc: "Status da busca local Searx (instalação é automática)",
     },
     en: {
-      desc: "Searx local search status/install",
-      subcommands: ["status", "install", "start", "stop"],
+      desc: "Searx local search status (install is automatic)",
     },
   },
 };
