@@ -139,10 +139,13 @@ describe("configSeeder", () => {
 
   it("each Roblox skill MD should have YAML frontmatter and real GitHub README content", () => {
     const skillsDir = path.join(process.cwd(), "defaults", "skills");
-    const files = fs.readdirSync(skillsDir).filter((f) => f.endsWith(".md"));
+    // Exclude non-GitHub skills (roblox-studio-mcp is an original doc, not a GitHub README)
+    const files = fs.readdirSync(skillsDir)
+      .filter((f) => f.endsWith(".md"))
+      .filter((f) => f !== "roblox-studio-mcp.md");
 
-    // 9 libraries + 6 CLI tool docs = 15 total
-    expect(files.length).toBe(16);  // 9 libs + 6 CLI tool docs + 1 testez
+    // 9 libraries + 6 CLI tool docs + 1 testez = 16 total (excluding studio-mcp)
+    expect(files.length).toBe(16);
 
     for (const file of files) {
       const filePath = path.join(skillsDir, file);

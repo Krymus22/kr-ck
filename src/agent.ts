@@ -1041,6 +1041,38 @@ async function executeHandler(name: string, args: Record<string, unknown>, toolC
     }
   }
   if (name.includes("__")) {
+    // ── Roblox Studio MCP Guard ────────────────────────────────────────────
+    // Intercept MCP tool calls to prevent the IA from bypassing safety
+    // validations (Bug Hunter, DataGuard, read-before-write, rollback).
+    //
+    // WRITE tools (multi_edit, generate_*, insert_from_creator_store) are
+    // BLOCKED — the IA must use our `aplicar_diff` instead, which goes
+    // through the full safety pipeline before syncing to Studio via Rojo.
+    //
+    // READ, EXECUTE, PLAYTEST, and SESSION tools are allowed (with logging
+    // for execute tools).
+    try {
+      const { evaluateMcpToolCall } = await import("./robloxMcpGuard.js");
+      const guardResult = evaluateMcpToolCall(name, args);
+      if (!guardResult.allowed) {
+        log.warn(`[MCP_GUARD] Blocked "${name}" — category: ${guardResult.category}`);
+        return {
+          resultStr: guardResult.blockReason ?? `[MCP_GUARD] Tool "${name}" blocked.`,
+          usedHeal: false,
+        };
+      }
+      if (guardResult.shouldLog) {
+        log.info(`[MCP_GUARD] Allowing "${name}" — category: ${guardResult.category}`);
+      }
+    } catch (guardErr) {
+      // If the guard itself fails, fail-SAFE: block the call
+      log.error(`[MCP_GUARD] Guard error, blocking call: ${(guardErr as Error).message}`);
+      return {
+        resultStr: `[MCP_GUARD] Safety check failed — call blocked for protection. Error: ${(guardErr as Error).message}`,
+        usedHeal: false,
+      };
+    }
+
     try {
       return { resultStr: await callMCPTool(name, args), usedHeal: false };
     } catch (err) {
