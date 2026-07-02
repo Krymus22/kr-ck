@@ -521,36 +521,59 @@ function createStreamState(): StreamState {
 
 /**
  * Detect if the model is stuck in a repetition loop.
- * Checks if the same phrase (10+ chars) has been repeated 5+ times
- * in the recent content. If so, returns true to abort generation.
+ *
+ * BALANCED THRESHOLDS (fixed after false-positive on markdown tables):
+ * The old detector (6 repetitions of 10-char phrases) triggered on legitimate
+ * markdown formatting like table cells ("| Siste...") or bullet lists
+ * ("- **Gacha..."). The new thresholds are:
+ *   - Minimum phrase length: 25 chars (too short = markdown fragments)
+ *   - Repetition threshold: 8x (was 6x — markdown naturally repeats 6x)
+ *   - Minimum alphanumeric chars: 15 (skip pure symbol/markdown phrases)
+ *   - Window: last 3000 chars (was 2000 — need more context for longer phrases)
+ *
+ * The detector also SKIPS phrases that look like markdown formatting:
+ *   - Phrases starting with |, -, #, *, >, or ``` (table cells, headers, etc.)
+ *   - Phrases that are mostly symbols/punctuation (< 60% alphanumeric)
  */
 function detectRepetition(state: StreamState): boolean {
   const content = state.totalContent;
-  if (content.length < 200) return false;
+  if (content.length < 300) return false;
 
-  // Check the last 2000 chars for repetition
-  const recent = content.slice(-2000);
+  // Check the last 3000 chars for repetition
+  const recent = content.slice(-3000);
 
-  // Try to find a phrase (10-100 chars) that repeats 5+ times
-  for (let len = 10; len <= 100; len += 5) {
+  // Try to find a phrase (25-100 chars) that repeats 8+ times.
+  // Start at 25 chars — shorter phrases are too often markdown fragments.
+  for (let len = 25; len <= 100; len += 5) {
     // Sample phrases from different positions in the recent text
-    for (let start = 0; start < recent.length - len * 5; start += Math.max(1, len)) {
+    for (let start = 0; start < recent.length - len * 8; start += Math.max(1, len)) {
       const phrase = recent.slice(start, start + len);
+      const trimmed = phrase.trim();
+
       // Skip whitespace-only or trivial phrases
-      if (phrase.trim().length < 5) continue;
+      if (trimmed.length < 20) continue;
+
+      // Skip phrases that look like markdown formatting (false-positive source):
+      //   - Starts with markdown markers: |, -, #, *, >, ```, 1., 2.
+      //   - Mostly symbols/punctuation (< 60% alphanumeric)
+      if (/^[|\-#*>`]/.test(trimmed)) continue;
+      if (/^\d+\.\s/.test(trimmed)) continue;
+
+      const alphaNumCount = (trimmed.match(/[a-zA-Z0-9à-úÀ-Ú]/g) ?? []).length;
+      if (alphaNumCount / trimmed.length < 0.6) continue;
 
       // Count occurrences in recent text
       let count = 0;
       let searchFrom = 0;
-      while (count < 6) {
+      while (count < 8) {
         const idx = recent.indexOf(phrase, searchFrom);
         if (idx === -1) break;
         count++;
         searchFrom = idx + len;
       }
 
-      if (count >= 6) {
-        console.log(`[REPETITION_DETECTED] Phrase "${phrase.slice(0, 40)}..." repeated ${count}x — aborting generation`);
+      if (count >= 8) {
+        console.log(`[REPETITION_DETECTED] Phrase "${phrase.slice(0, 50)}..." repeated ${count}x — aborting generation`);
         return true;
       }
     }
