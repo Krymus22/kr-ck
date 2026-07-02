@@ -20,6 +20,8 @@ import {
 
 interface ThinkingIndicatorProps {
   active: boolean;
+  /** Custom label to show instead of "PENSANDO" (e.g., "COMPACTANDO"). */
+  label?: string;
 }
 
 function formatElapsed(ms: number): string {
@@ -66,7 +68,7 @@ function spinnerChar(idx: number): string {
   return frames[idx % frames.length] ?? "•";
 }
 
-export function ThinkingIndicator({ active }: Readonly<ThinkingIndicatorProps>) {
+export function ThinkingIndicator({ active, label }: Readonly<ThinkingIndicatorProps>) {
   const [dots, setDots] = useState("");
   const [snapshot, setSnapshot] = useState<ActivitySnapshot>(getActivitySnapshot());
   const spinnerIdx = useRef(0);
@@ -109,7 +111,9 @@ export function ThinkingIndicator({ active }: Readonly<ThinkingIndicatorProps>) 
   }
 
   // Fallback: legacy "PENSANDO..." (when no activity was pushed)
+  // If a custom label was provided (e.g., "COMPACTANDO"), use it instead.
+  const displayLabel = label ?? "PENSANDO";
   return (
-    <Text color={colors.muted}> • PENSANDO{dots} </Text>
+    <Text color={colors.muted}> • {displayLabel}{dots} </Text>
   );
 }

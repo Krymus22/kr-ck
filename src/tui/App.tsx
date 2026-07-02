@@ -49,7 +49,7 @@ import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 
 // --- Types ------------------------------------------------------------------
 
-type AppStatus = "idle" | "thinking" | "streaming";
+type AppStatus = "idle" | "thinking" | "streaming" | "compacting";
 
 // --- Slash command definitions ----------------------------------------------
 
@@ -66,7 +66,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/buscar", desc: "Search for file on machine (tools, etc)" },
 ];
 
-type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null };
+type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null; compactDone?: boolean; compactResult?: { removed: number; beforeTokens: number; afterTokens: number } };
 
 
 
@@ -149,7 +149,9 @@ function handleCompactCommand(): CommandResult {
   if (!result) return { handled: true, message: "Nada for compactar." };
   return {
     handled: true,
-    message: `Compactado: ${result.removed} msgs removidas, ${result.beforeTokens} -> ${result.afterTokens} tokens.`,
+    message: `✅ Contexto compactado!\n  • ${result.removed} mensagens removidas\n  • Tokens: ${result.beforeTokens.toLocaleString()} → ${result.afterTokens.toLocaleString()} (−${(result.beforeTokens - result.afterTokens).toLocaleString()})\n  • Economia: ${((1 - result.afterTokens / result.beforeTokens) * 100).toFixed(1)}%\n\nA barra de contexto será atualizada no próximo turno da IA.`,
+    compactDone: true,
+    compactResult: result,
   };
 }
 
@@ -993,11 +995,26 @@ export function App() {
       if (result.resetChat) {
         setMessages([]);
       }
+      // After /compact, update the StatusBar immediately to reflect the
+      // new (smaller) context size. Without this, the bar keeps showing
+      // the old token count until the next IA response, which confuses
+      // the user into thinking the compaction didn't work.
+      if (result.compactDone && result.compactResult) {
+        const cr = result.compactResult;
+        // Show "compacting" status briefly for visual feedback
+        setStatus("compacting");
+        setLastUsage({
+          prompt_tokens: cr.afterTokens,
+          completion_tokens: 0,
+          total_tokens: cr.afterTokens,
+        });
+        // Return to idle after 1.2s so the user sees the feedback
+        setTimeout(() => setStatus("idle"), 1200);
+      }
       if (result.message) {
         setSystemMessages((prev) => [...prev, result.message!]);
       }
       isProcessing.current = false;
-      setStatus("idle");
       return true;
     }
     return false;
@@ -1184,8 +1201,11 @@ export function App() {
         <ChatDisplay messages={messages} />
       </Box>
 
-      {/* Thinking indicator */}
-      <ThinkingIndicator active={status === "thinking"} />
+      {/* Thinking indicator (also shows during compaction) */}
+      <ThinkingIndicator
+        active={status === "thinking" || status === "compacting"}
+        label={status === "compacting" ? "COMPACTANDO" : undefined}
+      />
 
       {/* Task panel */}
       <TodoPanel todos={todos} />
