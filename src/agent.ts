@@ -2013,6 +2013,34 @@ export async function runAgentLoop(
   recordMessage(userInput.length);
   log.debug(`History: ${history.historySummary()}`);
 
+  // ── Research Hint Injection ──────────────────────────────────────────────
+  // Detect if the user's question is about something that CHANGES OVER TIME
+  // (games, APIs, products, versions, news). If so, inject a hint telling
+  // the IA to consider using buscar_web() to verify before answering.
+  //
+  // This prevents the IA from answering factual questions from (potentially
+  // outdated) training data when it has web search available. The hint is
+  // SUBTLE — it suggests, doesn't force. The IA can still answer from
+  // training if confident the info is timeless.
+  //
+  // Anti-triggers: programming basics (print, loops), concepts (OOP, HTTP),
+  // and commands (write, create) do NOT trigger hints — those are either
+  // timeless or action requests, not factual questions.
+  try {
+    const { detectResearchTrigger, generateResearchHint } = await import("./researchHint.js");
+    const trigger = detectResearchTrigger(userInput);
+    if (trigger) {
+      const hint = generateResearchHint(trigger, userInput);
+      if (hint) {
+        history.addSystemMessage(hint);
+        log.debug(`[RESEARCH_HINT] Injected hint for trigger: ${trigger}`);
+      }
+    }
+  } catch (hintErr) {
+    // Research hints are optional — don't crash if it fails
+    log.debug(`[RESEARCH_HINT] Failed to inject: ${(hintErr as Error).message}`);
+  }
+
   // Set module-level callbacks so processToolCalls/dispatchToolCall can
   // notify the TUI of tool execution. These are cleared in the finally
   // block below to prevent leaking across turns.
