@@ -27,6 +27,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { existsSync as fsExistsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { platform } from "node:os";
@@ -335,6 +336,22 @@ export async function isSearxRunning(): Promise<boolean> {
 }
 
 /**
+ * Get the path to the platform-specific Docker setup script.
+ * Returns the PowerShell script on Windows, shell script on Unix.
+ * Returns null if the script doesn't exist.
+ */
+function getDockerSetupScriptPath(): string | null {
+  const projectRoot = process.cwd();
+  if (platform() === "win32") {
+    const ps1 = path.join(projectRoot, "scripts", "setup-searx-docker.ps1");
+    return fsExistsSync(ps1) ? ps1 : null;
+  } else {
+    const sh = path.join(projectRoot, "scripts", "setup-searx-docker.sh");
+    return fsExistsSync(sh) ? sh : null;
+  }
+}
+
+/**
  * Start Searx in background if it's installed but not running.
  * Non-blocking — returns immediately. The actual startup takes 2-5
  * seconds, but the TUI doesn't wait.
@@ -355,19 +372,56 @@ export async function autoStartSearx(): Promise<boolean> {
 
   // Method 1: Docker container
   if (dockerContainerExists()) {
-    // CRITICAL: Docker Desktop might not be running. Ensure it's started
-    // before trying to interact with the container. This handles the case
-    // where the user boots their machine, Docker Desktop hasn't auto-started
-    // yet, and they launch the CLI. We start Docker Desktop and wait.
+    // CRITICAL: Docker Desktop might not be running. If not, use the same
+    // setup script that postinstall uses — it starts Docker Desktop, waits
+    // for the daemon, and starts the container. This is more reliable than
+    // trying to start Docker Desktop directly from Node.js.
     if (!isDockerRunning()) {
-      const dockerReady = await ensureDockerRunning();
-      if (!dockerReady) {
-        console.error("[claude-killer] Docker daemon is not running. Searx container cannot start.");
-        console.error("[claude-killer] Start Docker Desktop manually, then re-run the CLI.");
-        return false;
+      console.log("[claude-killer] Docker daemon not running. Starting via setup script...");
+
+      // Try the platform-specific setup script (same as postinstall)
+      const scriptPath = getDockerSetupScriptPath();
+      if (scriptPath) {
+        try {
+          const result = spawnSync(
+            platform() === "win32" ? "powershell" : "bash",
+            platform() === "win32"
+              ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-Start"]
+              : [scriptPath, "start"],
+            {
+              encoding: "utf8",
+              timeout: 120_000, // 2 minutes — Docker Desktop can take 60-90s to start
+              stdio: ["ignore", "pipe", "pipe"],
+              shell: false,
+            }
+          );
+          if (result.status === 0) {
+            console.log("[claude-killer] Searx Docker container started via setup script.");
+            searxMethod = "docker";
+            return true;
+          }
+          console.error(`[claude-killer] Setup script failed (exit ${result.status}): ${result.stderr?.slice(0, 200)}`);
+        } catch (err) {
+          console.error(`[claude-killer] Setup script error: ${(err as Error).message}`);
+        }
+
+        // Fallback: try ensureDockerRunning + startDockerContainer directly
+        const dockerReady = await ensureDockerRunning();
+        if (!dockerReady) {
+          console.error("[claude-killer] Docker daemon is not running. Searx container cannot start.");
+          console.error("[claude-killer] Start Docker Desktop manually, then re-run the CLI.");
+          return false;
+        }
+      } else {
+        const dockerReady = await ensureDockerRunning();
+        if (!dockerReady) {
+          console.error("[claude-killer] Docker daemon is not running. Searx container cannot start.");
+          return false;
+        }
       }
     }
 
+    // Docker daemon is running — just start the container
     if (!dockerContainerRunning()) {
       console.log(`[claude-killer] Starting Searx Docker container...`);
       const started = startDockerContainer();
