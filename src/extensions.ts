@@ -224,6 +224,23 @@ function sendRequest(server: ActiveMCPServer, method: string, params?: Record<st
 
     server.pendingRequests.set(id, { resolve, reject });
 
+    // Timeout: 10 seconds for any MCP request. If the server doesn't respond,
+    // reject the promise so the CLI doesn't hang forever.
+    const timeout = setTimeout(() => {
+      if (server.pendingRequests.has(id)) {
+        server.pendingRequests.delete(id);
+        reject(new Error(`MCP request "${method}" timed out after 10s`));
+      }
+    }, 10_000);
+
+    // Clear timeout when resolved/rejected
+    const originalResolve = resolve;
+    const originalReject = reject;
+    server.pendingRequests.set(id, {
+      resolve: (val: unknown) => { clearTimeout(timeout); originalResolve(val); },
+      reject: (err: Error) => { clearTimeout(timeout); originalReject(err); },
+    });
+
     try {
       server.process.stdin!.write(message);
     } catch (err) {

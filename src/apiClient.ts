@@ -1126,11 +1126,13 @@ async function handle5xxRetryableError(
 // ── 403 retry handler ───────────────────────────────────────────────────────
 // NVIDIA NIM ocasionalmente retorna 403 (Forbidden) sem motivo aparente —
 // não é key expirada, não é rate limit, não é modelo removido. É um glitch
-// temporário do servidor. Tentar novamente em 1-2s costuma resolver.
+// temporário do servidor. Tentar novamente em 1s costuma resolver.
 //
-// Limite: 2 tentativas (3 tentativas total). Wait: 1s, depois 2s.
-// Se falhar nas 3, o erro propaga para o usuário.
-const MAX_403_RETRIES = 2;
+// Limite: 1 retry apenas (2 tentativas total). Wait: 1s.
+// Se falhar na 2ª, o erro propaga para o usuário.
+// Mantemos apenas 1 retry para não consumir budget da key e causar 429
+// no heartbeat/prewarm.
+const MAX_403_RETRIES = 1;
 
 function is403Error(err: unknown): boolean {
   const apiErr = err instanceof OpenAI.APIError ? err : null;
@@ -1147,11 +1149,10 @@ async function handle403Error(
   }
 
   const newAttempt = attempt + 1;
-  // Wait 1s on first retry, 2s on second
-  const waitMs = newAttempt === 1 ? 1000 : 2000;
+  const waitMs = 1000; // 1 second only
   log.warn(
     `Erro 403 (Forbidden) — glitch temporário do servidor. ` +
-    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
+    `Retry em 1s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
   );
   await sleep(waitMs);
   return { retried: true, newAttempt };
