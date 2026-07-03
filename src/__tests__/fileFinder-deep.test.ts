@@ -16,33 +16,35 @@ import { searchInDefinedFolders, searchFile, copyToModeTools } from "../fileFind
 
 describe("fileFinder — deep coverage", () => {
   describe("searchInDefinedFolders", () => {
-    it("retorna null para tool inexistente", () => {
-      const result = searchInDefinedFolders("nonexistent_tool_xyz", null);
-      expect(result === null || typeof result === 'string').toBe(true);
+    it("retorna array para arquivo inexistente", () => {
+      const result = searchInDefinedFolders("nonexistent_file_xyz.lua", null);
+      expect(Array.isArray(result)).toBe(true);
     });
 
-    it("retorna null ou path para tool conhecida", () => {
+    it("retorna array para arquivo conhecido", () => {
       const result = searchInDefinedFolders("selene", null);
-      expect(result === null || typeof result === 'string' || result === undefined).toBe(true);
+      expect(Array.isArray(result)).toBe(true);
     });
 
-    it("retorna null ou path com mode", () => {
+    it("retorna array com mode", () => {
       const result = searchInDefinedFolders("selene", "roblox");
-      expect(result === null || typeof result === 'string' || result === undefined).toBe(true);
+      expect(Array.isArray(result)).toBe(true);
     });
   });
 
   describe("searchFile", () => {
-    it("retorna null ou path para arquivo inexistente", async () => {
-      const result = await searchFile("definitely_nonexistent_file_12345.lua");
-      expect(result === null || typeof result === 'string' || result === undefined).toBe(true);
+    it("retorna objeto com results e searchedEntireMachine", async () => {
+      const result = await searchFile("definitely_nonexistent_file_12345.lua", null);
+      expect(result).toHaveProperty("results");
+      expect(result).toHaveProperty("searchedEntireMachine");
+      expect(Array.isArray(result.results)).toBe(true);
     });
   });
 
   describe("copyToModeTools", () => {
     it("retorna null para arquivo inexistente", () => {
       const result = copyToModeTools("/nonexistent/file.lua", "roblox");
-      expect(result === null || typeof result === 'string').toBe(true);
+      expect(result === null || typeof result === "string").toBe(true);
     });
 
     it("copia arquivo existente para mode tools", () => {
@@ -50,7 +52,7 @@ describe("fileFinder — deep coverage", () => {
       fs.writeFileSync(tmpFile, "print('hello')");
       try {
         const result = copyToModeTools(tmpFile, "roblox");
-        expect(result === null || typeof result === 'string' || result === undefined).toBe(true);
+        expect(result === null || typeof result === "string").toBe(true);
       } finally {
         fs.unlinkSync(tmpFile);
       }

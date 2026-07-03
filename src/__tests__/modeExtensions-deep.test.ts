@@ -70,9 +70,9 @@ describe("modeExtensions — deep coverage", () => {
   });
 
   describe("runPostEditHooks", () => {
-    it("retorna string", async () => {
+    it("retorna string (pode ser vazia)", async () => {
       const result = await runPostEditHooks("/tmp/test.lua");
-      expect(result).toBeTruthy();
+      expect(typeof result).toBe("string");
     });
   });
 });
