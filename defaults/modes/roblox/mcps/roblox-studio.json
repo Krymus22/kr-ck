@@ -3,14 +3,22 @@
   "name": "Roblox_Studio",
   "description": "Official Roblox Studio MCP server (built into Studio). Enables the IA to read the game data model, inspect instances, execute Luau code, run playtests, and capture screen. WRITE operations (multi_edit, generate_*, insert_from_creator_store) are blocked by robloxMcpGuard — the IA must use aplicar_diff instead, which goes through Bug Hunter + DataGuard + read-before-write + rollback.",
   "transport": "stdio",
-  "command": "RobloxStudioMCPServer",
-  "args": [],
+  "command": "cmd.exe",
+  "args": ["/c", "%LOCALAPPDATA%\\Roblox\\mcp.bat"],
   "env": {},
-  "autoStart": false,
+  "autoStart": true,
+  "platformOverrides": {
+    "darwin": {
+      "command": "/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP",
+      "args": []
+    }
+  },
   "notes": [
     "This MCP server is BUILT INTO Roblox Studio (no separate install needed).",
     "The user must enable it in Studio: Assistant > ... > Manage MCP Servers > Enable.",
-    "Claude-Killer auto-detects the server when Studio is running.",
+    "Windows: uses cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat",
+    "macOS: uses /Applications/RobloxStudio.app/Contents/MacOS/StudioMCP",
+    "Claude-Killer auto-starts the MCP server when mode Roblox is active.",
     "WRITE tools are blocked by robloxMcpGuard.ts for safety.",
     "See: https://create.roblox.com/docs/studio/mcp"
   ]

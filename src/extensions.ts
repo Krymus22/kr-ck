@@ -31,6 +31,13 @@ export interface MCPConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  autoStart?: boolean;
+  /** Platform-specific overrides for command/args */
+  platformOverrides?: {
+    win32?: { command: string; args?: string[] };
+    darwin?: { command: string; args?: string[] };
+    linux?: { command: string; args?: string[] };
+  };
 }
 
 export interface PluginManifest {
@@ -338,8 +345,14 @@ async function discoverTools(server: ActiveMCPServer): Promise<MCPToolDef[]> {
 async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<void> {
   if (activeMCPServers.has(name)) return;
 
+  // Apply platform-specific overrides if available
+  const platform = process.platform;
+  const override = config.platformOverrides?.[platform as "win32" | "darwin" | "linux"];
+  const command = override?.command ?? config.command;
+  const args = override?.args ?? config.args ?? [];
+
   const env = { ...process.env, ...config.env };
-  const child = spawn(config.command, config.args || [], {
+  const child = spawn(command, args, {
     env,
     stdio: ["pipe", "pipe", "pipe"],
     shell: true,
