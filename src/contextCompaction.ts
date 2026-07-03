@@ -144,6 +144,7 @@ export async function smartCompact(maxTokens: number = 50000): Promise<{ compact
   }
 
   log.info(`[COMPACTION] Context at ${before} tokens (threshold ${maxTokens}) — compacting SYNCHRONOUSLY (agent paused)`);
+  console.log(`[COMPACTION] Auto-compacting context (${before} tokens > ${maxTokens} threshold). The IA may lose some older context.`);
 
   // IDEIA 3: When context is critically full AND effort allows, use the
   // model to produce a high-fidelity summary. This preserves architectural

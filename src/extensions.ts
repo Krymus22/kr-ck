@@ -547,6 +547,36 @@ export async function loadAllExtensions() {
 }
 
 /**
+ * Load and start MCP servers from a specific mode's mcps/ directory.
+ * Called by applyMode() when the user switches modes AFTER startup.
+ * This is separate from loadAllExtensions() (which runs once at startup)
+ * because mode switching happens at runtime.
+ */
+export async function loadModeMCPs(modeName: string): Promise<void> {
+  const modeMCPs = loadMCPsFromModeDir(modeName);
+  for (const [name, cfg] of Object.entries(modeMCPs)) {
+    if (activeMCPServers.has(name)) {
+      // Already running — skip
+      continue;
+    }
+    try {
+      console.log(`[MCP] Starting server "${name}" (command: ${cfg.command})...`);
+      await startAndInitMCPServer(name, cfg);
+      if (activeMCPServers.has(name)) {
+        const server = activeMCPServers.get(name)!;
+        if (server.initialized) {
+          console.log(`[MCP] Server "${name}" connected! ${server.tools.length} tool(s) available.`);
+        } else {
+          console.log(`[MCP] Server "${name}" started but not initialized.`);
+        }
+      }
+    } catch (e) {
+      console.error(`[MCP] Failed to start server "${name}": ${(e as Error).message}`);
+    }
+  }
+}
+
+/**
  * Stop all active MCP Server subprocesses.
  */
 export function shutdownMCPServers() {

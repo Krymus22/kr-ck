@@ -677,6 +677,18 @@ export async function applyMode(name: string): Promise<ModeApplyResult> {
     }
 
     setActiveMode(name);
+
+    // Sprint: Load mode-specific MCP servers (e.g., Roblox Studio MCP).
+    // This is critical — loadAllExtensions() runs once at startup, but the
+    // user may switch modes AFTER startup. Without this, MCPs from the
+    // mode's mcps/ directory are never loaded.
+    try {
+      const { loadModeMCPs } = await import("./extensions.js");
+      await loadModeMCPs(name);
+    } catch (err) {
+      log.warn(`applyMode: failed to load MCPs: ${(err as Error).message}`);
+    }
+
     result.success = true;
     return result;
   } catch (err) {
