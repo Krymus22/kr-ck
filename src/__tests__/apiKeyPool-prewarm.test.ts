@@ -85,8 +85,7 @@ describe("apiKeyPool prewarm", () => {
     await prewarmPool();
 
     // Should have called create() 3 times (once per key)
-    // Last key (reserve) is skipped — 3 keys = 2 prewarmed
-    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockCreate).toHaveBeenCalledTimes(3);
   });
 
   it("prewarmPool() is idempotent — calling twice = 1 prewarm", async () => {
@@ -95,8 +94,7 @@ describe("apiKeyPool prewarm", () => {
     await prewarmPool();
     await prewarmPool(); // should be no-op
 
-    // Last key (reserve) is skipped — 3 keys = 2 prewarmed
-    expect(mockCreate).toHaveBeenCalledTimes(2); // not 6
+    expect(mockCreate).toHaveBeenCalledTimes(3); // not 6
   });
 
   it("prewarmPool() skips when pool is empty", async () => {
@@ -130,7 +128,7 @@ describe("apiKeyPool prewarm", () => {
     // If parallel: elapsed ≈ 50ms (all 3 run at once)
     // If serial: elapsed ≈ 150ms (3 × 50ms)
     expect(elapsed).toBeLessThan(120); // allow 20ms overhead
-    expect(callStarts.length).toBe(2); // 3 keys = 2 prewarmed (skip reserve)
+    expect(callStarts.length).toBe(3);
 
     // All 3 calls should have started within 20ms of each other (parallel)
     const spread = Math.max(...callStarts) - Math.min(...callStarts);
@@ -166,15 +164,13 @@ describe("apiKeyPool prewarm", () => {
     initApiKeyPool();
 
     await prewarmPool();
-    // Last key (reserve) is skipped — 3 keys = 2 prewarmed
-    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockCreate).toHaveBeenCalledTimes(3);
 
     resetPrewarm();
     mockCreate.mockClear();
 
     await prewarmPool();
-    // Last key (reserve) is skipped — 3 keys = 2 prewarmed
-    expect(mockCreate).toHaveBeenCalledTimes(2); // re-prewarmed
+    expect(mockCreate).toHaveBeenCalledTimes(3); // re-prewarmed
   });
 
   it("prewarm uses max_tokens=1 (cheap request)", async () => {
@@ -222,14 +218,13 @@ describe("apiKeyPool prewarm", () => {
     await expect(prewarmPool()).resolves.toBeUndefined();
   });
 
-  it("prewarm with 5 keys fires 4 parallel requests (skip reserve)", async () => {
+  it("prewarm with 5 keys fires 5 parallel requests", async () => {
     process.env.NVIDIA_API_KEYS = "nvapi-k1,nvapi-k2,nvapi-k3,nvapi-k4,nvapi-k5";
     initApiKeyPool();
     expect(getPoolSize()).toBe(5);
 
     await prewarmPool();
-    // 5 keys = 4 prewarmed (skip last/reserve)
-    expect(mockCreate).toHaveBeenCalledTimes(4);
+    expect(mockCreate).toHaveBeenCalledTimes(5);
   });
 });
 

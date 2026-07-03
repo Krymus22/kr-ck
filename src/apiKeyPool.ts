@@ -514,16 +514,11 @@ export async function prewarmPool(): Promise<void> {
   const start = Date.now();
   log.info(`[PREWARM] Warming ${pool.length} key(s) to ${PREWARM_MODEL}...`);
 
-  // Prewarm only the MAIN pool keys (exclude the last key which is the
-  // reserve/heartbeat key — it gets warmed by the heartbeat itself).
-  // With 4 keys: prewarm #0, #1, #2 — key #3 is warmed by heartbeat.
-  // This avoids consuming the reserve key's rate limit budget at startup.
-  const keysToPrewarm = pool.length > 1
-    ? pool.slice(0, pool.length - 1)  // All except last (reserve)
-    : pool;                            // Single key — prewarm it
-
+  // Prewarm ALL keys in parallel so they're all ready for the first request.
+  // max_tokens=1 keeps it cheap (1 token generated, ~10ms on warm model).
+  // stream=false so we don't trigger the streaming parser.
   const results = await Promise.allSettled(
-    keysToPrewarm.map(async (entry, i) => {
+    pool.map(async (entry, i) => {
       const t0 = Date.now();
       try {
         await entry.client.chat.completions.create({
