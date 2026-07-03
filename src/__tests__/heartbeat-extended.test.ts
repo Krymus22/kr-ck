@@ -156,32 +156,32 @@ describe("heartbeat tick (latência e estado do modelo)", () => {
 
 // ─── edge cases ────────────────────────────────────────────────────────────
 describe("edge cases", () => {
-  it("3 falhas consecutivas disparam log.error mas não interrompem heartbeat", async () => {
+  it("5 falhas consecutivas interrompem heartbeat (stopHeartbeat)", async () => {
     // Importa a função error do logger (namespace, igual ao source)
     const logMod = await import("../logger.js");
     const logError = (logMod as any).error as ReturnType<typeof vi.fn>;
 
     const client = { chat: { completions: { create: mockCreate } } } as any;
 
-    // Configura 3 falhas consecutivas
+    // Configura falhas consecutivas
     mockCreate.mockReset();
     mockCreate.mockRejectedValue(new Error("consecutive fail"));
     logError.mockClear();
 
-    // Três startHeartbeat sem reset entre eles acumula consecutiveFailures
-    for (let i = 0; i < 3; i++) {
+    // Cinco startHeartbeat sem reset entre eles acumula consecutiveFailures
+    for (let i = 0; i < 5; i++) {
       startHeartbeat(client);
       await new Promise((r) => setTimeout(r, 60));
       stopHeartbeat();
       // NÃO chama resetHeartbeat — preserva consecutiveFailures
     }
 
-    // Após 3+ falhas consecutivas, log.error deve ter sido chamado pelo menos uma vez
+    // Após 5+ falhas consecutivas, log.error deve ter sido chamado (stopHeartbeat)
     expect(logError).toHaveBeenCalled();
 
     // Stats refletem falhas
     const stats = getHeartbeatStats();
-    expect(stats.totalFailures).toBeGreaterThanOrEqual(3);
+    expect(stats.totalFailures).toBeGreaterThanOrEqual(5);
     expect(stats.consecutiveFailures).toBeGreaterThanOrEqual(3);
     expect(stats.lastHeartbeatOk).toBe(false);
   });

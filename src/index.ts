@@ -94,27 +94,24 @@ async function main(): Promise<void> {
     });
   }
 
-  // Start heartbeat — ONLY for NVIDIA (ZenMux has no cold start).
+  // Start heartbeat — ONLY for NVIDIA with single key (ZenMux has no cold start).
   // NVIDIA NIM free tier unloads models from GPU after 30-60 min of inactivity.
-  // ZenMux doesn't have this problem (shared infrastructure, always warm).
+  // With multi-key pool, heartbeat is DISABLED because:
+  //   1. The pool rotates keys during normal chat, keeping them warm
+  //   2. Prewarm at startup already warms all keys
+  //   3. Heartbeat on a single key (#0) was causing 429s by consuming
+  //      that key's rate limit budget while the pool also uses it
   if (providerNeedsHeartbeat()) {
-    if (getPoolSize() > 0) {
-      const firstKeyStats = getPoolStats()[0];
-      if (firstKeyStats) {
-        const heartbeatClient = new OpenAI({
-          apiKey: process.env.NVIDIA_API_KEYS?.split(",")[0] ?? process.env.NVIDIA_API_KEY ?? "",
-          baseURL: providerConfig.baseUrl,
-          timeout: 30_000,
-        });
-        startHeartbeat(heartbeatClient);
-      }
-    } else if (process.env.NVIDIA_API_KEY) {
+    if (getPoolSize() === 0 && process.env.NVIDIA_API_KEY) {
+      // Single-key mode: heartbeat is useful to keep the model warm
       const heartbeatClient = new OpenAI({
         apiKey: process.env.NVIDIA_API_KEY,
         baseURL: providerConfig.baseUrl,
         timeout: 30_000,
       });
       startHeartbeat(heartbeatClient);
+    } else if (getPoolSize() > 0) {
+      console.log("[claude-killer] Multi-key pool active — heartbeat disabled (pool keeps keys warm)");
     }
   }
 

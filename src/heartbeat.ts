@@ -25,8 +25,8 @@ import * as log from "./logger.js";
 
 // --- Config (env vars) -----------------------------------------------------
 
-/** Heartbeat interval in milliseconds. Default: 1 minute (60000ms). */
-const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS ?? "60000", 10);
+/** Heartbeat interval in milliseconds. Default: 5 minutes (300000ms). */
+const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS ?? "300000", 10);
 
 /** Whether heartbeat is enabled. Default: true. Set HEARTBEAT_ENABLED=0 to disable. */
 const HEARTBEAT_ENABLED = process.env.HEARTBEAT_ENABLED !== "0";
@@ -195,8 +195,9 @@ async function sendHeartbeat(client: OpenAI): Promise<void> {
     consecutiveFailures++;
     totalFailures++;
     log.warn(`[HEARTBEAT] Failed in ${elapsed}ms: ${msg}`);
-    if (consecutiveFailures >= 3) {
-      log.error(`[HEARTBEAT] ${consecutiveFailures} consecutive failures — model may be cold or API unstable`);
+    if (consecutiveFailures >= 5) {
+      log.error(`[HEARTBEAT] ${consecutiveFailures} consecutive failures — stopping heartbeat to avoid wasting requests`);
+      stopHeartbeat();
     }
   } finally {
     heartbeatRunning = false;
