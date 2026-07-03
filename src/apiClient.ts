@@ -1134,6 +1134,10 @@ async function handle5xxRetryableError(
 // no heartbeat/prewarm.
 const MAX_403_RETRIES = 1;
 
+// INVARIANT: 403 retry must be <= 1 to avoid consuming key budget
+import { invariant as _inv403 } from "./invariants.js";
+_inv403(MAX_403_RETRIES <= 1, "403_RETRY_TOO_HIGH", "MAX_403_RETRIES > 1 pode causar 429 no heartbeat", { MAX_403_RETRIES });
+
 function is403Error(err: unknown): boolean {
   const apiErr = err instanceof OpenAI.APIError ? err : null;
   const status = apiErr?.status ?? (err as { status?: number })?.status;

@@ -401,6 +401,9 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
   });
 
   activeMCPServers.set(name, server);
+  // INVARIANT: MCP server name must match expected format for guards
+  const { invariant: _invMCP } = require("./invariants.js");
+  _invMCP(name === name.trim(), "MCP_NAME_HAS_SPACES", "Nome do MCP server tem espaços", { name });
 
   // Initialize and discover tools
   const ok = await initializeServer(server);

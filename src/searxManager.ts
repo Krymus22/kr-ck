@@ -426,6 +426,11 @@ export async function autoStartSearx(): Promise<boolean> {
       console.log(`[claude-killer] Starting Searx Docker container...`);
       const started = startDockerContainer();
       if (started) {
+  // INVARIANT: Docker containers should NOT be stopped by CLI (they have --restart unless-stopped)
+  if (searxMethod === "docker") {
+    const { invariant: _invDocker } = require("./invariants.js");
+    _invDocker(false, "DOCKER_SHOULD_NOT_STOP", "CLI tentou parar container Docker — containers com --restart unless-stopped não devem ser parados", { searxMethod, searxPid });
+  }
         weStartedSearx = false; // Docker manages itself (--restart unless-stopped)
         searxMethod = "docker";
         console.log(`[claude-killer] Searx Docker container started.`);

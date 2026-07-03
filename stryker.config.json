@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_comment": "Stryker mutation testing configuration. Run with: npx stryker run",
+  "packageManager": "npm",
+  "reporters": ["html", "clear-text", "progress"],
+  "testRunner": "vitest",
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/apiClient.ts",
+    "src/heartbeat.ts",
+    "src/apiKeyPool.ts",
+    "src/searxManager.ts",
+    "src/extensions.ts",
+    "src/agent.ts",
+    "src/history.ts",
+    "src/researchHint.ts",
+    "src/robloxMcpGuard.ts",
+    "src/llmCompactor.ts",
+    "src/autoMemory.ts",
+    "src/contextCompaction.ts",
+    "src/argsNormalizer.ts",
+    "src/fileEdit.ts",
+    "src/impactAnalyzer.ts",
+    "src/bugHunter.ts",
+    "src/dataGuard.ts",
+    "src/modes.ts",
+    "src/toolDetector.ts",
+    "src/testRunner.ts"
+  ],
+  "thresholds": {
+    "high": 80,
+    "low": 60,
+    "break": 0
+  },
+  "timeoutMS": 60000,
+  "timeoutFactor": 2,
+  "maxTestRunnerReuse": 5,
+  "concurrency": 2,
+  "ignoreStatic": true,
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  }
+}

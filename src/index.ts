@@ -99,17 +99,14 @@ async function main(): Promise<void> {
   //
   // Heartbeat strategy:
   //   - With pool: use the LAST key (reserve key) so it doesn't compete
-  //     with the pool's main keys for rate limit budget. The reserve key
-  //     stays warm so if a main key fails, the reserve is ready.
+  //     with the pool's main keys for rate limit budget.
   //   - Without pool: use the single key (only option).
-  //   - Interval: 5 minutes (300000ms) — enough to keep GPU warm,
-  //     not enough to cause 429.
+  //   - Interval: 5 minutes (300000ms)
   if (providerNeedsHeartbeat()) {
     const allKeys = process.env.NVIDIA_API_KEYS?.split(",").map(k => k.trim()).filter(k => k) ?? [];
     const poolSize = allKeys.length;
 
     if (poolSize > 0) {
-      // Use LAST key (reserve) for heartbeat — doesn't compete with pool
       const heartbeatKey = allKeys[poolSize - 1];
       const heartbeatClient = new OpenAI({
         apiKey: heartbeatKey,
@@ -118,6 +115,15 @@ async function main(): Promise<void> {
       });
       console.log(`[claude-killer] Heartbeat active on key #${poolSize - 1} (reserve), interval=5min`);
       startHeartbeat(heartbeatClient);
+
+      // INVARIANT: Heartbeat must use the LAST key (reserve), not key #0
+      const { invariant } = await import("./invariants.js");
+      invariant(
+        heartbeatKey !== allKeys[0] || poolSize === 1,
+        "HEARTBEAT_USING_POOL_KEY_0",
+        "Heartbeat está usando key #0 do pool principal — vai causar 429",
+        { heartbeatKeyIndex: poolSize - 1, poolSize },
+      );
     } else if (process.env.NVIDIA_API_KEY) {
       const heartbeatClient = new OpenAI({
         apiKey: process.env.NVIDIA_API_KEY,

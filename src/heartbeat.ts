@@ -27,6 +27,9 @@ import * as log from "./logger.js";
 
 /** Heartbeat interval in milliseconds. Default: 5 minutes (300000ms). */
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS ?? "300000", 10);
+// INVARIANT: Heartbeat interval must be >= 5 minutes (300000ms) to avoid 429
+import { invariant as _invHB } from "./invariants.js";
+_invHB(HEARTBEAT_INTERVAL_MS >= 300000, "HEARTBEAT_INTERVAL_TOO_SHORT", "Heartbeat interval < 5min vai causar 429", { HEARTBEAT_INTERVAL_MS });
 
 /** Whether heartbeat is enabled. Default: true. Set HEARTBEAT_ENABLED=0 to disable. */
 const HEARTBEAT_ENABLED = process.env.HEARTBEAT_ENABLED !== "0";
