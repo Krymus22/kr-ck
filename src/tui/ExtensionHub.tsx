@@ -547,7 +547,7 @@ function ExtensionCard({ item, selected, cardWidth }: Readonly<{ item?: Extensio
       ? "[FALTA]"
       : toolStatus === "found"
       ? "[OK]"
-      : "[OK]"
+      : "[OK]" // "working" status — show as OK too
     : "";
 
   const statusColor = toolStatus === "missing" ? colors.error : toolStatus === "found" ? colors.success : colors.muted;

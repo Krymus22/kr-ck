@@ -212,8 +212,8 @@ export class ToolRegistry {
     const tool = this.tools.get(toolName);
     if (!tool) return "missing";
     if (!this.isInstalled(toolName)) return "missing";
-    // If we have binaryPath from detector, it's at least "found"
-    return tool.detection.binaryPath ? "found" : "found";
+    // If we have binaryPath from detector, it's "found", otherwise "missing"
+    return tool.detection.binaryPath ? "found" : "missing";
   }
   
   /**

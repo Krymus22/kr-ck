@@ -214,9 +214,10 @@ async function runHookInWorker(
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
+      // worker.terminate() is synchronous and can throw if worker already exited
       try {
         worker.terminate();
-      } catch {
+      } catch { /* worker already exited — ignore */
         /* ignore */
       }
       resolve(value);

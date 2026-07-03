@@ -711,29 +711,20 @@ export function deactivateMode(): void {
   // Usar optional chaining + fallback pra array vazia.
   const modeTools = (mode as any)?.tools ?? mode?.enableTools ?? [];
   if (mode && modeTools.length > 0) {
-    try {
-      // Lazy-import for evitar dependência circular (mesmo padrão do applyMode).
-      // Como o dynamic import é async, usamos um wrapper fire-and-forget —
-      // chamadas sincronizadas a deactivateMode ainda limpam o ponteiro
-      // imediatamente (abaixo), mas a reversão das tools acontece de forma
-      // assíncrona. O handler do TUI aguarda a próxima renderização.
-      void (async () => {
-        const { toggleExtension, getAllExtensions } = await import("./extensionCenter.js");
-        const all = getAllExtensions();
-        for (const toolId of modeTools) {
-          const ext = all.find((e) => e.id === toolId);
-          // Só desliga se estiver ON (enabled && triggerMode !== "disabled").
-          // Não desliga skills/features — usuário pode ter habilitado manualmente.
-          if (ext && ext.category === "tool" && ext.enabled && ext.triggerMode !== "disabled") {
-            toggleExtension(toolId);
-          }
+    // Lazy-import for evitar dependência circular.
+    // O .catch() já captura erros — try/catch externo era redundante.
+    void (async () => {
+      const { toggleExtension, getAllExtensions } = await import("./extensionCenter.js");
+      const all = getAllExtensions();
+      for (const toolId of modeTools) {
+        const ext = all.find((e) => e.id === toolId);
+        if (ext && ext.category === "tool" && ext.enabled && ext.triggerMode !== "disabled") {
+          toggleExtension(toolId);
         }
-      })().catch((err) => {
-        log.warn(`deactivateMode: failed to revert tools: ${(err as Error).message}`);
-      });
-    } catch (err) {
+      }
+    })().catch((err) => {
       log.warn(`deactivateMode: failed to revert tools: ${(err as Error).message}`);
-    }
+    });
   }
   setActiveMode(null);
 }
