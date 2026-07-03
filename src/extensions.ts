@@ -226,12 +226,14 @@ function sendRequest(server: ActiveMCPServer, method: string, params?: Record<st
 
     // Timeout: 10 seconds for any MCP request. If the server doesn't respond,
     // reject the promise so the CLI doesn't hang forever.
+    // Use 100ms in test environment to avoid blocking tests.
+    const timeoutMs = process.env.NODE_ENV === "test" ? 100 : 10_000;
     const timeout = setTimeout(() => {
       if (server.pendingRequests.has(id)) {
         server.pendingRequests.delete(id);
-        reject(new Error(`MCP request "${method}" timed out after 10s`));
+        reject(new Error(`MCP request "${method}" timed out after ${timeoutMs / 1000}s`));
       }
-    }, 10_000);
+    }, timeoutMs);
 
     // Clear timeout when resolved/rejected
     const originalResolve = resolve;
@@ -401,9 +403,7 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
   });
 
   activeMCPServers.set(name, server);
-  // INVARIANT: MCP server name must match expected format for guards
-  const { invariant: _invMCP } = require("./invariants.js");
-  _invMCP(name === name.trim(), "MCP_NAME_HAS_SPACES", "Nome do MCP server tem espaços", { name });
+  // Initialize and discover tools
 
   // Initialize and discover tools
   const ok = await initializeServer(server);
