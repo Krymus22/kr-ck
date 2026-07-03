@@ -599,19 +599,19 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
 
   // ─── /buscar ──────────────────────────────────────────────────────────────
 
-  it("/buscar (sem arg) — mostra ajuda de uso com exemplo /buscar darklua", async () => {
+  it("/buscar (sem arg) — mostra ajuda de uso com exemplo /buscar selene", async () => {
     const { stdin, lastFrame } = render(<App />);
     await sendCommand(stdin, "/buscar");
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("Usage: /buscar <filename>");
-    expect(out).toContain("/buscar darklua");
+    expect(out).toContain("/buscar selene");
   });
 
-  it("/buscar darklua — mostra mensagem 'Searching \"darklua\"'", async () => {
+  it("/buscar selene — mostra mensagem 'Searching \"selene\"'", async () => {
     const { stdin, lastFrame } = render(<App />);
-    await sendCommand(stdin, "/buscar darklua");
+    await sendCommand(stdin, "/buscar selene");
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain('Searching "darklua"');
+    expect(out).toContain('Searching "selene"');
   });
 
   // ─── /organize ────────────────────────────────────────────────────────────
@@ -660,14 +660,14 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
     expect(out).toContain("Configurador de Tools");
   });
 
-  it.skip("/configurar darklua — opens configurator for specific tool", async () => {
+  it.skip("/configurar selene — opens configurator for specific tool", async () => {
     const { stdin, lastFrame } = render(<App />);
-    await sendCommand(stdin, "/configurar darklua", 400);
+    await sendCommand(stdin, "/configurar selene", 400);
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain("Opening configurator for \"darklua\"");
-    // ConfiguratorChat real renderiza "Configurando \"darklua\"..."
+    expect(out).toContain("Opening configurator for \"selene\"");
+    // ConfiguratorChat real renderiza "Configurando \"selene\"..."
     expect(out).toContain("Configurando");
-    expect(out).toContain("darklua");
+    expect(out).toContain("selene");
   });
 
   // ─── /exit + /quit ────────────────────────────────────────────────────────
