@@ -139,8 +139,8 @@ export function loadModeManifests(modeName: string | null): ToolManifest[] {
  * Load manifests for the active mode + the "normal" base mode + shared tools.
  *
  * Sprint 6: Also loads manifests from OTHER modes that have sharedWith
- * including the active mode. For example, if "normal" has darklua with
- * sharedWith: ["roblox"], and roblox is active, darklua is included.
+ * including the active mode. For example, if "normal" has selene with
+ * sharedWith: ["roblox"], and roblox is active, selene is included.
  *
  * Priority: mode-specific > shared > normal (base).
  */

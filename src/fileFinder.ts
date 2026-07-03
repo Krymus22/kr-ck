@@ -7,7 +7,7 @@
  *   2. searchEntireMachine() — slow, scans all drives (needs permission)
  *
  * Used by:
- *   - Mini chat configurator (Sprint 11) — "tenho darklua em algum lugar"
+ *   - Mini chat configurator (Sprint 11) — "tenho selene em algum lugar"
  *   - Command /buscar <arquivo> — direct CLI access
  *   - Future: inbox organizer can suggest copying found files
  */
@@ -120,7 +120,7 @@ export function searchInDefinedFolders(
  * Windows: `where /R <drive> <filename>` for each drive (C:\, D:\, etc.)
  * Unix: `find / -name <filename> -type f 2>/dev/null`
  *
- * @param fileName   File to search for (e.g., "darklua" or "darklua.exe")
+ * @param fileName   File to search for (e.g., "selene" or "selene.exe")
  * @param onProgress Callback for progress updates (current path being scanned)
  * @param abortSignal Object with `aborted: boolean` — set to true to cancel
  * @returns Array of results (may be empty)

@@ -211,7 +211,7 @@ function handleHubCommand(): CommandResult {
 // Sprint 9: /buscar <arquivo> — procura arquivo na máquina
 function handleBuscarCommand(arg: string | null): CommandResult {
   if (!arg) {
-    return { handled: true, message: "Usage: /buscar <filename>\nExample: /buscar darklua\nSearches default folders first. If not found, asks to search entire machine." };
+    return { handled: true, message: "Usage: /buscar <filename>\nExample: /buscar selene\nSearches default folders first. If not found, asks to search entire machine." };
   }
   // The actual search is async — we return a message and the search
   // will be triggered by the system message flow.

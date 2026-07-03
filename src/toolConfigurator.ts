@@ -85,7 +85,7 @@ function getConfiguratorTools() {
         parameters: {
           type: "object",
           properties: {
-            comando: { type: "string", description: "Comando completo (ex: 'darklua --help', 'where rojo')" },
+            comando: { type: "string", description: "Comando completo (ex: 'selene --help', 'where rojo')" },
           },
           required: ["comando"],
         },
@@ -99,7 +99,7 @@ function getConfiguratorTools() {
         parameters: {
           type: "object",
           properties: {
-            nome: { type: "string", description: "Nome do arquivo (ex: 'darklua', 'rojo')" },
+            nome: { type: "string", description: "Nome do arquivo (ex: 'selene', 'rojo')" },
           },
           required: ["nome"],
         },
@@ -113,7 +113,7 @@ function getConfiguratorTools() {
         parameters: {
           type: "object",
           properties: {
-            toolName: { type: "string", description: "Nome da tool (ex: 'darklua')" },
+            toolName: { type: "string", description: "Nome da tool (ex: 'selene')" },
             manifest: { type: "object", description: "Objeto JSON do manifest" },
           },
           required: ["toolName", "manifest"],
@@ -258,7 +258,7 @@ async function handleConfiguratorTool(
  * This runs a mini agent loop with limited tools and a restrictive system prompt.
  * The IA can: run --help/--version, search files, create manifests, ask questions.
  *
- * @param toolName    Name of the tool to configure (e.g., "darklua")
+ * @param toolName    Name of the tool to configure (e.g., "selene")
  * @param modeName    Active mode name
  * @param onAskUser   Callback for asking user questions (AskUser integration)
  * @param onMessage   Callback for showing messages to user (mini chat)
