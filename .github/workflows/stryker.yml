@@ -1,10 +1,17 @@
-name: Mutation Testing (Stryker)
+name: Mutation Testing (Stryker) (DISABLED — run manually)
+
+# DESATIVADO: rodava todo dia às 22:30 BRT (9h de execução = ~540 min/dia!).
+# Em 1 dia consome 27% do limite mensal de 2000 min do free tier private.
+# Para rodar manualmente quando quiser:
+#   1. Vai em https://github.com/Krymus22/claude-killer/actions/workflows/stryker.yml
+#   2. Clica em "Run workflow"
+# Reativar: descomentar as linhas `schedule:` abaixo.
 
 on:
   # Roda toda noite: 22:30 BRT (01:30 UTC) até 07:30 BRT (10:30 UTC)
   # Janela de 9 horas para análise completa
-  schedule:
-    - cron: '30 1 * * *'
+  # schedule:
+  #   - cron: '30 1 * * *'
   # Permite rodar manualmente
   workflow_dispatch:
 

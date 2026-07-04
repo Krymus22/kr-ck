@@ -1,10 +1,13 @@
-name: SonarQube Analysis
+name: SonarQube Analysis (DISABLED — run manually via workflow_dispatch)
+
+# DESATIVADO para economizar GitHub Actions minutes (consome ~98 min/mês
+# no free tier private repo). Para rodar manualmente:
+#   1. Vai em https://github.com/Krymus22/claude-killer/actions/workflows/sonarqube.yml
+#   2. Clica em "Run workflow"
+# Reativar: trocar `workflow_dispatch:` apenas por `push: branches: [master]`
+# e `pull_request: branches: [master]`.
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
   workflow_dispatch:
 
 jobs:
