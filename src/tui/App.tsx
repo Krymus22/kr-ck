@@ -195,23 +195,71 @@ function handleMcpCommand(arg: string | null): CommandResult {
     if (!name) {
       return { handled: true, message: "Usage: /mcp remove <name>" };
     }
+    const removedFrom: string[] = [];
+    const errors: string[] = [];
+
+    // 1. Try ~/.claude-killer/config.json
     try {
       const current = loadDotfileConfig();
       const existingServers = current.mcpServers ?? {};
-      if (!existingServers[name]) {
-        return { handled: true, message: `MCP server "${name}" not found in ~/.claude-killer/config.json` };
+      if (existingServers[name]) {
+        delete existingServers[name];
+        saveDotfileConfig({ ...current, mcpServers: existingServers });
+        removedFrom.push("~/.claude-killer/config.json");
       }
-      delete existingServers[name];
-      saveDotfileConfig({ ...current, mcpServers: existingServers });
+    } catch (err) {
+      errors.push(`~/.claude-killer/config.json: ${(err as Error).message}`);
+    }
+
+    // 2. Try ./.mcp.json (project-local)
+    try {
+      const projectMcpJson = path.join(process.cwd(), ".mcp.json");
+      if (fs.existsSync(projectMcpJson)) {
+        const raw = JSON.parse(fs.readFileSync(projectMcpJson, "utf8"));
+        if (raw.mcpServers && raw.mcpServers[name]) {
+          delete raw.mcpServers[name];
+          fs.writeFileSync(projectMcpJson, JSON.stringify(raw, null, 2), "utf8");
+          removedFrom.push("./.mcp.json");
+        }
+      }
+    } catch (err) {
+      errors.push(`./.mcp.json: ${(err as Error).message}`);
+    }
+
+    // 3. Try ~/.claude.json (Claude Code global format)
+    try {
+      const home = process.env.HOME ?? process.env.USERPROFILE ?? ".";
+      const claudeJson = path.join(home, ".claude.json");
+      if (fs.existsSync(claudeJson)) {
+        const raw = JSON.parse(fs.readFileSync(claudeJson, "utf8"));
+        if (raw.mcpServers && raw.mcpServers[name]) {
+          delete raw.mcpServers[name];
+          fs.writeFileSync(claudeJson, JSON.stringify(raw, null, 2), "utf8");
+          removedFrom.push("~/.claude.json");
+        }
+      }
+    } catch (err) {
+      errors.push(`~/.claude.json: ${(err as Error).message}`);
+    }
+
+    if (removedFrom.length > 0) {
       return {
         handled: true,
         message:
-          `[OK] MCP server "${name}" removed from ~/.claude-killer/config.json\n` +
-          `Restart the CLI to unload it.`,
+          `[OK] MCP server "${name}" removed from:\n` +
+          removedFrom.map((s) => `  - ${s}`).join("\n") +
+          `\n\nRestart the CLI to unload it.`,
       };
-    } catch (err) {
-      return { handled: true, message: `Failed to remove MCP server: ${(err as Error).message}` };
     }
+    return {
+      handled: true,
+      message:
+        `MCP server "${name}" not found in any config file:\n` +
+        `  - ~/.claude-killer/config.json\n` +
+        `  - ./.mcp.json\n` +
+        `  - ~/.claude.json\n` +
+        (errors.length > 0 ? `\nErrors:\n${errors.map((e) => `  - ${e}`).join("\n")}` : ""),
+    };
   }
 
   return {
