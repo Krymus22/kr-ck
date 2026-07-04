@@ -14,6 +14,7 @@ import { Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { runAgentLoop } from "../agent.js";
 import * as history from "../history.js";
 import * as todo from "../todo.js";
@@ -66,6 +67,7 @@ function getSlashCommands(): Array<{ cmd: string; desc: string; subcommands?: st
 const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   ...getSlashCommands().map((c) => ({ cmd: c.cmd, desc: c.desc })),
   { cmd: "/buscar", desc: "Search for file on machine (tools, etc)" },
+  { cmd: "/cd", desc: "Change working directory (project switcher)" },
 ];
 
 type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null; compactDone?: boolean; compactStarted?: boolean; compactInstruction?: string; compactResult?: { removed: number; beforeTokens: number; afterTokens: number; method?: string } };
@@ -221,6 +223,157 @@ function handleBuscarCommand(arg: string | null): CommandResult {
   };
 }
 
+/**
+ * /cd [path] — change working directory (similar to Claude Code's project picker).
+ *
+ * Without arg: shows current cwd + suggestions (subdirs + parent).
+ * With arg: changes cwd to the given path (relative or absolute).
+ *
+ * Use cases:
+ *   /cd                      → show current cwd + suggestions
+ *   /cd src                  → enter src/ subfolder
+ *   /cd ..                   → go to parent
+ *   /cd C:\Users\kryst\jogo  → absolute path (Windows)
+ *   /cd ~/projects           → home-relative
+ *
+ * After /cd, all subsequent file operations (editar_arquivo, executar_comando,
+ * Bug Hunter, etc.) will use the new cwd.
+ *
+ * The IA can also call this when the user says "switch to my other project"
+ * or "let's work on the roblox game".
+ */
+function handleCdCommand(arg: string | null): CommandResult {
+  const currentCwd = process.cwd();
+
+  // /cd (sem arg) — mostra cwd atual + sugestões
+  if (!arg) {
+    const lines: string[] = [
+      `Current working directory:`,
+      `  ${currentCwd}`,
+      ``,
+      `Quick navigation:`,
+    ];
+
+    // Lista subpastas do cwd atual
+    try {
+      const entries = fs.readdirSync(currentCwd, { withFileTypes: true });
+      const subdirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !e.name.startsWith("node_modules"))
+        .slice(0, 15)
+        .map((e) => e.name);
+      if (subdirs.length > 0) {
+        lines.push(`  Subfolders (use /cd <name>):`);
+        for (const d of subdirs) {
+          lines.push(`    /cd ${d}`);
+        }
+      } else {
+        lines.push(`  (no subfolders here)`);
+      }
+    } catch {
+      lines.push(`  (could not list subfolders)`);
+    }
+
+    // Parent dir
+    const parent = path.dirname(currentCwd);
+    if (parent !== currentCwd) {
+      lines.push(``, `Parent:`, `  /cd ..  → ${parent}`);
+    }
+
+    // Detecta se é um projeto Roblox (default.project.json)
+    const hasRobloxProject = fs.existsSync(path.join(currentCwd, "default.project.json"));
+    if (hasRobloxProject) {
+      lines.push(``, `✓ Roblox project detected (default.project.json found)`);
+    }
+
+    // Detecta se é projeto Node
+    const hasNodeProject = fs.existsSync(path.join(currentCwd, "package.json"));
+    if (hasNodeProject) {
+      lines.push(`✓ Node.js project detected (package.json found)`);
+    }
+
+    lines.push(
+      ``,
+      `Usage:`,
+      `  /cd <subfolder>          — enter subfolder`,
+      `  /cd ..                   — go to parent`,
+      `  /cd <absolute-path>      — jump to absolute path`,
+      `  /cd ~                    — go to home directory`,
+      `  /cd ~/projects/jogo      — home-relative path`,
+    );
+    return { handled: true, message: lines.join("\n") };
+  }
+
+  // /cd ~ → home
+  if (arg === "~") {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+    try {
+      process.chdir(home);
+      return { handled: true, message: `[OK] Working directory changed to:\n  ${process.cwd()}` };
+    } catch (err) {
+      return { handled: true, message: `[ERROR] Could not change to home: ${(err as Error).message}` };
+    }
+  }
+
+  // /cd ~/path → expand home
+  let targetPath = arg;
+  if (arg.startsWith("~/") || arg.startsWith("~\\")) {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+    targetPath = path.join(home, arg.slice(2));
+  }
+
+  // Resolve path (relative to cwd if not absolute)
+  const resolved = path.resolve(targetPath);
+
+  // Verifica se existe e é diretório
+  try {
+    const stat = fs.statSync(resolved);
+    if (!stat.isDirectory()) {
+      return { handled: true, message: `[ERROR] Not a directory: ${resolved}` };
+    }
+  } catch {
+    return { handled: true, message: `[ERROR] Path does not exist: ${resolved}` };
+  }
+
+  // Tenta mudar o cwd
+  try {
+    process.chdir(resolved);
+    const newCwd = process.cwd();
+    const lines = [
+      `[OK] Working directory changed:`,
+      `  ${newCwd}`,
+      ``,
+    ];
+    // Detecta projetos no novo cwd
+    if (fs.existsSync(path.join(newCwd, "default.project.json"))) {
+      lines.push(`✓ Roblox project detected (default.project.json found)`);
+    }
+    if (fs.existsSync(path.join(newCwd, "package.json"))) {
+      lines.push(`✓ Node.js project detected (package.json found)`);
+    }
+    // Lista subpastas do novo cwd
+    try {
+      const entries = fs.readdirSync(newCwd, { withFileTypes: true });
+      const subdirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !e.name.startsWith("node_modules"))
+        .slice(0, 10)
+        .map((e) => e.name);
+      if (subdirs.length > 0) {
+        lines.push(``, `Subfolders:`, ...subdirs.map((d) => `  ${d}`));
+      }
+    } catch { /* ignore */ }
+    // Recarrega project memory (CLAUDE.md/AGENTS.md do novo diretório)
+    try {
+      const memory = history.reloadProjectMemory();
+      if (memory) {
+        lines.push(``, `✓ Project memory reloaded (CLAUDE.md / AGENTS.md)`);
+      }
+    } catch { /* ignore */ }
+    return { handled: true, message: lines.join("\n") };
+  } catch (err) {
+    return { handled: true, message: `[ERROR] Could not change directory: ${(err as Error).message}` };
+  }
+}
+
 // Sprint 10: /organize — classifica e move arquivos do inbox/ do modo ativo
 function handleOrganizeCommand(): CommandResult {
   const mode = getActiveMode();
@@ -358,6 +511,8 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/distill": () => handleDistillCommand(),
   // Sprint 9: buscar arquivo na máquina
   "/buscar": (arg) => handleBuscarCommand(arg),
+  // /cd — change working directory (similar to Claude Code's project picker)
+  "/cd": (arg) => handleCdCommand(arg),
   // Sprint 10: organizar inbox do modo ativo
   "/organize": () => handleOrganizeCommand(),
   // Sprint 11: configurar tools via mini chat

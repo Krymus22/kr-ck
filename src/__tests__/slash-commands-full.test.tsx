@@ -683,4 +683,50 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
     await sendCommand(stdin, "/quit");
     expect(mockedShutdownMCPServers).toHaveBeenCalledTimes(1);
   });
+
+  // ─── /cd — change working directory ────────────────────────────────────────
+
+  it("/cd (sem arg) — mostra cwd atual + sugestões de subpastas", async () => {
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/cd");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("Current working directory");
+    expect(out).toContain("Quick navigation");
+    expect(out).toContain("/cd <subfolder>");
+    expect(out).toContain("/cd ..");
+  });
+
+  it("/cd <subfolder> — muda cwd e confirma", async () => {
+    const { stdin, lastFrame } = render(<App />);
+    // Vai pra tmp (sempre existe)
+    const tmpDir = require("node:os").tmpdir();
+    await sendCommand(stdin, `/cd ${tmpDir}`);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("[OK] Working directory changed");
+    expect(out).toContain(tmpDir);
+  });
+
+  it("/cd <path-inexistente> — mostra erro", async () => {
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/cd /caminho/que/nao/existe/12345");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("[ERROR] Path does not exist");
+  });
+
+  it("/cd ~ — vai pra home directory", async () => {
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/cd ~");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("[OK] Working directory changed");
+    expect(out).toContain(require("node:os").homedir());
+  });
+
+  it("/cd . — mantém no mesmo diretório", async () => {
+    const { stdin, lastFrame } = render(<App />);
+    const beforeCwd = process.cwd();
+    await sendCommand(stdin, "/cd .");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("[OK] Working directory changed");
+    expect(process.cwd()).toBe(beforeCwd);
+  });
 });
