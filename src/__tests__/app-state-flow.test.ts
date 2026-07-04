@@ -56,9 +56,13 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
 };
 
 function handleSlashCommand(input: string): CommandResult {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  const arg = parts[1]?.toLowerCase() || null;
+  // Mirror of the real handleSlashCommand in App.tsx — passes the FULL arg
+  // string (case preserved) to the handler, not just the first whitespace-
+  // separated token.
+  const trimmed = input.trim();
+  const firstSpace = trimmed.search(/\s/);
+  const cmd = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+  const arg = firstSpace === -1 ? null : trimmed.slice(firstSpace + 1).trim() || null;
   const handler = COMMAND_HANDLERS[cmd];
   if (handler) return handler(arg);
   return { handled: false };

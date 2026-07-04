@@ -517,6 +517,91 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
     expect(out).toContain("Choose an option");
   });
 
+  // ─── Regression: /mode <name> new|keep must NOT re-show the "Choose an option" prompt ──
+  // Bug: handleSlashCommand used `parts[1]` as arg, dropping everything after the
+  // second token. So `/mode roblox new` was parsed as `/mode roblox` and the user
+  // saw the prompt again no matter how many times they typed `new` or `keep`.
+
+  it("/mode roblox new — ativa modo, reseta chat, mostra sucesso (não re-prompta)", async () => {
+    mockedGetMode.mockReturnValue({
+      name: "roblox", label: "Roblox (External)", enableTools: ["rojo"], enableSkills: [],
+      enableFeatures: [], effortLevel: "high", strictMode: true,
+    });
+    mockedApplyMode.mockResolvedValue({ success: true });
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/mode roblox new");
+    // Wait a tick for the async applyMode().then(...) to resolve.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockedApplyMode).toHaveBeenCalledWith("roblox");
+    expect(mockedResetHistory).toHaveBeenCalledTimes(1);
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain('[OK] Modo "roblox"');
+    expect(out).toContain("ativado!");
+    expect(out).toContain("Chat reiniciado");
+    // Must NOT re-show the prompt — that was the bug.
+    expect(out).not.toContain("Choose an option");
+  });
+
+  it("/mode roblox keep — ativa modo, mantém chat, mostra sucesso (não reseta)", async () => {
+    mockedGetMode.mockReturnValue({
+      name: "roblox", label: "Roblox (External)", enableTools: ["rojo"], enableSkills: [],
+      enableFeatures: [], effortLevel: "high", strictMode: true,
+    });
+    mockedApplyMode.mockResolvedValue({ success: true });
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/mode roblox keep");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockedApplyMode).toHaveBeenCalledWith("roblox");
+    // keep must NOT reset history.
+    expect(mockedResetHistory).not.toHaveBeenCalled();
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain('[OK] Modo "roblox"');
+    expect(out).toContain("ativado!");
+    expect(out).toContain("Chat mantido");
+    expect(out).not.toContain("Choose an option");
+  });
+
+  it("/mode ROBLOX NEW — case-insensitive mode name, uppercase action", async () => {
+    // Mode name should be lowercased before lookup; action should be lowercased too.
+    mockedGetMode.mockImplementation((name: string) =>
+      name === "roblox"
+        ? { name: "roblox", label: "Roblox", enableTools: [], enableSkills: [], enableFeatures: [], effortLevel: "high", strictMode: false }
+        : null,
+    );
+    mockedApplyMode.mockResolvedValue({ success: true });
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/mode ROBLOX NEW");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockedApplyMode).toHaveBeenCalledWith("roblox");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("ativado!");
+    expect(out).not.toContain("Choose an option");
+  });
+
+  it("/mode roblox bogus — action inválido re-prompta (mas não ativa)", async () => {
+    // Unknown action token should fall through to the "Choose an option" prompt
+    // without calling applyMode.
+    mockedGetMode.mockReturnValue({
+      name: "roblox", label: "Roblox", enableTools: [], enableSkills: [], enableFeatures: [],
+      effortLevel: "high", strictMode: false,
+    });
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/mode roblox bogus");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mockedApplyMode).not.toHaveBeenCalled();
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("Choose an option");
+  });
+
+  it("/compact <multi-word instruction> — preserva instrucao com espacos e case", async () => {
+    // Same root bug: handleSlashCommand dropped everything after parts[1].
+    // `/compact focus on code changes` was passed as arg="focus" only.
+    const { stdin, lastFrame } = render(<App />);
+    await sendCommand(stdin, "/compact focus on Code Changes");
+    const out = stripAnsi(lastFrame() ?? "");
+    expect(out).toContain("Compactando com foco em: focus on Code Changes");
+  });
+
   it("/mode off — deactivates and calls deactivateMode()", async () => {
     const { stdin, lastFrame } = render(<App />);
     await sendCommand(stdin, "/mode off");

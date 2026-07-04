@@ -113,13 +113,15 @@ function handleCavemanCommand(arg: string | null): CommandResult {
     const current = history.getCavemanLevel();
     return { handled: true, message: `Caveman: ${current ?? "desativado"}\nUso: /caveman <lite|full|ultra|off>` };
   }
-  if (arg === "off" || arg === "normal") {
+  // arg is now case-preserved by handleSlashCommand; levels are lowercase by convention.
+  const normalized = arg.toLowerCase();
+  if (normalized === "off" || normalized === "normal") {
     history.setCavemanLevel(null);
     return { handled: true, message: "Caveman desativado!" };
   }
-  if (validLevels.includes(arg)) {
-    history.setCavemanLevel(arg);
-    return { handled: true, message: `Caveman ativado: ${arg.toUpperCase()}` };
+  if (validLevels.includes(normalized)) {
+    history.setCavemanLevel(normalized);
+    return { handled: true, message: `Caveman ativado: ${normalized.toUpperCase()}` };
   }
   return { handled: true, message: `Invalid level. Use: ${validLevels.join(", ")} or off` };
 }
@@ -151,6 +153,7 @@ function handleCompactCommand(arg: string | null): CommandResult {
   // /compact vazio = compactação automática (preserva tudo importante)
   // A compactação real (LLM-based) é feita pelo caller (handleSlashCommandFlow)
   // que tem acesso aos setters do React.
+  // NOTE: arg is the FULL string after `/compact ` (multi-word, case preserved).
   const customInstruction = arg?.trim() || undefined;
 
   return {
@@ -239,21 +242,24 @@ function handleOrganizeCommand(): CommandResult {
 
 // Sprint 11: /configurar [tool-name] — abre mini chat do configurador
 function handleConfigurarCommand(arg: string | null): CommandResult {
-  // The actual UI is opened via state — this just triggers it
+  // The actual UI is opened via state — this just triggers it.
+  // arg is a tool name — normalize to lowercase (tool names are lowercase by convention).
+  const toolName = arg?.toLowerCase() ?? null;
   return {
     handled: true,
-    message: arg
-      ? `Abrindo configurador for "${arg}"...`
+    message: toolName
+      ? `Abrindo configurador for "${toolName}"...`
       : "Opening configurator... (use /configurar <tool-name> to configure a specific tool)",
     openConfigurator: true,
-    configuratorTool: arg,
+    configuratorTool: toolName,
   };
 }
 
 function handleToolsCommand(arg: string | null): CommandResult {
   const registry = getExternalToolRegistry();
 
-  const category = arg;
+  // Category is conventionally lowercase.
+  const category = arg?.toLowerCase() ?? null;
   const tools = category ? registry.getByCategory(category as any) : registry.getAll();
   
   if (tools.length === 0) {
@@ -291,8 +297,10 @@ function handleToolInfoCommand(arg: string | null): CommandResult {
     return { handled: true, message: "Uso: /toolinfo <nome_da_tool>" };
   }
 
+  // Tool names are conventionally lowercase.
+  const name = arg.toLowerCase();
   const registry = getExternalToolRegistry();
-  const tool = registry.get(arg);
+  const tool = registry.get(name);
   
   if (!tool) {
     return { handled: true, message: `Tool "${arg}" not found.` };
@@ -373,13 +381,17 @@ function handleLangCommand(arg: string | null): CommandResult {
     const current = detectLanguage();
     return { handled: true, message: `Idioma atual: ${current}\nUse: /lang pt-BR | en` };
   }
+  // Accept case-insensitively (e.g. "pt-BR", "pt-br", "PT-BR" all map to "pt-BR").
+  // Previously the global lowercasing in handleSlashCommand turned "pt-BR" into
+  // "pt-br", which then failed the strict `valid.includes(arg)` check.
+  const normalized = arg.toLowerCase() === "pt-br" ? "pt-BR" : arg.toLowerCase();
   const valid = ["pt-BR", "en"];
-  if (!valid.includes(arg)) {
+  if (!valid.includes(normalized)) {
     return { handled: true, message: `Invalid language: ${arg}\nOptions: pt-BR, en` };
   }
-  setLanguage(arg as any);
+  setLanguage(normalized as any);
   resetLanguageCache();
-  return { handled: true, message: `Idioma alterado para: ${arg}` };
+  return { handled: true, message: `Idioma alterado para: ${normalized}` };
 }
 
 function handleSearxCommand(_arg: string | null): CommandResult {
@@ -460,11 +472,13 @@ function handleEffortCommand(arg: string | null): CommandResult {
   if (!arg) {
     return { handled: true, message: `Effort atual: ${getEffortLabel()}\nUse: /effort low|medium|high|max` };
   }
+  // Levels are lowercase by convention.
+  const level = arg.toLowerCase();
   const valid = ["low", "medium", "high", "max"];
-  if (!valid.includes(arg)) {
+  if (!valid.includes(level)) {
     return { handled: true, message: `Invalid level: ${arg}\nOptions: low, medium, high, max` };
   }
-  setEffortLevel(arg as any);
+  setEffortLevel(level as any);
   return { handled: true, message: `Effort alterado para: ${getEffortLabel()}` };
 }
 
@@ -557,9 +571,16 @@ function handleModeCommand(arg: string | null): CommandResult {
   // Parse: /mode <name> [new|keep]
   //   new  = ativa modo + limpa chat (contexto fresh)
   //   keep = ativa modo + mantém chat atual (default)
+  // arg is the FULL string after `/mode ` (case preserved by handleSlashCommand).
+  // modeName is conventionally lowercase; lowercase it for the getMode lookup so
+  // users can type `/mode ROBLOX new` and still hit the "roblox" mode.
   const parts = arg.split(/\s+/).filter(Boolean);
-  const modeName = parts[0]!;
+  const modeName = (parts[0] ?? "").toLowerCase();
   const contextAction = parts[1]?.toLowerCase();  // "new" | "keep" | undefined
+
+  if (!modeName) {
+    return { handled: true, message: "Usage: /mode <name> [new|keep]" };
+  }
 
   const mode = getMode(modeName);
   if (!mode) {
@@ -630,9 +651,16 @@ function handlePoolCommand(): CommandResult {
 }
 
 function handleSlashCommand(input: string): CommandResult {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  const arg = parts[1]?.toLowerCase() || null;
+  // NOTE: pass the FULL argument string (everything after the command token)
+  // to the handler — not just the first whitespace-separated token. Several
+  // commands take multi-word args (e.g. `/mode roblox new`, `/mode create
+  // <description with spaces>`, `/compact focus on code changes`, `/buscar
+  // FileName.txt`). Case is preserved here; each handler lowercases its arg
+  // if/when it needs to.
+  const trimmed = input.trim();
+  const firstSpace = trimmed.search(/\s/);
+  const cmd = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+  const arg = firstSpace === -1 ? null : trimmed.slice(firstSpace + 1).trim() || null;
 
   const handler = COMMAND_HANDLERS[cmd];
   if (handler) return handler(arg);
