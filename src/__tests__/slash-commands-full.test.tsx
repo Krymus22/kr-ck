@@ -977,14 +977,15 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
 
 // ─── /cd — change working directory ────────────────────────────────────────
 
-  it("/cd (sem arg) — mostra cwd atual + sugestões de subpastas", async () => {
+  it("/cd (sem arg) — abre seletor visual de pastas (FolderBrowser)", async () => {
     const { stdin, lastFrame } = render(<App />);
     await sendCommand(stdin, "/cd");
     const out = stripAnsi(lastFrame() ?? "");
-    expect(out).toContain("Current working directory");
-    expect(out).toContain("Quick navigation");
-    expect(out).toContain("/cd <subfolder>");
-    expect(out).toContain("/cd ..");
+    // FolderBrowser overlay deve aparecer
+    expect(out).toContain("Select working directory");
+    expect(out).toContain("Path:");
+    expect(out).toContain("navigate");
+    expect(out).toContain("open/select");
   });
 
   it("/cd <subfolder> — muda cwd e confirma", async () => {

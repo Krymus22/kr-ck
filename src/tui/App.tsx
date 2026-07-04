@@ -44,6 +44,7 @@ import { StatusBar } from "./StatusBar.js";
 import { TodoPanel, TodoItem } from "./TodoPanel.js";
 import { ThinkingIndicator } from "./ThinkingIndicator.js";
 import { ExtensionHub } from "./ExtensionHub.js";
+import { FolderBrowser } from "./FolderBrowser.js";
 import { QuestionPrompt } from "./QuestionPrompt.js";
 import { ConfiguratorChat } from "./ConfiguratorChat.js";
 import { useTerminalWidth } from "./useTerminal.js";
@@ -71,7 +72,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   { cmd: "/cd", desc: "Change working directory (project switcher)" },
 ];
 
-type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null; compactDone?: boolean; compactStarted?: boolean; compactInstruction?: string; compactResult?: { removed: number; beforeTokens: number; afterTokens: number; method?: string } };
+type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; openFolderBrowser?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null; compactDone?: boolean; compactStarted?: boolean; compactInstruction?: string; compactResult?: { removed: number; beforeTokens: number; afterTokens: number; method?: string } };
 
 
 
@@ -415,62 +416,9 @@ function handleBuscarCommand(arg: string | null): CommandResult {
 function handleCdCommand(arg: string | null): CommandResult {
   const currentCwd = process.cwd();
 
-  // /cd (sem arg) — mostra cwd atual + sugestões
+  // /cd (sem arg) — abre o seletor visual interativo (FolderBrowser)
   if (!arg) {
-    const lines: string[] = [
-      `Current working directory:`,
-      `  ${currentCwd}`,
-      ``,
-      `Quick navigation:`,
-    ];
-
-    // Lista subpastas do cwd atual
-    try {
-      const entries = fs.readdirSync(currentCwd, { withFileTypes: true });
-      const subdirs = entries
-        .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !e.name.startsWith("node_modules"))
-        .slice(0, 15)
-        .map((e) => e.name);
-      if (subdirs.length > 0) {
-        lines.push(`  Subfolders (use /cd <name>):`);
-        for (const d of subdirs) {
-          lines.push(`    /cd ${d}`);
-        }
-      } else {
-        lines.push(`  (no subfolders here)`);
-      }
-    } catch {
-      lines.push(`  (could not list subfolders)`);
-    }
-
-    // Parent dir
-    const parent = path.dirname(currentCwd);
-    if (parent !== currentCwd) {
-      lines.push(``, `Parent:`, `  /cd ..  → ${parent}`);
-    }
-
-    // Detecta se é um projeto Roblox (default.project.json)
-    const hasRobloxProject = fs.existsSync(path.join(currentCwd, "default.project.json"));
-    if (hasRobloxProject) {
-      lines.push(``, `✓ Roblox project detected (default.project.json found)`);
-    }
-
-    // Detecta se é projeto Node
-    const hasNodeProject = fs.existsSync(path.join(currentCwd, "package.json"));
-    if (hasNodeProject) {
-      lines.push(`✓ Node.js project detected (package.json found)`);
-    }
-
-    lines.push(
-      ``,
-      `Usage:`,
-      `  /cd <subfolder>          — enter subfolder`,
-      `  /cd ..                   — go to parent`,
-      `  /cd <absolute-path>      — jump to absolute path`,
-      `  /cd ~                    — go to home directory`,
-      `  /cd ~/projects/jogo      — home-relative path`,
-    );
-    return { handled: true, message: lines.join("\n") };
+    return { handled: true, openFolderBrowser: true };
   }
 
   // /cd ~ → home
@@ -1140,6 +1088,7 @@ export function App() {
   const [systemMessages, setSystemMessages] = useState<string[]>([]);
   const [acIndex, setAcIndex] = useState(0);
   const [showHub, setShowHub] = useState(false);
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
 
   // Sprint 1: AskUser — estado de pergunta pendente
   // Quando a IA chama perguntar_usuario, essa state é setada e o QuestionPrompt
@@ -1372,6 +1321,9 @@ export function App() {
       if (result.openHub) {
         setShowHub(true);
       }
+      if (result.openFolderBrowser) {
+        setShowFolderBrowser(true);
+      }
       if (result.openConfigurator) {
         setConfiguratorTool(result.configuratorTool ?? null);
         setShowConfigurator(true);
@@ -1552,7 +1504,7 @@ export function App() {
     }
 
     // If hub is open, don't process other keys here
-    if (showHub) return;
+    if (showHub || showFolderBrowser) return;
 
     if (!showAutocomplete || acMatches.length === 0) return;
 
@@ -1591,6 +1543,40 @@ export function App() {
               setConfiguratorTool(toolName ?? null);
               setShowConfigurator(true);
             }}
+          />
+        </Box>
+      )}
+
+      {/* Folder Browser overlay (opened by /cd without args) */}
+      {showFolderBrowser && (
+        <Box marginBottom={1}>
+          <FolderBrowser
+            initialPath={process.cwd()}
+            onSelect={(selectedPath) => {
+              try {
+                process.chdir(selectedPath);
+                const newCwd = process.cwd();
+                // Recarrega project memory do novo diretório
+                try {
+                  history.reloadProjectMemory();
+                } catch { /* ignore */ }
+                // Detecta tipo de projeto
+                const hasRoblox = fs.existsSync(path.join(newCwd, "default.project.json"));
+                const hasNode = fs.existsSync(path.join(newCwd, "package.json"));
+                const parts = [`[OK] Working directory changed to: ${newCwd}`];
+                if (hasRoblox) parts.push("✓ Roblox project detected (default.project.json)");
+                if (hasNode) parts.push("✓ Node.js project detected (package.json)");
+                try {
+                  const mem = history.reloadProjectMemory();
+                  if (mem) parts.push("✓ Project memory reloaded (CLAUDE.md / AGENTS.md)");
+                } catch { /* ignore */ }
+                setSystemMessages((prev) => [...prev, parts.join("\n")]);
+              } catch (err) {
+                setSystemMessages((prev) => [...prev, `[ERROR] Could not change directory: ${(err as Error).message}`]);
+              }
+              setShowFolderBrowser(false);
+            }}
+            onCancel={() => setShowFolderBrowser(false)}
           />
         </Box>
       )}
@@ -1657,8 +1643,8 @@ export function App() {
       <Box flexDirection="row" marginTop={1}>
         {/* Input section - hidden when Hub is open to prevent key leaks */}
         <Box flexGrow={1}>
-          {showHub ? (
-            <Text color={colors.muted}>[ Hub aberto - pressione Esc for fechar ]</Text>
+          {showHub || showFolderBrowser ? (
+            <Text color={colors.muted}>[ Navegador aberto - pressione Esc para fechar ]</Text>
           ) : (
             <>
               <Text color={colors.primary} bold>{"> "}</Text>
