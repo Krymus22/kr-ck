@@ -194,9 +194,12 @@ describe("Flow 3: Mode Roblox → MCP Guard", () => {
     }
   });
 
-  it("bloqueia tools desconhecidas (fail-safe)", () => {
+  it("permite tools desconhecidas (default-allow policy)", () => {
+    // PHILISOPHY CHANGE (commit a65fde5): default-allow para tools unknown.
+    // Se o usuário instalou o MCP, confia nele. Apenas WRITE tools conhecidas
+    // são bloqueadas (multi_edit, generate_*, insert_*).
     const result = evaluateMcpToolCall("Roblox_Studio__unknown_new_tool", {});
-    expect(result.allowed).toBe(false);
+    expect(result.allowed).toBe(true);
     expect(result.category).toBe("unknown");
   });
 });

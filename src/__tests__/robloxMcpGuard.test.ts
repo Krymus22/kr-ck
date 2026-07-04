@@ -156,11 +156,17 @@ describe("robloxMcpGuard", () => {
       expect(result.category).toBe("session");
     });
 
-    it("BLOQUEIA tools desconhecidas (fail-safe)", () => {
+    it("PERMITE tools desconhecidas (default-allow policy — per user request)", () => {
+      // PHILISOPHY CHANGE (commit a65fde5): "se o usuário instala um mcp é
+      // porque confia no mcp, então todas as tools daquele mcp deveriam não
+      // serem bloqueadas". Tools unknown agora são PERMITIDAS, não bloqueadas.
+      // Apenas WRITE tools conhecidas (multi_edit, generate_*, insert_*) são
+      // bloqueadas porque bypassam o pipeline de segurança.
       const result = evaluateMcpToolCall("Roblox_Studio__unknown_new_tool", {});
-      expect(result.allowed).toBe(false);
+      expect(result.allowed).toBe(true);
       expect(result.category).toBe("unknown");
-      expect(result.blockReason).toContain("not recognized");
+      // Não deve ter blockReason (é permitido, não bloqueado)
+      expect(result.blockReason).toBeUndefined();
     });
 
     it("NÃO interfere com outros servidores MCP", () => {
