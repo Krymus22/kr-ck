@@ -32,6 +32,29 @@ function frame(obj: unknown): string {
   return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
 }
 
+/**
+ * NDJSON frame: JSON object followed by a single newline (per MCP spec).
+ * Use this for responses that should test the NDJSON code path.
+ */
+function frameNDJSON(obj: unknown): string {
+  return JSON.stringify(obj) + "\n";
+}
+
+/**
+ * Parse NDJSON from stdin data (what the production code sends).
+ * Returns the first valid JSON object found, or null.
+ * Handles both single-line and multi-line NDJSON.
+ */
+function parseStdinNDJSON(data: string): any | null {
+  const lines = data.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try { return JSON.parse(trimmed); } catch { /* skip non-JSON lines */ }
+  }
+  return null;
+}
+
 function fakeChild() {
   const child = new EventEmitter() as any;
   child.stdin = new PassThrough();
@@ -48,11 +71,8 @@ function fakeChild() {
  */
 function withAutoReply(child: any, tools: any[] = []) {
   child.stdin.write = vi.fn((data: string) => {
-    const jsonStart = data.indexOf("\r\n\r\n");
-    if (jsonStart === -1) return;
-    const body = data.slice(jsonStart + 4);
-    let req: any;
-    try { req = JSON.parse(body); } catch { return; }
+    const req = parseStdinNDJSON(data);
+    if (!req) return;
     if (req.id == null) return; // notification
 
     if (req.method === "initialize") {
@@ -132,11 +152,8 @@ describe("MCP server lifecycle", () => {
       const child = fakeChild();
       const replies: string[] = [];
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         replies.push(req.method);
         if (req.method === "initialize") {
@@ -159,11 +176,8 @@ describe("MCP server lifecycle", () => {
     it("should handle incomplete message (buffer splits across chunks)", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -189,11 +203,8 @@ describe("MCP server lifecycle", () => {
     it("should skip malformed JSON in message body", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const bad = "Content-Length: 5\r\n\r\n{bad}";
@@ -275,11 +286,8 @@ describe("MCP server lifecycle", () => {
     it("should handle response with no matching pending request (orphan)", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const orphan = { jsonrpc: "2.0", id: 999, result: { data: "orphan" } };
@@ -303,11 +311,8 @@ describe("MCP server lifecycle", () => {
     it("should handle lowercase content-length header", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -330,11 +335,8 @@ describe("MCP server lifecycle", () => {
     it("should handle large message bodies (10KB+)", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const bigData = "x".repeat(10000);
@@ -370,11 +372,8 @@ describe("MCP server lifecycle", () => {
     it("should reject when response contains JSON-RPC error", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const err = { jsonrpc: "2.0", id: req.id, error: { code: -32600, message: "Invalid Request" } };
@@ -406,11 +405,8 @@ describe("MCP server lifecycle", () => {
       const child = fakeChild();
       const ids: number[] = [];
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         ids.push(req.id);
         if (req.method === "initialize") {
@@ -448,11 +444,8 @@ describe("MCP server lifecycle", () => {
     it("should set server.initialized = false on initialize error", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const err = { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: "Init failed" } };
@@ -473,11 +466,8 @@ describe("MCP server lifecycle", () => {
       const written: string[] = [];
       child.stdin.write = vi.fn((data: string) => {
         written.push(data);
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -495,18 +485,15 @@ describe("MCP server lifecycle", () => {
       const notif = written.find((c) => c.includes("notifications/initialized"));
       expect(initReq).toBeDefined();
       expect(notif).toBeDefined();
-      expect(notif).toContain("Content-Length:");
+      expect(notif).toContain("notifications/initialized");
       shutdownMCPServers();
     });
 
     it("should store capabilities from initialize response", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = {
@@ -561,11 +548,8 @@ describe("MCP server lifecycle", () => {
     it("should handle tools/list returning no tools key", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -586,11 +570,8 @@ describe("MCP server lifecycle", () => {
     it("should handle tools/list returning error", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -640,11 +621,8 @@ describe("MCP server lifecycle", () => {
       const child = fakeChild();
       // Mock respond to initialize so it doesn't hang, then trigger error
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const err = { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: "spawn error" } };
@@ -757,11 +735,8 @@ describe("MCP server lifecycle", () => {
       const written: string[] = [];
       child.stdin.write = vi.fn((data: string) => {
         written.push(data);
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -869,11 +844,8 @@ describe("MCP server lifecycle", () => {
     it("should return error for uninitialized server", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const err = { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: "fail" } };
@@ -892,11 +864,8 @@ describe("MCP server lifecycle", () => {
     it("should send tools/call and return text content", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -921,11 +890,8 @@ describe("MCP server lifecycle", () => {
     it("should join multiple text content items with newline", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -954,11 +920,8 @@ describe("MCP server lifecycle", () => {
     it("should filter out non-text content items", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -986,11 +949,8 @@ describe("MCP server lifecycle", () => {
     it("should JSON.stringify result when no content array", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -1015,11 +975,8 @@ describe("MCP server lifecycle", () => {
     it("should return error string when tools/call returns error", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -1050,11 +1007,8 @@ describe("MCP server lifecycle", () => {
     it("should handle empty content array", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -1080,11 +1034,8 @@ describe("MCP server lifecycle", () => {
     it("should handle content with text item missing text field", async () => {
       const child = fakeChild();
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: {} } };
@@ -1126,11 +1077,8 @@ describe("MCP server lifecycle", () => {
       const child = fakeChild();
       // Respond to initialize so it resolves, then error fires
       child.stdin.write = vi.fn((data: string) => {
-        const jsonStart = data.indexOf("\r\n\r\n");
-        if (jsonStart === -1) return;
-        const body = data.slice(jsonStart + 4);
-        let req: any;
-        try { req = JSON.parse(body); } catch { return; }
+        const req = parseStdinNDJSON(data);
+        if (!req) return;
         if (req.id == null) return;
         if (req.method === "initialize") {
           const err = { jsonrpc: "2.0", id: req.id, error: { code: -32000, message: "spawn error" } };

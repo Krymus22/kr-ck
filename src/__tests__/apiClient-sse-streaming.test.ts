@@ -412,6 +412,99 @@ describe("Reasoning content (thinking)", () => {
     // primeiro content chega → onStreamStart dispara exatamente 1x.
     expect(streamStartCount).toBe(1);
   });
+
+  // ─── BUG 1 (session /home/z/my-project): chunk combinado com reasoning + content ──
+  // Modelos de reasoning (GLM-4.5, Kimi K2, DeepSeek R1, Qwen3) frequentemente
+  // enviam um "chunk de transição" que finaliza o reasoning e começa a resposta
+  // visível NO MESMO delta. O `return` prematuro após processReasoningChunk
+  // descartava silenciosamente o `delta.content` — a IA perdia os primeiros
+  // caracteres da resposta (sintoma: "CLI cortando o início da resposta").
+
+  it("Chunk combinado (reasoning + content no mesmo delta) — NÃO descarta content", async () => {
+    // 1 chunk com BOTH reasoning_content AND content no mesmo delta.
+    // Simula o "chunk de transição" que modelos de reasoning enviam.
+    const combinedChunk = {
+      id: "chatcmpl-test",
+      model: "moonshotai/kimi-k2.6",
+      created: 1700000000,
+      choices: [{
+        index: 0,
+        delta: {
+          reasoning_content: "fim do pensamento",
+          content: "A resposta é",
+        },
+        finish_reason: null,
+      }],
+    };
+    const stream = makeChunkStream([
+      combinedChunk,
+      contentChunk(" 42"),
+      finishChunk("stop"),
+    ]);
+    hoisted.createMock.mockResolvedValue(stream);
+
+    let thinkingCount = 0;
+    const tokens: string[] = [];
+    let streamStartCount = 0;
+    const response = await chat(
+      sampleMessages,
+      () => { streamStartCount++; },
+      (t) => tokens.push(t),
+      () => { thinkingCount++; },
+    );
+
+    // onThinking foi chamado (pelo reasoning no chunk combinado)
+    expect(thinkingCount).toBe(1);
+    // onToken foi chamado 2x: "A resposta é" (do chunk combinado) + " 42"
+    // ANTES do fix, só " 42" chegava — o "A resposta é" era descartado.
+    expect(tokens).toEqual(["A resposta é", " 42"]);
+    // Conteúdo final contém AMBOS os tokens (não apenas o segundo)
+    expect(response.choices[0].message.content).toBe("A resposta é 42");
+    // onStreamStart disparou 1x (no primeiro content chunk = o combinado)
+    expect(streamStartCount).toBe(1);
+  });
+
+  it("Chunk combinado (reasoning + content + tool_calls no mesmo delta) — processa tudo", async () => {
+    // Caso extremo: 1 chunk com reasoning + content + tool_calls.
+    // Verifica que nada é descartado.
+    const combinedChunk = {
+      id: "chatcmpl-test",
+      model: "moonshotai/kimi-k2.6",
+      created: 1700000000,
+      choices: [{
+        index: 0,
+        delta: {
+          reasoning_content: "pensando...",
+          content: "Vou usar a tool",
+          tool_calls: [{
+            index: 0,
+            id: "call_1",
+            type: "function",
+            function: { name: "ler_arquivo", arguments: '{"path":"/tmp/x"}' },
+          }],
+        },
+        finish_reason: null,
+      }],
+    };
+    const stream = makeChunkStream([combinedChunk, finishChunk("tool_calls")]);
+    hoisted.createMock.mockResolvedValue(stream);
+
+    let thinkingCount = 0;
+    const tokens: string[] = [];
+    const response = await chat(
+      sampleMessages,
+      () => {},
+      (t) => tokens.push(t),
+      () => { thinkingCount++; },
+    );
+
+    // Tudo foi processado
+    expect(thinkingCount).toBe(1);
+    expect(tokens).toEqual(["Vou usar a tool"]);
+    expect(response.choices[0].message.content).toBe("Vou usar a tool");
+    expect(response.choices[0].message.tool_calls).toHaveLength(1);
+    expect(response.choices[0].message.tool_calls?.[0]?.function.name).toBe("ler_arquivo");
+  });
 });
 
 // ─── 3. Tool calls no stream ───────────────────────────────────────────────

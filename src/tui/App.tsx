@@ -49,6 +49,7 @@ import { ConfiguratorChat } from "./ConfiguratorChat.js";
 import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 import { getSearxStatus } from "../searxManager.js";
+import { loadConfig as loadDotfileConfig, updateConfig as updateDotfileConfig, saveConfig as saveDotfileConfig } from "../dotfileConfig.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -109,19 +110,187 @@ function handlePluginsCommand(): CommandResult {
   return { handled: true, message: `MCP Servers:\n${text}` };
 }
 
+/**
+ * BUG FIX (BUG 3C): /mcp slash command for managing MCP servers.
+ *
+ * Subcommands:
+ *   /mcp                 — list active MCP servers + supported config locations
+ *   /mcp list            — alias for /mcp
+ *   /mcp add <name> <command> [args...]
+ *                         — add MCP server to ~/.claude-killer/config.json
+ *   /mcp remove <name>   — remove MCP server from ~/.claude-killer/config.json
+ *
+ * Note: adding/removing requires a CLI restart to take effect (MCPs are loaded
+ * at startup). This is the same UX as Claude Code's `claude mcp add`.
+ */
+function handleMcpCommand(arg: string | null): CommandResult {
+  const subcommand = arg?.split(/\s+/)[0]?.toLowerCase() ?? "";
+
+  // /mcp or /mcp list
+  if (!subcommand || subcommand === "list") {
+    const servers = getActiveMCPServers();
+    const claudeJsonEnabled = process.env.CLAUDE_KILLER_LOAD_CLAUDE_JSON === "1";
+    const lines: string[] = ["MCP Servers:"];
+    if (servers.length === 0) {
+      lines.push("  (none active)");
+    } else {
+      for (const s of servers) lines.push(`  * ${s}`);
+    }
+    lines.push(
+      "",
+      "Config locations (loaded at startup, in precedence order):",
+      "  1. ./.mcp.json                                    (project-local, Claude Code format)",
+      "  2. ~/.claude-killer/config.json -> mcpServers     (native dotfile)",
+      `  3. ~/.claude.json -> mcpServers                   (Claude Code global) ${claudeJsonEnabled ? "[ENABLED]" : "[DISABLED — set CLAUDE_KILLER_LOAD_CLAUDE_JSON=1 to enable]"}`,
+      "  4. ~/.claude-killer/plugins/*/plugin.json         (plugins)",
+      "  5. ~/.claude-killer/modes/<mode>/mcps/*.json      (mode-specific)",
+      "",
+      "Usage:",
+      "  /mcp add <name> <command> [args...]   — add server to ~/.claude-killer/config.json",
+      "  /mcp remove <name>                    — remove server (searches all 3 config files)",
+      "  /mcp list                             — list active servers",
+      "",
+      "Example:",
+      '  /mcp add Roblox_Studio "C:\\Users\\kryst\\AppData\\Local\\Roblox\\Versions\\version-XXX\\StudioMCP.exe"',
+      "  (restart CLI to load the new server)",
+    );
+    return { handled: true, message: lines.join("\n") };
+  }
+
+  // /mcp add <name> <command> [args...]
+  if (subcommand === "add") {
+    const rest = arg!.slice(3).trim(); // remove "add"
+    const parts = rest.split(/\s+/).filter(Boolean);
+    if (parts.length < 2) {
+      return {
+        handled: true,
+        message: 'Usage: /mcp add <name> <command> [args...]\nExample: /mcp add Roblox_Studio cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat',
+      };
+    }
+    const [name, command, ...args] = parts;
+    try {
+      const current = loadDotfileConfig();
+      const existingServers = current.mcpServers ?? {};
+      const updated = updateDotfileConfig({
+        mcpServers: {
+          ...existingServers,
+          [name!]: { command, args: args.length > 0 ? args : undefined },
+        },
+      });
+      const total = Object.keys(updated.mcpServers ?? {}).length;
+      return {
+        handled: true,
+        message:
+          `[OK] MCP server "${name}" added to ~/.claude-killer/config.json\n` +
+          `  command: ${command}\n` +
+          `  args:    ${args.length > 0 ? args.join(" ") : "(none)"}\n` +
+          `  total servers in config: ${total}\n\n` +
+          `Restart the CLI to load it. (MCPs are spawned at startup.)`,
+      };
+    } catch (err) {
+      return { handled: true, message: `Failed to add MCP server: ${(err as Error).message}` };
+    }
+  }
+
+  // /mcp remove <name>
+  if (subcommand === "remove" || subcommand === "rm" || subcommand === "delete") {
+    const name = arg!.split(/\s+/)[1];
+    if (!name) {
+      return { handled: true, message: "Usage: /mcp remove <name>" };
+    }
+    const removedFrom: string[] = [];
+    const errors: string[] = [];
+
+    // 1. Try ~/.claude-killer/config.json
+    try {
+      const current = loadDotfileConfig();
+      const existingServers = current.mcpServers ?? {};
+      if (existingServers[name]) {
+        delete existingServers[name];
+        saveDotfileConfig({ ...current, mcpServers: existingServers });
+        removedFrom.push("~/.claude-killer/config.json");
+      }
+    } catch (err) {
+      errors.push(`~/.claude-killer/config.json: ${(err as Error).message}`);
+    }
+
+    // 2. Try ./.mcp.json (project-local)
+    try {
+      const projectMcpJson = path.join(process.cwd(), ".mcp.json");
+      if (fs.existsSync(projectMcpJson)) {
+        const raw = JSON.parse(fs.readFileSync(projectMcpJson, "utf8"));
+        if (raw.mcpServers && raw.mcpServers[name]) {
+          delete raw.mcpServers[name];
+          fs.writeFileSync(projectMcpJson, JSON.stringify(raw, null, 2), "utf8");
+          removedFrom.push("./.mcp.json");
+        }
+      }
+    } catch (err) {
+      errors.push(`./.mcp.json: ${(err as Error).message}`);
+    }
+
+    // 3. Try ~/.claude.json (Claude Code global format)
+    try {
+      const home = process.env.HOME ?? process.env.USERPROFILE ?? ".";
+      const claudeJson = path.join(home, ".claude.json");
+      if (fs.existsSync(claudeJson)) {
+        const raw = JSON.parse(fs.readFileSync(claudeJson, "utf8"));
+        if (raw.mcpServers && raw.mcpServers[name]) {
+          delete raw.mcpServers[name];
+          fs.writeFileSync(claudeJson, JSON.stringify(raw, null, 2), "utf8");
+          removedFrom.push("~/.claude.json");
+        }
+      }
+    } catch (err) {
+      errors.push(`~/.claude.json: ${(err as Error).message}`);
+    }
+
+    if (removedFrom.length > 0) {
+      return {
+        handled: true,
+        message:
+          `[OK] MCP server "${name}" removed from:\n` +
+          removedFrom.map((s) => `  - ${s}`).join("\n") +
+          `\n\nRestart the CLI to unload it.`,
+      };
+    }
+    return {
+      handled: true,
+      message:
+        `MCP server "${name}" not found in any config file:\n` +
+        `  - ~/.claude-killer/config.json\n` +
+        `  - ./.mcp.json\n` +
+        `  - ~/.claude.json\n` +
+        (errors.length > 0 ? `\nErrors:\n${errors.map((e) => `  - ${e}`).join("\n")}` : ""),
+    };
+  }
+
+  return {
+    handled: true,
+    message:
+      `Unknown subcommand: "${subcommand}"\n` +
+      `Usage: /mcp [list|add|remove]\n` +
+      `  /mcp                    — list active servers + config locations\n` +
+      `  /mcp add <name> <cmd> [args...]  — add server\n` +
+      `  /mcp remove <name>      — remove server`,
+  };
+}
+
 function handleCavemanCommand(arg: string | null): CommandResult {
   const validLevels = ["lite", "full", "ultra", "wenyan-lite", "wenyan-full", "wenyan-ultra"];
   if (!arg) {
     const current = history.getCavemanLevel();
     return { handled: true, message: `Caveman: ${current ?? "desativado"}\nUso: /caveman <lite|full|ultra|off>` };
   }
-  if (arg === "off" || arg === "normal") {
+  // arg is now case-preserved by handleSlashCommand; levels are lowercase by convention.
+  const normalized = arg.toLowerCase();
+  if (normalized === "off" || normalized === "normal") {
     history.setCavemanLevel(null);
     return { handled: true, message: "Caveman desativado!" };
   }
-  if (validLevels.includes(arg)) {
-    history.setCavemanLevel(arg);
-    return { handled: true, message: `Caveman ativado: ${arg.toUpperCase()}` };
+  if (validLevels.includes(normalized)) {
+    history.setCavemanLevel(normalized);
+    return { handled: true, message: `Caveman ativado: ${normalized.toUpperCase()}` };
   }
   return { handled: true, message: `Invalid level. Use: ${validLevels.join(", ")} or off` };
 }
@@ -153,6 +322,7 @@ function handleCompactCommand(arg: string | null): CommandResult {
   // /compact vazio = compactação automática (preserva tudo importante)
   // A compactação real (LLM-based) é feita pelo caller (handleSlashCommandFlow)
   // que tem acesso aos setters do React.
+  // NOTE: arg is the FULL string after `/compact ` (multi-word, case preserved).
   const customInstruction = arg?.trim() || undefined;
 
   return {
@@ -392,21 +562,24 @@ function handleOrganizeCommand(): CommandResult {
 
 // Sprint 11: /configurar [tool-name] — abre mini chat do configurador
 function handleConfigurarCommand(arg: string | null): CommandResult {
-  // The actual UI is opened via state — this just triggers it
+  // The actual UI is opened via state — this just triggers it.
+  // arg is a tool name — normalize to lowercase (tool names are lowercase by convention).
+  const toolName = arg?.toLowerCase() ?? null;
   return {
     handled: true,
-    message: arg
-      ? `Abrindo configurador for "${arg}"...`
+    message: toolName
+      ? `Abrindo configurador for "${toolName}"...`
       : "Opening configurator... (use /configurar <tool-name> to configure a specific tool)",
     openConfigurator: true,
-    configuratorTool: arg,
+    configuratorTool: toolName,
   };
 }
 
 function handleToolsCommand(arg: string | null): CommandResult {
   const registry = getExternalToolRegistry();
 
-  const category = arg;
+  // Category is conventionally lowercase.
+  const category = arg?.toLowerCase() ?? null;
   const tools = category ? registry.getByCategory(category as any) : registry.getAll();
   
   if (tools.length === 0) {
@@ -444,8 +617,10 @@ function handleToolInfoCommand(arg: string | null): CommandResult {
     return { handled: true, message: "Uso: /toolinfo <nome_da_tool>" };
   }
 
+  // Tool names are conventionally lowercase.
+  const name = arg.toLowerCase();
   const registry = getExternalToolRegistry();
-  const tool = registry.get(arg);
+  const tool = registry.get(name);
   
   if (!tool) {
     return { handled: true, message: `Tool "${arg}" not found.` };
@@ -498,6 +673,7 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/history": () => handleHistoryCommand(),
   "/skills": () => handleSkillsCommand(),
   "/plugins": () => handlePluginsCommand(),
+  "/mcp": (arg) => handleMcpCommand(arg),
   "/tools": (arg) => handleToolsCommand(arg),
   "/toolinfo": (arg) => handleToolInfoCommand(arg),
   "/effort": (arg) => handleEffortCommand(arg),
@@ -528,13 +704,17 @@ function handleLangCommand(arg: string | null): CommandResult {
     const current = detectLanguage();
     return { handled: true, message: `Idioma atual: ${current}\nUse: /lang pt-BR | en` };
   }
+  // Accept case-insensitively (e.g. "pt-BR", "pt-br", "PT-BR" all map to "pt-BR").
+  // Previously the global lowercasing in handleSlashCommand turned "pt-BR" into
+  // "pt-br", which then failed the strict `valid.includes(arg)` check.
+  const normalized = arg.toLowerCase() === "pt-br" ? "pt-BR" : arg.toLowerCase();
   const valid = ["pt-BR", "en"];
-  if (!valid.includes(arg)) {
+  if (!valid.includes(normalized)) {
     return { handled: true, message: `Invalid language: ${arg}\nOptions: pt-BR, en` };
   }
-  setLanguage(arg as any);
+  setLanguage(normalized as any);
   resetLanguageCache();
-  return { handled: true, message: `Idioma alterado para: ${arg}` };
+  return { handled: true, message: `Idioma alterado para: ${normalized}` };
 }
 
 function handleSearxCommand(_arg: string | null): CommandResult {
@@ -615,11 +795,13 @@ function handleEffortCommand(arg: string | null): CommandResult {
   if (!arg) {
     return { handled: true, message: `Effort atual: ${getEffortLabel()}\nUse: /effort low|medium|high|max` };
   }
+  // Levels are lowercase by convention.
+  const level = arg.toLowerCase();
   const valid = ["low", "medium", "high", "max"];
-  if (!valid.includes(arg)) {
+  if (!valid.includes(level)) {
     return { handled: true, message: `Invalid level: ${arg}\nOptions: low, medium, high, max` };
   }
-  setEffortLevel(arg as any);
+  setEffortLevel(level as any);
   return { handled: true, message: `Effort alterado para: ${getEffortLabel()}` };
 }
 
@@ -652,8 +834,11 @@ function handleModeCommand(arg: string | null): CommandResult {
   }
 
   // /mode create <description> - AI-assisted mode creation
-  if (arg.startsWith("create ") || arg.startsWith("new ")) {
-    const prompt = arg.replace(/^(create|new)\s+/, "").trim();
+  // Accept "/mode create" (bare, no description) → show "Empty description"
+  // instead of falling through to "/mode <name>" which would show the
+  // misleading "Mode 'create' not found" message.
+  if (arg === "create" || arg === "new" || arg.startsWith("create ") || arg.startsWith("new ")) {
+    const prompt = arg.replace(/^(create|new)(\s+)?/, "").trim();
     if (!prompt) {
       return { handled: true, message: "Empty description. Use: /mode create <what you want to do>" };
     }
@@ -712,9 +897,16 @@ function handleModeCommand(arg: string | null): CommandResult {
   // Parse: /mode <name> [new|keep]
   //   new  = ativa modo + limpa chat (contexto fresh)
   //   keep = ativa modo + mantém chat atual (default)
+  // arg is the FULL string after `/mode ` (case preserved by handleSlashCommand).
+  // modeName is conventionally lowercase; lowercase it for the getMode lookup so
+  // users can type `/mode ROBLOX new` and still hit the "roblox" mode.
   const parts = arg.split(/\s+/).filter(Boolean);
-  const modeName = parts[0]!;
+  const modeName = (parts[0] ?? "").toLowerCase();
   const contextAction = parts[1]?.toLowerCase();  // "new" | "keep" | undefined
+
+  if (!modeName) {
+    return { handled: true, message: "Usage: /mode <name> [new|keep]" };
+  }
 
   const mode = getMode(modeName);
   if (!mode) {
@@ -785,9 +977,16 @@ function handlePoolCommand(): CommandResult {
 }
 
 function handleSlashCommand(input: string): CommandResult {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  const arg = parts[1]?.toLowerCase() || null;
+  // NOTE: pass the FULL argument string (everything after the command token)
+  // to the handler — not just the first whitespace-separated token. Several
+  // commands take multi-word args (e.g. `/mode roblox new`, `/mode create
+  // <description with spaces>`, `/compact focus on code changes`, `/buscar
+  // FileName.txt`). Case is preserved here; each handler lowercases its arg
+  // if/when it needs to.
+  const trimmed = input.trim();
+  const firstSpace = trimmed.search(/\s/);
+  const cmd = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+  const arg = firstSpace === -1 ? null : trimmed.slice(firstSpace + 1).trim() || null;
 
   const handler = COMMAND_HANDLERS[cmd];
   if (handler) return handler(arg);
@@ -1245,11 +1444,15 @@ export function App() {
       // - BUG FIX: if the user typed the full command already (e.g., "/hub" matches
       //   selected.label "/hub"), submit immediately instead of adding a space and
       //   forcing the user to press Enter twice.
+      // - BUG FIX: /mode has TWO arguments (/mode roblox new) — autocomplete
+      //   was replacing "roblox" with the subcommand match. Now we only use
+      //   autocomplete for commands with exactly ONE argument (/effort low).
       if (showAutocomplete && acMatches.length > 0) {
         const selected = acMatches[acIndex];
     if (selected?.label) {
-          if (hasSpace) {
-            // Subcommand selected - build the full command + subcommand and continue to execute
+          const spaceCount = (trimmedValue.match(/\s/g) ?? []).length;
+          if (hasSpace && spaceCount === 1) {
+            // Single-argument command (e.g., "/effort low") — autocomplete the subcommand
             const spaceIdx = trimmedValue.indexOf(" ");
             const cmdPart = trimmedValue.slice(0, spaceIdx);
             trimmedValue = `${cmdPart} ${selected.label}`;
@@ -1258,14 +1461,18 @@ export function App() {
             // Fall through to actual command execution below
           } else if (selected.label === trimmedValue) {
             // User typed the full command (e.g., "/hub" === "/hub") — submit immediately.
-            // Don't add a space, don't force a second Enter press.
             setAcIndex(0);
             // Fall through to actual command execution below
-          } else {
+          } else if (!hasSpace) {
             // Command selected - add space so user can type subcommand
             setInput(selected.label + " ");
             setAcIndex(0);
             return;
+          } else {
+            // Multi-argument command (e.g., "/mode roblox new") —
+            // user already typed the full command, just submit it.
+            setAcIndex(0);
+            // Fall through to actual command execution below
           }
         }
       }
@@ -1273,13 +1480,18 @@ export function App() {
       setInput("");
       setAcIndex(0);
       isProcessing.current = true;
-      setStatus("thinking");
 
-      // Handle slash commands
+      // Handle slash commands — set status AFTER, not before.
+      // Slash commands handle their own status (idle, compacting, etc.)
+      // Setting "thinking" before slash commands causes the "pensando..."
+      // indicator to stay forever if the command doesn't set idle.
       if (trimmedValue.startsWith("/")) {
         const exitCalled = handleSlashCommandFlow(trimmedValue);
         if (exitCalled) return;
       }
+
+      // Only set "thinking" for non-slash commands (actual IA requests)
+      setStatus("thinking");
 
       // Add user message to display
       const userMsg: ChatMessage = { role: "user", content: trimmedValue };

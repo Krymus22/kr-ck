@@ -11,33 +11,28 @@
  *   - Strict Quality Gate (never blocks on test failure)
  *   - Guardrail (never validates safety)
  *
- * SOLUTION: Classify MCP tools into 4 categories and apply different policies:
+ * SOLUTION: Blacklist of WRITE tools that bypass the safety pipeline.
+ * Tools in the blacklist are BLOCKED — the IA must use `aplicar_diff`
+ * instead, which goes through the full pipeline.
  *
- *   READ-ONLY (allowed directly):
- *     script_read, script_search, script_grep, search_game_tree,
- *     inspect_instance, explore_subagent, list_roblox_studios,
- *     console_output
- *     → These only read data, no risk of bypassing validations
+ * PHILOSOPHY (per user request, July 2026):
+ *   "se o usuário instala um mcp é porque confia no mcp, então todas as
+ *    tools daquele mcp deveriam não serem bloqueadas"
  *
- *   WRITE/EDIT (BLOCKED — redirect to our pipeline):
- *     multi_edit, insert_from_creator_store, generate_mesh,
- *     generate_material, generate_procedural_model
- *     → The IA must use our `aplicar_diff` instead, which goes through
- *       Bug Hunter → DataGuard → read-before-write → rollback → then sync
- *       to Studio via Rojo (the normal flow)
+ *   → Default-ALLOW policy for unknown tools. If a tool is not in the
+ *     blacklist, it's allowed. This avoids blocking new tools that Roblox
+ *     adds to Studio MCP without notice.
  *
- *   EXECUTE (allowed with monitoring):
- *     execute_luau, run_script_in_play_mode
- *     → Allowed because the IA needs to test code. BUT we log the execution
- *       and capture output for Bug Hunter analysis on the next turn.
- *       DataGuard still runs on any code the IA writes via aplicar_diff
- *       BEFORE it reaches Studio.
+ *   → Only WRITE tools that bypass our safety pipeline are blocked
+ *     (multi_edit, generate_*, insert_from_creator_store).
  *
- *   PLAYTEST (allowed):
- *     start_stop_play, screen_capture, playtest_subagent,
- *     character_navigation, keyboard_input, mouse_input,
- *     set_active_studio
- *     → These control the game runtime, not code. Safe to allow directly.
+ *   → EXECUTE tools (execute_luau) are allowed WITH logging, because the
+ *     IA needs to test code it wrote via aplicar_diff.
+ *
+ *   → READ/PLAYTEST/SESSION tools are allowed silently.
+ *
+ *   → UNKNOWN tools are ALLOWED silently (default-allow). If you want to
+ *     classify them for documentation, add them to TOOL_CLASSIFICATION.
  *
  * ARCHITECTURE:
  *
@@ -77,6 +72,7 @@ const TOOL_CLASSIFICATION: Record<string, McpToolCategory> = {
   "explore_subagent": "read",
   "list_roblox_studios": "read",
   "console_output": "read",
+  "get_studio_state": "read",  // Retorna estado do Studio (place aberto, selection, modo edit/play)
 
   // ── WRITE/EDIT (BLOCKED — must use our aplicar_diff pipeline) ─────────────
   // These modify scripts or insert assets. The IA must use our tools instead
@@ -215,16 +211,43 @@ export function evaluateMcpToolCall(
 
     case "unknown":
     default:
-      // Unknown tool — block by default (fail-safe)
+      // PHILISOPHY CHANGE (per user request): "se o usuário instala um mcp é
+      // porque confia no mcp, então todas as tools daquele mcp deveriam não
+      // serem bloqueadas".
+      //
+      // Default-allow: tools desconhecidas são PERMITIDAS (não bloqueadas).
+      // Apenas tools WRITE conhecidas (multi_edit, generate_*, insert_*) são
+      // bloqueadas porque elas explicitamente bypassam o pipeline de segurança
+      // (Bug Hunter, DataGuard, read-before-write, rollback).
+      //
+      // Tools desconhecidas geralmente são tools novas do Roblox Studio MCP
+      // (que a Roblox adiciona sem avisar) — bloquear gera falsos positivos.
+      // Confiamos no usuário que instalou o MCP.
+      log.info(`[MCP_GUARD] Allowing unknown tool "${toolName}" (default-allow policy)`);
       return {
-        allowed: false,
+        allowed: true,
         category: "unknown",
-        shouldLog: true,
-        blockReason: `[MCP_GUARD] Tool "${toolName}" is not recognized. For safety, ` +
-          `unknown Roblox Studio MCP tools are blocked. If this is a new tool, ` +
-          `ask the developer to add it to robloxMcpGuard.ts.`,
+        shouldLog: false,  // não logar como WARN, é fluxo normal agora
       };
   }
+}
+
+/**
+ * Format a HELPFUL message when an unknown tool is allowed but not classified.
+ * (Kept for reference — currently not used because unknown tools are allowed
+ * silently. If you want to surface a notice, return this as blockReason.)
+ */
+function formatUnknownAllowedMessage(toolName: string): string {
+  return [
+    `[MCP_GUARD] Tool "${toolName}" is not in the recognized list, but is ALLOWED.`,
+    `(Default-allow policy: trust the user who installed the MCP.)`,
+    ``,
+    `If you want to add it to the classification for documentation:`,
+    `  - Open src/robloxMcpGuard.ts`,
+    `  - Add: "${toolName}": "<category>",  // <description>`,
+    ``,
+    `Categories: read | write | execute | playtest | session`,
+  ].join("\n");
 }
 
 /**

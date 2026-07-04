@@ -23,6 +23,7 @@ const EXPECTED_READ_ONLY_TOOLS = new Set([
   "explorar_subagente",  // IDEIA 5 — must be read-only for parallel sub-agents
   "status_pool",         // Pool stats — read-only
   "ler_estado",          // Task state read — read-only
+  "listar_memoria",      // List project memory files — read-only
 ]);
 
 const EXPECTED_WRITE_TOOLS = new Set([
@@ -51,6 +52,10 @@ describe("readOnlyTools classification", () => {
 
   it("ler_estado is read-only", () => {
     expect(EXPECTED_READ_ONLY_TOOLS.has("ler_estado")).toBe(true);
+  });
+
+  it("listar_memoria is read-only", () => {
+    expect(EXPECTED_READ_ONLY_TOOLS.has("listar_memoria")).toBe(true);
   });
 
   it("write tools are NOT in read-only set", () => {

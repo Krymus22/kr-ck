@@ -56,9 +56,13 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
 };
 
 function handleSlashCommand(input: string): CommandResult {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  const arg = parts[1]?.toLowerCase() || null;
+  // Mirror of the real handleSlashCommand in App.tsx — passes the FULL arg
+  // string (case preserved) to the handler, not just the first whitespace-
+  // separated token.
+  const trimmed = input.trim();
+  const firstSpace = trimmed.search(/\s/);
+  const cmd = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+  const arg = firstSpace === -1 ? null : trimmed.slice(firstSpace + 1).trim() || null;
   const handler = COMMAND_HANDLERS[cmd];
   if (handler) return handler(arg);
   return { handled: false };
@@ -251,6 +255,83 @@ describe("App state flow", () => {
       const result = handleSlashCommand("/caveman lite");
       expect(result.handled).toBe(true);
       expect(result.message).toContain("lite");
+    });
+
+    // ─── Parser edge cases (regression: handleSlashCommand used to take only
+    //     parts[1] as arg, truncating multi-word args. These tests guard against
+    //     any future regression in the parser itself.) ────────────────────────
+
+    it("should not crash on empty input", () => {
+      const result = handleSlashCommand("");
+      expect(result.handled).toBe(false);
+    });
+
+    it("should not crash on whitespace-only input", () => {
+      const result = handleSlashCommand("    ");
+      expect(result.handled).toBe(false);
+    });
+
+    it("should not crash on whitespace + command (no args)", () => {
+      const result = handleSlashCommand("   /hub   ");
+      expect(result.handled).toBe(true);
+      expect(result.openHub).toBe(true);
+    });
+
+    it("should pass multi-word arg as a single string (not just first token)", () => {
+      // /compact receives the FULL string after the command.
+      // Test using /caveman which echoes arg back: handler returns `caveman: <arg>`.
+      const result = handleSlashCommand("/caveman lite full ultra");
+      expect(result.handled).toBe(true);
+      // The simulated /caveman handler returns `caveman: ${arg}` — arg must be
+      // the full string "lite full ultra", not just "lite".
+      expect(result.message).toContain("lite full ultra");
+    });
+
+    it("should handle multiple spaces between command and arg", () => {
+      const result = handleSlashCommand("/tools    roblox");
+      expect(result.handled).toBe(true);
+      expect(result.message).toContain("roblox");
+    });
+
+    it("should handle tabs between command and arg", () => {
+      const result = handleSlashCommand("/tools\troblox");
+      expect(result.handled).toBe(true);
+      expect(result.message).toContain("roblox");
+    });
+
+    it("should trim trailing whitespace from arg", () => {
+      // Arg should be "roblox" not "roblox   ".
+      const result = handleSlashCommand("/tools roblox   ");
+      expect(result.handled).toBe(true);
+      expect(result.message).toBe("tools: roblox");
+    });
+
+    it("should accept UPPERCASE command name (cmd is lowercased)", () => {
+      const result = handleSlashCommand("/HUB");
+      expect(result.handled).toBe(true);
+      expect(result.openHub).toBe(true);
+    });
+
+    it("should accept MixedCase command name", () => {
+      const result = handleSlashCommand("/Hub");
+      expect(result.handled).toBe(true);
+      expect(result.openHub).toBe(true);
+    });
+
+    it("should preserve case in arg (no global lowercasing)", () => {
+      // Regression: old handleSlashCommand did `arg = parts[1]?.toLowerCase()`.
+      // Now case is preserved; /caveman echoes arg back so we can verify.
+      const result = handleSlashCommand("/caveman LITE");
+      expect(result.handled).toBe(true);
+      expect(result.message).toContain("LITE");
+      expect(result.message).not.toContain("lite");
+    });
+
+    it("should treat null arg when command has no following token", () => {
+      const result = handleSlashCommand("/caveman");
+      expect(result.handled).toBe(true);
+      // Simulated /caveman handler: `caveman: ${arg ?? "status"}`.
+      expect(result.message).toBe("caveman: status");
     });
   });
 

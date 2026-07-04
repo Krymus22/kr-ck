@@ -412,6 +412,17 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "listar_memoria",
+      description:
+        "List project memory files (CLAUDE.md, AGENTS.md) loaded into the system prompt at startup, with their paths and sizes. " +
+        "Use this when the user asks 'which config files did you read?' or 'what files are in your context?' or 'which AGENTS.md/CLAUDE.md did you load?' " +
+        "Returns the list of files with their relative paths and sizes. To see the CURRENT file contents (in case the file was edited since startup), call ler_arquivo(<path>) with the path returned here.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "explorar_subagente",
       description:
         "Delegate EXPLORATION/RESEARCH tasks to a read-only sub-agent. " +
@@ -865,7 +876,13 @@ function processStreamChunk(
   const reasoning = delta.reasoning_content ?? ("reasoning" in delta ? delta.reasoning : undefined);
   if (reasoning) {
     processReasoningChunk(state, onThinking);
-    return;
+    // BUG FIX (BUG 1 from /home/z/my-project session): NÃO fazer `return` aqui.
+    // Modelos de reasoning (GLM-4.5, Kimi K2, DeepSeek R1, Qwen3) frequentemente
+    // enviam chunks de transição com BOTH `reasoning_content` AND `content` no
+    // mesmo delta — algo como `{ delta: { reasoning_content: "fim do pensamento",
+    // content: "A resposta é" } }`. O `return` prematuro descartava silenciosamente
+    // o `content`, fazendo a IA "perder" os primeiros caracteres da resposta.
+    // Agora processamos reasoning E continuamos para checar tool_calls/content.
   }
 
   if (delta.tool_calls) {

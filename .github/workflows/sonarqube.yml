@@ -1,5 +1,6 @@
 name: SonarQube Analysis
 
+# Reativado: repo agora é público, CI é ilimitado.
 on:
   push:
     branches: [master]

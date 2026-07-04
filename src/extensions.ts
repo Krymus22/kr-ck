@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 
 import os from "node:os";
 
@@ -81,6 +82,8 @@ export interface ActiveMCPServer {
   pendingRequests: Map<number, { resolve: (r: any) => void; reject: (e: Error) => void }>;
   buffer: string;
   initialized: boolean;
+  /** Captured stderr (for debugging initialize failures). */
+  stderrBuffer: string;
 }
 
 // --- Directory Paths --------------------------------------------------------
@@ -213,21 +216,36 @@ function loadPluginsFromDir(dirPath: string): { skills: Skill[]; mcps: Record<st
 
 /**
  * Send a JSON-RPC request to an MCP server via its stdin.
- * Framing: "Content-Length: <n>\r\n\r\n<json body>"
+ * Framing: NDJSON (newline-delimited JSON) per MCP spec — `{json}\n`.
+ * (Previous versions used LSP-style Content-Length framing, but the MCP
+ * spec at https://spec.modelcontextprotocol.io/ specifies NDJSON. Servers
+ * like Roblox Studio's StudioMCP.exe follow the spec and fail to parse
+ * Content-Length framing with "serde error expected value at line 1 column 1".)
  */
 function sendRequest(server: ActiveMCPServer, method: string, params?: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const id = server.nextRequestId++;
     const request: JSONRPCRequest = { jsonrpc: "2.0", id, method, params };
     const body = JSON.stringify(request);
-    const message = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
+    // NDJSON: JSON object followed by a single newline. No Content-Length header.
+    const message = body + "\n";
 
     server.pendingRequests.set(id, { resolve, reject });
 
-    // Timeout: 10 seconds for any MCP request. If the server doesn't respond,
-    // reject the promise so the CLI doesn't hang forever.
-    // Use 100ms in test environment to avoid blocking tests.
-    const timeoutMs = process.env.NODE_ENV === "test" ? 100 : 10_000;
+    // Timeout per request type:
+    //   - initialize: 30s (cold start on Windows is slow, especially cmd.exe /c mcp.bat
+    //     that spawns Roblox Studio internally — easily 5-15s on first run)
+    //   - tools/list: 15s (some servers query remote services)
+    //   - tools/call: 60s (actual tool execution can be slow)
+    //   - other: 10s
+    // Test environment: 100ms to avoid blocking tests.
+    const baseTimeout = process.env.NODE_ENV === "test"
+      ? 100
+      : method === "initialize" ? 30_000
+      : method === "tools/list" ? 15_000
+      : method === "tools/call" ? 60_000
+      : 10_000;
+    const timeoutMs = baseTimeout;
     const timeout = setTimeout(() => {
       if (server.pendingRequests.has(id)) {
         server.pendingRequests.delete(id);
@@ -253,42 +271,72 @@ function sendRequest(server: ActiveMCPServer, method: string, params?: Record<st
 }
 
 /**
- * Parse Content-Length framed messages from the server's stdout buffer.
- * Returns an array of parsed JSON-RPC response objects.
+ * Parse incoming MCP messages from the server's stdout buffer.
+ *
+ * Supports TWO framing formats (auto-detected per chunk):
+ *   1. NDJSON (MCP spec — https://spec.modelcontextprotocol.io/):
+ *      each message is a JSON object on its own line, delimited by `\n`.
+ *   2. LSP-style Content-Length framing (legacy, used by some older servers):
+ *      `Content-Length: <n>\r\n\r\n<json body>`
+ *
+ * Auto-detection: if the buffer contains `\r\n\r\n` with a Content-Length
+ * header, parse as LSP. Otherwise, parse as NDJSON (split by newlines).
  */
 function parseMessages(buffer: string): { messages: JSONRPCResponse[]; remaining: string } {
   const messages: JSONRPCResponse[] = [];
   let remaining = buffer;
 
-  while (true) {
-    const headerEnd = remaining.indexOf("\r\n\r\n");
-    if (headerEnd === -1) break;
+  // Check if this looks like LSP-style Content-Length framing
+  const hasLspHeader = /Content-Length:\s*\d+/i.test(remaining) && remaining.includes("\r\n\r\n");
 
-    const header = remaining.slice(0, headerEnd);
-    const match = /Content-Length:\s*(\d+)/i.exec(header);
-    if (!match) break;
+  if (hasLspHeader) {
+    // Legacy LSP-style parsing (for backward compat with old servers)
+    while (true) {
+      const headerEnd = remaining.indexOf("\r\n\r\n");
+      if (headerEnd === -1) break;
 
-    const contentLength = Number.parseInt(match[1], 10);
-    const bodyStart = headerEnd + 4;
-    const bodyEnd = bodyStart + contentLength;
+      const header = remaining.slice(0, headerEnd);
+      const match = /Content-Length:\s*(\d+)/i.exec(header);
+      if (!match) break;
 
-    if (remaining.length < bodyEnd) break; // incomplete message
+      const contentLength = Number.parseInt(match[1], 10);
+      const bodyStart = headerEnd + 4;
+      const bodyEnd = bodyStart + contentLength;
 
-    const body = remaining.slice(bodyStart, bodyEnd);
-    remaining = remaining.slice(bodyEnd);
+      if (remaining.length < bodyEnd) break; // incomplete message
 
-    try {
-      const parsed = JSON.parse(body) as JSONRPCResponse;
-      messages.push(parsed);
-    } catch { /* skip malformed messages */ }
+      const body = remaining.slice(bodyStart, bodyEnd);
+      remaining = remaining.slice(bodyEnd);
+
+      try {
+        const parsed = JSON.parse(body) as JSONRPCResponse;
+        messages.push(parsed);
+      } catch { /* skip malformed messages */ }
+    }
+  } else {
+    // NDJSON parsing (MCP spec)
+    const lines = remaining.split("\n");
+    // Last element is the incomplete line (no trailing newline yet) — keep it as remaining
+    remaining = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue; // skip empty lines
+      try {
+        const parsed = JSON.parse(trimmed) as JSONRPCResponse;
+        messages.push(parsed);
+      } catch {
+        // Not valid JSON — could be a partial message or server log output.
+        // Skip silently; if it's a partial, the rest will arrive in the next chunk.
+      }
+    }
   }
 
   return { messages, remaining };
 }
 
 /**
- * Set up stdout line parsing for a server. Buffers data and extracts
- * Content-Length framed JSON-RPC messages.
+ * Set up stdout parsing for a server. Buffers data and extracts JSON-RPC
+ * messages (auto-detects NDJSON vs LSP-style Content-Length framing).
  */
 function setupMessageParser(server: ActiveMCPServer): void {
   server.process.stdout!.on("data", (chunk: Buffer) => {
@@ -332,9 +380,9 @@ async function initializeServer(server: ActiveMCPServer): Promise<boolean> {
     server.capabilities = initResult.capabilities as Record<string, unknown> | undefined;
 
     // Send initialized notification (no id = notification)
+    // NDJSON framing: JSON object followed by newline (per MCP spec)
     const notification = JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" });
-    const framed = `Content-Length: ${Buffer.byteLength(notification)}\r\n\r\n${notification}`;
-    server.process.stdin!.write(framed);
+    server.process.stdin!.write(notification + "\n");
 
     server.initialized = true;
     return true;
@@ -370,12 +418,49 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
   const command = override?.command ?? config.command;
   const args = override?.args ?? config.args ?? [];
 
+  // BUG FIX (BUG 3B): Platform guard — skip spawn when the command is clearly
+  // Windows-only and we're not on Windows. Previously, `cmd.exe /c foo.bat`
+  // on Linux would silently fail with ENOENT and the user would have no idea
+  // why the MCP didn't load.
+  if (platform !== "win32") {
+    const isWindowsCommand =
+      command.toLowerCase().endsWith("cmd.exe") ||
+      command.toLowerCase().endsWith(".bat") ||
+      command.toLowerCase().endsWith(".cmd") ||
+      command.toLowerCase().endsWith(".ps1");
+    const hasWindowsVar = args.some((a) => /%[A-Z_]+%/.test(a));
+    if (isWindowsCommand) {
+      console.error(
+        `[MCP] Server "${name}" skipped: command "${command}" is Windows-only but you're on ${platform}.\n` +
+        `  Either provide a platformOverrides.${platform} entry in the MCP config, or run on Windows.\n` +
+        `  Original config: command=${JSON.stringify(command)} args=${JSON.stringify(args)}`,
+      );
+      return;
+    }
+    if (hasWindowsVar) {
+      console.error(
+        `[MCP] Server "${name}" warning: args contain Windows-style %VAR% patterns ` +
+        `(${args.filter((a) => /%[A-Z_]+%/.test(a)).join(", ")}). ` +
+        `On ${platform}, these will NOT be expanded — use $VAR (POSIX) or platformOverrides.${platform}.`,
+      );
+    }
+  }
+
   const env = { ...process.env, ...config.env };
-  const child = spawn(command, args, {
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: true,
-  });
+  let child: import("child_process").ChildProcess;
+  try {
+    child = spawn(command, args, {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: true,
+    });
+  } catch (err) {
+    console.error(
+      `[MCP] Server "${name}" failed to spawn on ${platform}: ${(err as Error).message}\n` +
+      `  command=${JSON.stringify(command)} args=${JSON.stringify(args)}`,
+    );
+    return;
+  }
 
   const server: ActiveMCPServer = {
     name,
@@ -385,13 +470,33 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
     pendingRequests: new Map(),
     buffer: "",
     initialized: false,
+    stderrBuffer: "",
   };
 
   // Set up message parsing before initializing
   setupMessageParser(server);
 
+  // Capture stderr for debugging (MCP servers log diagnostics here)
+  if (child.stderr) {
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      server.stderrBuffer += text;
+      // Cap stderr buffer at 4KB to avoid memory growth
+      if (server.stderrBuffer.length > 4096) {
+        server.stderrBuffer = server.stderrBuffer.slice(-4096);
+      }
+      // Log stderr lines as debug (visible with DEBUG=true)
+      if (process.env.DEBUG || process.env.MCP_DEBUG) {
+        process.stderr.write(`[MCP:${name}:stderr] ${text}`);
+      }
+    });
+  }
+
   child.on("error", (err) => {
-    console.error(`[MCP] Server "${name}" spawn error: ${err.message}`);
+    console.error(
+      `[MCP] Server "${name}" spawn error on ${platform}: ${err.message}\n` +
+      `  command=${JSON.stringify(command)} args=${JSON.stringify(args)}`,
+    );
     activeMCPServers.delete(name);
   });
 
@@ -403,19 +508,122 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
   });
 
   activeMCPServers.set(name, server);
-  // Initialize and discover tools
-
-  // Initialize and discover tools
-  const ok = await initializeServer(server);
+  // Initialize and discover tools (with 1 retry on timeout)
+  let ok = await initializeServer(server);
+  if (!ok) {
+    // Retry once — MCP servers can be slow to cold-start on Windows
+    console.error(`[MCP] Retrying initialize for "${name}" (1/1)...`);
+    ok = await initializeServer(server);
+  }
   if (ok) {
     server.tools = await discoverTools(server);
     if (server.tools.length > 0) {
       console.error(`[MCP] Server "${name}": discovered ${server.tools.length} tool(s)`);
     }
+  } else {
+    // Log captured stderr to help debug why initialize failed
+    if (server.stderrBuffer.trim()) {
+      console.error(
+        `[MCP] Server "${name}" stderr (last 1KB):\n` +
+        server.stderrBuffer.slice(-1024),
+      );
+    }
   }
 }
 
 // --- Public API -------------------------------------------------------------
+
+/**
+ * BUG FIX (BUG 3A): Load MCP configs from multiple standard locations.
+ *
+ * Supports 3 formats the user might already have:
+ *   1. `~/.claude-killer/config.json` → `{ mcpServers: { name: { command, args, env } } }`
+ *      (our native dotfile format — previously defined but never read)
+ *   2. `./.mcp.json` (project-local) → `{ mcpServers: { ... } }`
+ *      (Claude Code native format — widely used)
+ *   3. `~/.claude.json` → `{ mcpServers: { ... } }`
+ *      (Claude Code global format — for users migrating from Claude Code)
+ *
+ * Precedence (most specific first): project .mcp.json > ~/.claude-killer/config.json > ~/.claude.json
+ * Earlier-loaded entries are NOT overridden by later ones (first wins).
+ */
+function loadMCPsFromConfigFiles(): Record<string, MCPConfig> {
+  const result: Record<string, MCPConfig> = {};
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+
+  // Helper: merge MCPs from a parsed JSON object
+  const mergeFromJson = (obj: any, source: string) => {
+    if (!obj || typeof obj !== "object") return;
+    const servers = obj.mcpServers ?? obj.mcp_servers;
+    if (!servers || typeof servers !== "object") return;
+    for (const [name, cfg] of Object.entries(servers)) {
+      if (result[name]) continue; // first wins
+      const c = cfg as { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string };
+      if (!c.command) continue; // skip invalid entries
+      result[name] = {
+        command: c.command,
+        args: c.args ?? [],
+        env: c.env ?? {},
+      };
+      console.log(`[MCP] Loaded "${name}" from ${source}`);
+    }
+  };
+
+  // 1. Project-local .mcp.json (highest precedence)
+  const projectMcpJson = path.join(process.cwd(), ".mcp.json");
+  try {
+    if (fs.existsSync(projectMcpJson)) {
+      mergeFromJson(JSON.parse(fs.readFileSync(projectMcpJson, "utf8")), `./.mcp.json`);
+    }
+  } catch (err) {
+    console.error(`[MCP] Failed to parse ${projectMcpJson}: ${(err as Error).message}`);
+  }
+
+  // 2. ~/.claude-killer/config.json (our native dotfile)
+  // NOTE: dotfileConfig.ts uses `require()` internally for some imports, but
+  // its public API (loadConfig/saveConfig/updateConfig) is synchronous and
+  // ESM-safe. We import it statically at the top of extensions.ts (see imports).
+  try {
+    // Use a sync require shim — extensions.ts already uses `require` for
+    // dynamic mode imports above, so we use the same pattern here.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const dotfileMod = createRequire(import.meta.url)("./dotfileConfig.js");
+    const dotfileCfg = dotfileMod.loadConfig() as { mcpServers?: Record<string, any> };
+    if (dotfileCfg.mcpServers) {
+      for (const [name, cfg] of Object.entries(dotfileCfg.mcpServers)) {
+        if (result[name]) continue;
+        const c = cfg as { command: string; args?: string[]; env?: Record<string, string>; cwd?: string };
+        if (!c.command) continue;
+        result[name] = {
+          command: c.command,
+          args: c.args ?? [],
+          env: c.env ?? {},
+        };
+        console.log(`[MCP] Loaded "${name}" from ~/.claude-killer/config.json`);
+      }
+    }
+  } catch {
+    // dotfileConfig not available — skip
+  }
+
+  // 3. ~/.claude.json (Claude Code global format)
+  // OPT-IN: only load if CLAUDE_KILLER_LOAD_CLAUDE_JSON=1 is set.
+  // Default is OFF to avoid conflicts with Claude Desktop / Claude Code
+  // (which also use ~/.claude.json). Users who want to migrate their MCPs
+  // from Claude Code can set the env var to import them.
+  if (process.env.CLAUDE_KILLER_LOAD_CLAUDE_JSON === "1") {
+    const claudeJson = path.join(home, ".claude.json");
+    try {
+      if (fs.existsSync(claudeJson)) {
+        mergeFromJson(JSON.parse(fs.readFileSync(claudeJson, "utf8")), `~/.claude.json`);
+      }
+    } catch (err) {
+      console.error(`[MCP] Failed to parse ${claudeJson}: ${(err as Error).message}`);
+    }
+  }
+
+  return result;
+}
 
 /**
  * Sprint 7: Load MCP configs from a mode's mcps/ directory.
@@ -426,11 +634,24 @@ function loadMCPsFromModeDir(modeName: string): Record<string, MCPConfig> {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
   const result: Record<string, MCPConfig> = {};
 
+  // Resolve bundled defaults dir (relative to this file when running from dist/)
+  // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
+  const bundledDefaultsDir = (() => {
+    try {
+      const { fileURLToPath } = require("node:url");
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      return path.join(here, "..", "defaults", "modes", modeName, "mcps");
+    } catch {
+      // Fallback: try cwd-based path (used in dev mode and tests)
+      return path.join(process.cwd(), "defaults", "modes", modeName, "mcps");
+    }
+  })();
+
   // Try user's mode dir first
   const dirs = [
     path.join(home, ".claude-killer", "modes", modeName, "mcps"),
     path.join(process.cwd(), "defaults", "modes", modeName, "mcps"),
-    path.join(__dirname, "..", "defaults", "modes", modeName, "mcps"),
+    bundledDefaultsDir,
   ];
 
   for (const dir of dirs) {
@@ -491,11 +712,18 @@ export async function loadAllExtensions() {
         if (fs.existsSync(bundledDir)) {
           modeSkills = loadSkillsFromDir(bundledDir);
         }
-        // Also try relative to __dirname (when running from dist/)
+        // Also try relative to this file (when running from dist/)
+        // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
         if (modeSkills.length === 0) {
-          const distDir = path.join(__dirname, "..", "defaults", "modes", mode.name, "skills");
-          if (fs.existsSync(distDir)) {
-            modeSkills = loadSkillsFromDir(distDir);
+          try {
+            const { fileURLToPath } = require("node:url");
+            const here = path.dirname(fileURLToPath(import.meta.url));
+            const distDir = path.join(here, "..", "defaults", "modes", mode.name, "skills");
+            if (fs.existsSync(distDir)) {
+              modeSkills = loadSkillsFromDir(distDir);
+            }
+          } catch {
+            // fileURLToPath not available — skip
           }
         }
       }
@@ -516,7 +744,10 @@ export async function loadAllExtensions() {
   const localPlugins = loadPluginsFromDir(path.join(LOCAL_DIR, "plugins"));
   activeSkills = [...activeSkills, ...globalPlugins.skills, ...localPlugins.skills];
 
-  const mcpConfigs = { ...globalPlugins.mcps, ...localPlugins.mcps };
+  // Start with config-file MCPs (lowest precedence — mode/plugins can override)
+  // BUG FIX (BUG 3A): previously only plugin.json + mode dirs were loaded.
+  // Now also loads from ./.mcp.json, ~/.claude-killer/config.json, ~/.claude.json
+  const mcpConfigs = { ...loadMCPsFromConfigFiles(), ...globalPlugins.mcps, ...localPlugins.mcps };
 
   // Sprint 7: Load MCPs from the active mode's mcps/ folder
   try {
@@ -585,10 +816,9 @@ export async function loadModeMCPs(modeName: string): Promise<void> {
 export function shutdownMCPServers() {
   for (const [, server] of activeMCPServers.entries()) {
     try {
-      // Send shutdown notification before killing
+      // Send shutdown notification before killing (NDJSON framing per MCP spec)
       const notification = JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled" });
-      const framed = `Content-Length: ${Buffer.byteLength(notification)}\r\n\r\n${notification}`;
-      server.process.stdin!.write(framed);
+      server.process.stdin!.write(notification + "\n");
     } catch { /* ignore */ }
     try {
       server.process.kill();

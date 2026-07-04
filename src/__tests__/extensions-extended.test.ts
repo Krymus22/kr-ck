@@ -47,6 +47,20 @@ function frame(obj: unknown): string {
   const body = JSON.stringify(obj);
   return `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
 }
+/**
+ * Parse NDJSON from stdin data (what the production code sends).
+ * Returns the first valid JSON object found, or null.
+ */
+function parseStdinNDJSON(data: string): any | null {
+  const lines = data.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try { return JSON.parse(trimmed); } catch { /* skip non-JSON lines */ }
+  }
+  return null;
+}
+
 
 function fakeChild() {
   const child = new EventEmitter() as any;
@@ -61,15 +75,8 @@ function fakeChild() {
 /** Cria um child que responde automaticamente a initialize e tools/list */
 function withAutoReply(child: any, tools: any[] = []) {
   child.stdin.write = vi.fn((data: string) => {
-    const jsonStart = data.indexOf("\r\n\r\n");
-    if (jsonStart === -1) return;
-    const body = data.slice(jsonStart + 4);
-    let req: any;
-    try {
-      req = JSON.parse(body);
-    } catch {
-      return;
-    }
+    const req = parseStdinNDJSON(data);
+    if (!req) return;
     if (req.id == null) return; // notification
     if (req.method === "initialize") {
       const res = { jsonrpc: "2.0", id: req.id, result: { capabilities: { tools: {} } } };
@@ -305,15 +312,8 @@ describe("extensions (extended) - callMCPTool", () => {
     writeMcpPlugin(globalPluginsDir, "p", "srv", "echo");
     const child = fakeChild();
     child.stdin.write = vi.fn((data: string) => {
-      const jsonStart = data.indexOf("\r\n\r\n");
-      if (jsonStart === -1) return;
-      const body = data.slice(jsonStart + 4);
-      let req: any;
-      try {
-        req = JSON.parse(body);
-      } catch {
-        return;
-      }
+      const req = parseStdinNDJSON(data);
+      if (!req) return;
       if (req.id == null) return;
       if (req.method === "initialize") {
         process.nextTick(() =>
@@ -366,15 +366,8 @@ describe("extensions (extended) - callMCPTool", () => {
     writeMcpPlugin(globalPluginsDir, "p", "srv", "echo");
     const child = fakeChild();
     child.stdin.write = vi.fn((data: string) => {
-      const jsonStart = data.indexOf("\r\n\r\n");
-      if (jsonStart === -1) return;
-      const body = data.slice(jsonStart + 4);
-      let req: any;
-      try {
-        req = JSON.parse(body);
-      } catch {
-        return;
-      }
+      const req = parseStdinNDJSON(data);
+      if (!req) return;
       if (req.id == null) return;
       if (req.method === "initialize") {
         process.nextTick(() =>

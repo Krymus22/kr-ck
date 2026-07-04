@@ -22,6 +22,8 @@ import {
   estimateTokens,
   getSystemPrompt,
   reloadProjectMemory,
+  loadProjectMemoryFiles,
+  getLoadedMemoryFiles,
   optimizeContext,
 } from "../history.js";
 
@@ -297,6 +299,118 @@ describe("reloadProjectMemory", () => {
   it("returns null or string without errors", () => {
     const result = reloadProjectMemory();
     expect(result === null || typeof result === "string").toBe(true);
+  });
+});
+
+// ─── BUG 2 regression: project memory file listing (listar_memoria tool) ──
+// The model needs to answer "which config file did you read?" — previously
+// it only saw injected content without knowing the source files. Now
+// loadProjectMemoryFiles() returns metadata (path, size, content) and
+// getLoadedMemoryFiles() returns the cached list.
+
+describe("loadProjectMemoryFiles", () => {
+  beforeEach(() => {
+    resetHistory();
+    reloadProjectMemory(); // invalidate cache
+  });
+
+  it("returns an array (possibly empty) without errors", () => {
+    const files = loadProjectMemoryFiles();
+    expect(Array.isArray(files)).toBe(true);
+  });
+
+  it("each file has relativePath, absolutePath, sizeBytes, content", () => {
+    const files = loadProjectMemoryFiles();
+    for (const f of files) {
+      expect(typeof f.relativePath).toBe("string");
+      expect(typeof f.absolutePath).toBe("string");
+      expect(typeof f.sizeBytes).toBe("number");
+      expect(typeof f.content).toBe("string");
+      expect(f.sizeBytes).toBeGreaterThan(0);
+    }
+  });
+
+  it("absolutePath is absolute (starts with / or drive letter)", () => {
+    const files = loadProjectMemoryFiles();
+    for (const f of files) {
+      // On Linux/macOS: starts with /
+      // On Windows: starts with drive letter like C:
+      expect(f.absolutePath.startsWith("/") || /^[A-Za-z]:/.test(f.absolutePath)).toBe(true);
+    }
+  });
+});
+
+describe("getLoadedMemoryFiles (cache)", () => {
+  beforeEach(() => {
+    resetHistory();
+    reloadProjectMemory(); // invalidate cache
+  });
+
+  it("returns the same list as loadProjectMemoryFiles (cached)", () => {
+    const fresh = loadProjectMemoryFiles();
+    const cached = getLoadedMemoryFiles();
+    expect(cached.length).toBe(fresh.length);
+    // Same references after caching
+    if (fresh.length > 0) {
+      expect(cached[0]?.relativePath).toBe(fresh[0]?.relativePath);
+    }
+  });
+
+  it("returns stable results across multiple calls (cache works)", () => {
+    const first = getLoadedMemoryFiles();
+    const second = getLoadedMemoryFiles();
+    expect(second.length).toBe(first.length);
+    // Should be the same array reference (cached)
+    expect(second).toBe(first);
+  });
+
+  it("reloadProjectMemory invalidates cache (new array reference)", () => {
+    const first = getLoadedMemoryFiles();
+    reloadProjectMemory();
+    const second = getLoadedMemoryFiles();
+    // After reload, cache is rebuilt — different array reference
+    expect(second).not.toBe(first);
+    expect(second.length).toBe(first.length); // same content though
+  });
+});
+
+describe("getSystemPrompt with project memory", () => {
+  beforeEach(() => {
+    resetHistory();
+    reloadProjectMemory();
+  });
+
+  it("if memory files exist, system prompt mentions ler_arquivo for re-reading", () => {
+    const files = loadProjectMemoryFiles();
+    const prompt = getSystemPrompt();
+    if (files.length > 0) {
+      // BUG 2 fix: system prompt should instruct the model that it can
+      // re-read files via ler_arquivo(path), and list the files.
+      expect(prompt).toContain("Project Memory");
+      expect(prompt).toContain("ler_arquivo");
+      expect(prompt).toContain("were loaded from disk at startup");
+      // Each file's relative path should appear in the prompt
+      for (const f of files) {
+        expect(prompt).toContain(f.relativePath);
+      }
+    } else {
+      // No memory files in test cwd — skip this assertion
+      expect(prompt.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("if memory files exist, system prompt includes file sizes", () => {
+    const files = loadProjectMemoryFiles();
+    const prompt = getSystemPrompt();
+    if (files.length > 0) {
+      // File size should appear in human-readable form (e.g., "1.2 KB" or "500 B")
+      for (const f of files) {
+        const sizeStr = f.sizeBytes < 1024
+          ? `${f.sizeBytes} B`
+          : `${(f.sizeBytes / 1024).toFixed(1)} KB`;
+        expect(prompt).toContain(sizeStr);
+      }
+    }
   });
 });
 

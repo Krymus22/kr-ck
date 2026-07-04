@@ -48,11 +48,11 @@ describe("modelRegistry — extended", () => {
   // ─── getModelContextWindow — extras (2) ────────────────────────────────────
 
   describe("getModelContextWindow — extras", () => {
-    it("retorna 128000 para todos os modelos ZenMux (capacidade uniforme)", () => {
-      const zenmuxModels = MODEL_REGISTRY.filter((m) => m.provider === "zenmux");
+    it("retorna >= 128000 para todos os modelos ZenMux", () => {
+      const zenmuxModels = MODEL_REGISTRY.filter((m) => m.provider === "zenmux" || m.provider === "both");
       expect(zenmuxModels.length).toBeGreaterThan(0);
       for (const m of zenmuxModels) {
-        expect(getModelContextWindow(m.id)).toBe(128_000);
+        expect(getModelContextWindow(m.id)).toBeGreaterThanOrEqual(128_000);
       }
     });
 

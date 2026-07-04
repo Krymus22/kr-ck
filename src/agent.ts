@@ -675,6 +675,41 @@ const toolHandlers: Record<string, ToolHandler> = {
     };
   },
 
+  "listar_memoria": async () => {
+    // Returns the list of project memory files (CLAUDE.md, AGENTS.md) loaded
+    // into the system prompt at startup. The model uses this to answer
+    // "which config file did you read?" without parsing the system prompt.
+    const files = history.getLoadedMemoryFiles();
+    if (files.length === 0) {
+      return {
+        resultStr: "No project memory files (CLAUDE.md / AGENTS.md) were found at startup. " +
+          "To add one, create CLAUDE.md or AGENTS.md in the project root (or any parent dir up to 10 levels).",
+        usedHeal: false,
+      };
+    }
+    const lines = [
+      `Project memory files loaded at startup (${files.length}):`,
+      "",
+    ];
+    for (const f of files) {
+      const sizeStr = f.sizeBytes < 1024
+        ? `${f.sizeBytes} B`
+        : f.sizeBytes < 1024 * 1024
+        ? `${(f.sizeBytes / 1024).toFixed(1)} KB`
+        : `${(f.sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+      lines.push(`- ${f.relativePath} (${sizeStr})`);
+    }
+    lines.push(
+      "",
+      "To see the CURRENT contents of any file above, call ler_arquivo(<path>).",
+      "The cached version in the system prompt may be stale if the file was edited since startup.",
+    );
+    return {
+      resultStr: lines.join("\n"),
+      usedHeal: false,
+    };
+  },
+
   // --- IDEIA 5: Sub-agent for isolated exploration ------------------------
   "explorar_subagente": async (args) => {
     const question = asString(args.questao ?? args.question);
@@ -1097,6 +1132,8 @@ const READ_ONLY_TOOLS = new Set([
   "explorar_subagente",
   // Task state read is read-only.
   "ler_estado",
+  // Listing project memory files is read-only (just returns the cached list).
+  "listar_memoria",
 ]);
 
 const FILE_TOOLS = new Set([

@@ -1,5 +1,6 @@
 name: Mutation Testing (Stryker)
 
+# Reativado: repo agora é público, CI é ilimitado.
 on:
   # Roda toda noite: 22:30 BRT (01:30 UTC) até 07:30 BRT (10:30 UTC)
   # Janela de 9 horas para análise completa

@@ -16,7 +16,6 @@ __test_aplicardir__/
 __test_lerdir__/
 scratch/
 e2e/
-Z:\nonexistent\
 tool-results/
 Z*
 
@@ -26,4 +25,3 @@ Z*
 /default.json
 /default.project.json
 /src/PlayerData*
-/README.md

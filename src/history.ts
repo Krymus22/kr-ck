@@ -25,12 +25,23 @@ import { getEffortPromptSnippet } from "./effortLevels.js";
 
 const MEMORY_FILENAMES = ["CLAUDE.md", "AGENTS.md", ".claude-killer/AGENTS.md"];
 
+export interface MemoryFile {
+  /** Path relative to cwd (or absolute if outside cwd). */
+  relativePath: string;
+  /** Absolute path on disk. */
+  absolutePath: string;
+  /** File size in bytes. */
+  sizeBytes: number;
+  /** File contents (trimmed). */
+  content: string;
+}
+
 /**
- * Walks up from cwd looking for memory files. Returns concatenated contents
- * (with headers) or null if none found. Capped at 10 parent dirs to avoid
+ * Walks up from cwd looking for memory files. Returns the list of files found
+ * (closest = last = highest precedence). Capped at 10 parent dirs to avoid
  * runaway on weird FS layouts.
  */
-function loadProjectMemory(): string | null {
+export function loadProjectMemoryFiles(): MemoryFile[] {
   const start = process.cwd();
   const parts: { file: string; absDir: string }[] = [];
   let dir: string | null = start;
@@ -48,14 +59,39 @@ function loadProjectMemory(): string | null {
     dir = parent;
   }
 
-  if (parts.length === 0) return null;
+  if (parts.length === 0) return [];
 
   // Reverse so closest (most specific) is last and treated as highest precedence
   parts.reverse();
 
-  return parts
-    .map((p) => `--- MEMORY: ${path.relative(start, p.file) || p.file} ---\n${fs.readFileSync(p.file, "utf8").trim()}`)
+  return parts.map((p) => {
+    const stat = fs.statSync(p.file);
+    return {
+      relativePath: path.relative(start, p.file) || p.file,
+      absolutePath: p.file,
+      sizeBytes: stat.size,
+      content: fs.readFileSync(p.file, "utf8").trim(),
+    };
+  });
+}
+
+/**
+ * Legacy: returns concatenated contents (with headers) or null if none found.
+ * Kept for backward compat with tests; new code should use loadProjectMemoryFiles().
+ */
+function loadProjectMemory(): string | null {
+  const files = loadProjectMemoryFiles();
+  if (files.length === 0) return null;
+  return files
+    .map((p) => `--- MEMORY: ${p.relativePath} ---\n${p.content}`)
     .join("\n\n");
+}
+
+/** Human-readable file size (e.g., "2.3 KB", "1.1 MB", "450 B"). */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // --- System Prompt ------------------------------------------------------------
@@ -281,9 +317,21 @@ export function getSystemPrompt(): string {
     basePrompt = `[SYSTEM NOTE: CAVEMAN MODE IS ACTIVE (Level: ${currentCavemanLevel}). You MUST strictly adhere to the caveman rules below for ALL replies. Speaking in standard conversational prose is strictly forbidden. Keep all technical terms, code blocks, and exact strings intact.]\n\n${basePrompt}`;
   }
 
-    const memory = loadProjectMemoryCached();
-  if (memory) {
-    basePrompt = `${basePrompt}\n\n## Project Memory (CLAUDE.md / AGENTS.md)\n\nThe following files describe this project's conventions. Follow them.\n\n${memory}\n`;
+    const memoryFiles = loadProjectMemoryFilesCached();
+  if (memoryFiles.length > 0) {
+    const fileList = memoryFiles
+      .map((f) => `- ${f.relativePath} (${formatFileSize(f.sizeBytes)})`)
+      .join("\n");
+    const fileContents = memoryFiles
+      .map((f) => `--- ${f.relativePath} (${formatFileSize(f.sizeBytes)}) ---\n${f.content}`)
+      .join("\n\n");
+    basePrompt = `${basePrompt}\n\n## Project Memory (CLAUDE.md / AGENTS.md)\n\n` +
+      `The following files were loaded from disk at startup and describe this project's conventions:\n\n` +
+      `${fileList}\n\n` +
+      `You can re-read any of these files at any time using \`ler_arquivo(<path>)\` to see the CURRENT content ` +
+      `(the cached version below may be stale if the file was edited since startup). ` +
+      `When the user asks "which config file did you read?" or "what files are in your context?", answer with the list above.\n\n` +
+      `### File contents:\n\n${fileContents}\n`;
   }
 
   if (skills.length === 0) {
@@ -322,18 +370,29 @@ function injectPatterns(prompt: string): string {
   return prompt;
 }
 
-let cachedMemory: string | null | undefined; // undefined = not loaded yet
-function loadProjectMemoryCached(): string | null {
-  if (cachedMemory === undefined) {
-    cachedMemory = loadProjectMemory();
+let cachedMemoryFiles: MemoryFile[] | undefined; // undefined = not loaded yet
+function loadProjectMemoryFilesCached(): MemoryFile[] {
+  if (cachedMemoryFiles === undefined) {
+    cachedMemoryFiles = loadProjectMemoryFiles();
   }
-  return cachedMemory;
+  return cachedMemoryFiles;
+}
+
+/**
+ * Returns the list of project memory files currently loaded (cached).
+ * Used by the `listar_memoria` tool so the model can answer "which config
+ * files did you read?" without relying on system prompt parsing.
+ */
+export function getLoadedMemoryFiles(): MemoryFile[] {
+  return loadProjectMemoryFilesCached();
 }
 
 /** Invalidate the memoized project memory (call on /memory reload). */
 export function reloadProjectMemory(): string | null {
-  cachedMemory = undefined;
-  return loadProjectMemoryCached();
+  cachedMemoryFiles = undefined;
+  const files = loadProjectMemoryFilesCached();
+  if (files.length === 0) return null;
+  return files.map((f) => `--- MEMORY: ${f.relativePath} ---\n${f.content}`).join("\n\n");
 }
 
 // --- History Store ------------------------------------------------------------

@@ -11,6 +11,11 @@
     "darwin": {
       "command": "/Applications/RobloxStudio.app/Contents/MacOS/StudioMCP",
       "args": []
+    },
+    "linux": {
+      "_comment": "Roblox Studio MCP is not available on Linux. The server will be skipped at startup with a clear warning (see extensions.ts startAndInitMCPServer platform guard). Set 'command' to a real Linux binary if you have a custom build of StudioMCP for Linux.",
+      "command": "true",
+      "args": []
     }
   },
   "notes": [
@@ -18,7 +23,8 @@
     "The user must enable it in Studio: Assistant > ... > Manage MCP Servers > Enable.",
     "Windows: uses cmd.exe /c %LOCALAPPDATA%\\Roblox\\mcp.bat",
     "macOS: uses /Applications/RobloxStudio.app/Contents/MacOS/StudioMCP",
-    "Claude-Killer auto-starts the MCP server when mode Roblox is active.",
+    "Linux: NOT available — Roblox Studio does not run on Linux. The server is skipped at startup with a warning.",
+    "Claude-Killer auto-starts the MCP server when mode Roblox is active (Windows/macOS only).",
     "WRITE tools are blocked by robloxMcpGuard.ts for safety.",
     "See: https://create.roblox.com/docs/studio/mcp"
   ]
