@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "_comment": "Stryker mutation testing configuration. Run with: npx stryker run",
+  "_comment": "Stryker mutation testing. Run with: npx stryker run",
   "packageManager": "npm",
   "reporters": ["html", "clear-text", "progress"],
   "testRunner": "vitest",
@@ -27,6 +27,7 @@
     "src/toolDetector.ts",
     "src/testRunner.ts",
     "src/invariants.ts",
+    "src/invariants-all.ts",
     "src/i18n.ts",
     "src/utf8Safety.ts",
     "src/toolInstaller.ts",
@@ -72,7 +73,9 @@
   "maxTestRunnerReuse": 5,
   "concurrency": 4,
   "ignoreStatic": true,
+  "ignoreGlobalConstants": true,
+  "disableTypeChecks": true,
   "vitest": {
-    "configFile": "vitest.config.ts"
+    "configFile": "vitest.stryker.config.ts"
   }
 }
