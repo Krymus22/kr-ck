@@ -634,11 +634,24 @@ function loadMCPsFromModeDir(modeName: string): Record<string, MCPConfig> {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
   const result: Record<string, MCPConfig> = {};
 
+  // Resolve bundled defaults dir (relative to this file when running from dist/)
+  // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
+  const bundledDefaultsDir = (() => {
+    try {
+      const { fileURLToPath } = require("node:url");
+      const here = path.dirname(fileURLToPath(import.meta.url));
+      return path.join(here, "..", "defaults", "modes", modeName, "mcps");
+    } catch {
+      // Fallback: try cwd-based path (used in dev mode and tests)
+      return path.join(process.cwd(), "defaults", "modes", modeName, "mcps");
+    }
+  })();
+
   // Try user's mode dir first
   const dirs = [
     path.join(home, ".claude-killer", "modes", modeName, "mcps"),
     path.join(process.cwd(), "defaults", "modes", modeName, "mcps"),
-    path.join(__dirname, "..", "defaults", "modes", modeName, "mcps"),
+    bundledDefaultsDir,
   ];
 
   for (const dir of dirs) {
@@ -699,11 +712,18 @@ export async function loadAllExtensions() {
         if (fs.existsSync(bundledDir)) {
           modeSkills = loadSkillsFromDir(bundledDir);
         }
-        // Also try relative to __dirname (when running from dist/)
+        // Also try relative to this file (when running from dist/)
+        // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
         if (modeSkills.length === 0) {
-          const distDir = path.join(__dirname, "..", "defaults", "modes", mode.name, "skills");
-          if (fs.existsSync(distDir)) {
-            modeSkills = loadSkillsFromDir(distDir);
+          try {
+            const { fileURLToPath } = require("node:url");
+            const here = path.dirname(fileURLToPath(import.meta.url));
+            const distDir = path.join(here, "..", "defaults", "modes", mode.name, "skills");
+            if (fs.existsSync(distDir)) {
+              modeSkills = loadSkillsFromDir(distDir);
+            }
+          } catch {
+            // fileURLToPath not available — skip
           }
         }
       }
