@@ -77,6 +77,7 @@ const TOOL_CLASSIFICATION: Record<string, McpToolCategory> = {
   "explore_subagent": "read",
   "list_roblox_studios": "read",
   "console_output": "read",
+  "get_studio_state": "read",  // Retorna estado do Studio (place aberto, selection, modo edit/play)
 
   // ── WRITE/EDIT (BLOCKED — must use our aplicar_diff pipeline) ─────────────
   // These modify scripts or insert assets. The IA must use our tools instead
@@ -220,11 +221,36 @@ export function evaluateMcpToolCall(
         allowed: false,
         category: "unknown",
         shouldLog: true,
-        blockReason: `[MCP_GUARD] Tool "${toolName}" is not recognized. For safety, ` +
-          `unknown Roblox Studio MCP tools are blocked. If this is a new tool, ` +
-          `ask the developer to add it to robloxMcpGuard.ts.`,
+        blockReason: formatUnknownBlockMessage(toolName),
       };
   }
+}
+
+/**
+ * Format the error message when an UNKNOWN tool is blocked.
+ * Tells the user/developer exactly which tool to add and where,
+ * so future Roblox Studio MCP additions don't surprise us.
+ */
+function formatUnknownBlockMessage(toolName: string): string {
+  return [
+    `[MCP_GUARD] Tool "${toolName}" is not in the recognized list of Roblox Studio MCP tools.`,
+    `For safety, unknown tools are blocked (fail-safe).`,
+    ``,
+    `If this is a NEW tool from Roblox Studio MCP, the developer needs to classify it.`,
+    `Categories: read | write | execute | playtest | session`,
+    ``,
+    `To fix: open src/robloxMcpGuard.ts and add this line to TOOL_CLASSIFICATION:`,
+    `  "${toolName}": "<category>",  // <brief description>`,
+    ``,
+    `Guidelines for classification:`,
+    `  - read: only returns data (script_read, get_*, list_*, search_*)`,
+    `  - write: modifies scripts or inserts assets (multi_edit, generate_*, insert_*)`,
+    `  - execute: runs Luau code (execute_luau, run_script_in_play_mode)`,
+    `  - playtest: controls game runtime (start_stop_play, screen_capture, inputs)`,
+    `  - session: session management (set_active_studio)`,
+    ``,
+    `When in doubt, classify as "read" (safe default — most new tools are read-only).`,
+  ].join("\n");
 }
 
 /**
