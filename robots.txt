@@ -1,0 +1,9 @@
+# robots.txt — pede pra buscadores (Google, Bing, DuckDuckGo) não indexarem
+# este repositório.
+#
+# Nota: o Google lê https://github.com/robots.txt (do domínio), não este
+# arquivo. Mas alguns crawlers menores e ferramentas de arquivamento
+# respeitam o robots.txt do próprio repo. Não custa nada ter.
+
+User-agent: *
+Disallow: /
