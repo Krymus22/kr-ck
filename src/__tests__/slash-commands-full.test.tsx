@@ -317,7 +317,11 @@ afterAll(() => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () => {
+  let originalCwd: string;
+
   beforeEach(() => {
+    // Salva cwd original pra restaurar depois (testes de /cd mudam o cwd)
+    originalCwd = process.cwd();
     // Limpa histórico de chamadas (não reseta implementações)
     vi.clearAllMocks();
     // Re-seta defaults que testes individuais podem override
@@ -351,6 +355,13 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
     mockedFormatPoolStats.mockReturnValue("1 keys, 40 RPM");
     mockedOrganizeInbox.mockReturnValue({ organized: [], ignored: [], errors: [] });
     mockedFormatOrganizeResult.mockReturnValue("");
+  });
+
+  afterEach(() => {
+    // Restaura cwd original (testes de /cd mudam o cwd globalmente)
+    try {
+      process.chdir(originalCwd);
+    } catch { /* cwd pode ter sido deletado — ignora */ }
   });
 
   // ─── /help ────────────────────────────────────────────────────────────────
@@ -992,7 +1003,9 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
     const { stdin, lastFrame } = render(<App />);
     // Vai pra tmp (sempre existe)
     const tmpDir = require("node:os").tmpdir();
-    await sendCommand(stdin, `/cd ${tmpDir}`);
+    // Delay maior (400ms) pra CI — máquinas mais lentas precisam de mais tempo
+    // para o React/Ink processar o comando e re-renderizar.
+    await sendCommand(stdin, `/cd ${tmpDir}`, 400);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("[OK] Working directory changed");
     expect(out).toContain(tmpDir);
@@ -1000,14 +1013,14 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
 
   it("/cd <path-inexistente> — mostra erro", async () => {
     const { stdin, lastFrame } = render(<App />);
-    await sendCommand(stdin, "/cd /caminho/que/nao/existe/12345");
+    await sendCommand(stdin, "/cd /caminho/que/nao/existe/12345", 400);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("[ERROR] Path does not exist");
   });
 
   it("/cd ~ — vai pra home directory", async () => {
     const { stdin, lastFrame } = render(<App />);
-    await sendCommand(stdin, "/cd ~");
+    await sendCommand(stdin, "/cd ~", 400);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("[OK] Working directory changed");
     expect(out).toContain(require("node:os").homedir());
@@ -1016,7 +1029,7 @@ describe("Slash Commands FULL — cobertura completa de TODOS os comandos", () =
   it("/cd . — mantém no mesmo diretório", async () => {
     const { stdin, lastFrame } = render(<App />);
     const beforeCwd = process.cwd();
-    await sendCommand(stdin, "/cd .");
+    await sendCommand(stdin, "/cd .", 400);
     const out = stripAnsi(lastFrame() ?? "");
     expect(out).toContain("[OK] Working directory changed");
     expect(process.cwd()).toBe(beforeCwd);
