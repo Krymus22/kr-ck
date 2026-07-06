@@ -256,7 +256,10 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     id: "z-ai/glm-5.2",
     name: "GLM 5.2",
     contextWindow: 1_000_000,
-    maxOutputTokens: 16_384,
+    // GLM 5.2 generates reasoning_content BEFORE content. With 16k max_tokens,
+    // reasoning can consume all tokens → content is empty. Increased to 32k
+    // so reasoning + content both fit.
+    maxOutputTokens: 32_768,
     costPer1MPrompt: 0,
     costPer1MCompletion: 0,
     supportsTools: true,

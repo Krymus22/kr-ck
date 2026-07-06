@@ -1260,29 +1260,65 @@ export async function chat(
   onThinking?: () => void,
   tools?: OpenAI.Chat.Completions.ChatCompletionTool[]
 ): Promise<ChatResponse> {
-  // Global timeout: 5 minutes (300s). If the API doesn't respond in 5 min,
-  // abort and return an error. This prevents infinite hangs.
-  const GLOBAL_TIMEOUT_MS = 300_000;
+  // Auto-retry: if the API hangs (>3min) or returns empty content (reasoning
+  // consumed all tokens), automatically retry up to 2 times without user
+  // intervention. This matches Claude Code behavior — the CLI should recover
+  // on its own.
+  const MAX_CHAT_RETRIES = 2;
+  const HANG_TIMEOUT_MS = 180_000; // 3 minutes = hang (not just slow)
 
-  const timeoutPromise = new Promise<ChatResponse>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error(`Tempo limite excedido (${GLOBAL_TIMEOUT_MS / 1000}s). A API não respondeu. Possíveis causas: servidor sobrecarregado, modelo em cold start, ou problema de rede. Tente novamente.`));
-    }, GLOBAL_TIMEOUT_MS);
-  });
+  for (let attempt = 0; attempt <= MAX_CHAT_RETRIES; attempt++) {
+    // Wrap in timeout that REJECTS (triggers retry) instead of returning error
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`__HANG_TIMEOUT__`));
+      }, HANG_TIMEOUT_MS);
+    });
 
-  const chatPromise = (async (): Promise<ChatResponse> => {
-    const poolActive = getPoolSize() > 0 || initApiKeyPool();
-    if (poolActive) {
-      try {
-        return await chatWithPool(messages, tools, onStreamStart, onToken, onThinking);
-      } catch (err) {
-        log.warn(`[POOL] Falling back to single-key mode: ${(err as Error).message}`);
+    const chatPromise = (async (): Promise<ChatResponse> => {
+      const poolActive = getPoolSize() > 0 || initApiKeyPool();
+      if (poolActive) {
+        try {
+          return await chatWithPool(messages, tools, onStreamStart, onToken, onThinking);
+        } catch (err) {
+          log.warn(`[POOL] Falling back to single-key mode: ${(err as Error).message}`);
+        }
       }
-    }
-    return chatSingleKey(messages, tools, onStreamStart, onToken, onThinking);
-  })();
+      return chatSingleKey(messages, tools, onStreamStart, onToken, onThinking);
+    })();
 
-  return Promise.race([chatPromise, timeoutPromise]);
+    try {
+      const result = await Promise.race([chatPromise, timeoutPromise]);
+
+      // Check for empty response (reasoning consumed all tokens)
+      const content = result.choices?.[0]?.message?.content;
+      const toolCalls = result.choices?.[0]?.message?.tool_calls;
+      const finishReason = result.choices?.[0]?.finish_reason;
+
+      if (!content && (!toolCalls || toolCalls.length === 0) && attempt < MAX_CHAT_RETRIES) {
+        log.warn(`[CHAT] Resposta vazia (finish_reason=${finishReason}). Auto-retry ${attempt + 1}/${MAX_CHAT_RETRIES}...`);
+        // Wait 2s before retry
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+
+      return result;
+    } catch (err) {
+      const errMsg = (err as Error).message ?? String(err);
+
+      // Hang timeout — retry automatically
+      if (errMsg === "__HANG_TIMEOUT__" && attempt < MAX_CHAT_RETRIES) {
+        log.warn(`[CHAT] API sem resposta há ${HANG_TIMEOUT_MS / 1000}s. Auto-retry ${attempt + 1}/${MAX_CHAT_RETRIES}...`);
+        continue;
+      }
+
+      // Other errors (403, 429, network) — let existing retry handlers deal with it
+      throw err;
+    }
+  }
+
+  // All retries exhausted — return error response instead of hanging forever
+  throw new Error(`API não respondeu após ${MAX_CHAT_RETRIES + 1} tentativas. Possíveis causas: servidor sobrecarregado, modelo em cold start, ou problema de rede. Tente novamente em alguns minutos.`);
 }
 
 // BUG FIX (BUG 6): helper for cancelar/abortar um stream perdedor do hedging.
