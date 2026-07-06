@@ -51,6 +51,7 @@ import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 import { getSearxStatus } from "../searxManager.js";
 import { loadConfig as loadDotfileConfig, updateConfig as updateDotfileConfig, saveConfig as saveDotfileConfig } from "../dotfileConfig.js";
+import { saveSession, loadSession, listSessions, deleteSession, renameSession, autoSave } from "../session.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -70,6 +71,7 @@ const SLASH_COMMANDS: Array<{ cmd: string; desc: string }> = [
   ...getSlashCommands().map((c) => ({ cmd: c.cmd, desc: c.desc })),
   { cmd: "/buscar", desc: "Search for file on machine (tools, etc)" },
   { cmd: "/cd", desc: "Change working directory (project switcher)" },
+  { cmd: "/session", desc: "Save/load/list/delete conversation sessions" },
 ];
 
 type CommandResult = { handled: boolean; message?: string; exit?: boolean; openHub?: boolean; openFolderBrowser?: boolean; resetChat?: boolean; openConfigurator?: boolean; configuratorTool?: string | null; compactDone?: boolean; compactStarted?: boolean; compactInstruction?: string; compactResult?: { removed: number; beforeTokens: number; afterTokens: number; method?: string } };
@@ -77,6 +79,16 @@ type CommandResult = { handled: boolean; message?: string; exit?: boolean; openH
 
 
 function handleExitCommand(): CommandResult {
+  // Auto-save session before exiting (so user can /session load later)
+  try {
+    const sessionId = autoSave();
+    if (sessionId) {
+      // Log to stderr (less disruptive than stdout in TUI mode)
+      console.error(`[SESSION] Auto-saved: ${sessionId} (use /session load ${sessionId} to resume)`);
+    }
+  } catch {
+    // Auto-save failure should NOT prevent exit
+  }
   shutdownMCPServers();
   return { handled: true, exit: true };
 }
@@ -112,18 +124,87 @@ function handlePluginsCommand(): CommandResult {
 }
 
 /**
- * BUG FIX (BUG 3C): /mcp slash command for managing MCP servers.
+ * /session — manage conversation sessions (save, load, list, delete, rename).
  *
  * Subcommands:
- *   /mcp                 — list active MCP servers + supported config locations
- *   /mcp list            — alias for /mcp
- *   /mcp add <name> <command> [args...]
- *                         — add MCP server to ~/.claude-killer/config.json
- *   /mcp remove <name>   — remove MCP server from ~/.claude-killer/config.json
+ *   /session                    — list saved sessions
+ *   /session list               — alias for /session
+ *   /session save [name]        — save current session (optional custom name)
+ *   /session load <id>          — load a saved session (replaces current)
+ *   /session delete <id>        — delete a saved session
+ *   /session rename <old> <new> — rename a session
  *
- * Note: adding/removing requires a CLI restart to take effect (MCPs are loaded
- * at startup). This is the same UX as Claude Code's `claude mcp add`.
+ * Sessions are stored in ~/.claude-killer/sessions/<id>.json
+ * Auto-save happens on /exit.
  */
+function handleSessionCommand(arg: string | null): CommandResult {
+  const subcommand = arg?.split(/\s+/)[0]?.toLowerCase() ?? "";
+
+  // /session or /session list
+  if (!subcommand || subcommand === "list") {
+    const sessions = listSessions();
+    if (sessions.length === 0) {
+      return {
+        handled: true,
+        message: "No saved sessions.\n\nUsage:\n  /session save [name]  — save current session\n  /session load <id>   — load a session",
+      };
+    }
+    const lines = [`Saved sessions (${sessions.length}):`, ""];
+    for (const s of sessions.slice(0, 20)) {
+      const date = s.lastModified.slice(0, 19).replace("T", " ");
+      const summary = s.summary.length > 50 ? s.summary.slice(0, 50) + "..." : s.summary;
+      lines.push(`  ${s.id}  ${date}  ${s.messageCount} msgs  ${summary}`);
+    }
+    if (sessions.length > 20) {
+      lines.push(`  ... and ${sessions.length - 20} more`);
+    }
+    lines.push("", "Usage:", "  /session save [name]        — save current", "  /session load <id>          — load", "  /session delete <id>        — delete", "  /session rename <old> <new> — rename");
+    return { handled: true, message: lines.join("\n") };
+  }
+
+  // /session save [name]
+  if (subcommand === "save") {
+    const name = arg!.slice(4).trim() || undefined;
+    try {
+      const id = saveSession(name);
+      return { handled: true, message: `[OK] Session saved: ${id}\nUse /session load ${id} to resume later.` };
+    } catch (err) {
+      return { handled: true, message: `[ERROR] Failed to save session: ${(err as Error).message}` };
+    }
+  }
+
+  // /session load <id>
+  if (subcommand === "load") {
+    const id = arg!.split(/\s+/)[1];
+    if (!id) return { handled: true, message: "Usage: /session load <id>" };
+    const ok = loadSession(id);
+    if (ok) {
+      return { handled: true, resetChat: true, message: `[OK] Session loaded: ${id}\nChat history restored.` };
+    }
+    return { handled: true, message: `[ERROR] Session not found: ${id}\nUse /session list to see available sessions.` };
+  }
+
+  // /session delete <id>
+  if (subcommand === "delete" || subcommand === "rm") {
+    const id = arg!.split(/\s+/)[1];
+    if (!id) return { handled: true, message: "Usage: /session delete <id>" };
+    const ok = deleteSession(id);
+    return { handled: true, message: ok ? `[OK] Session deleted: ${id}` : `[ERROR] Session not found: ${id}` };
+  }
+
+  // /session rename <old> <new>
+  if (subcommand === "rename") {
+    const parts = arg!.split(/\s+/);
+    const oldId = parts[1];
+    const newId = parts[2];
+    if (!oldId || !newId) return { handled: true, message: "Usage: /session rename <old-id> <new-id>" };
+    const ok = renameSession(oldId, newId);
+    return { handled: true, message: ok ? `[OK] Session renamed: ${oldId} → ${newId}` : `[ERROR] Failed to rename (session not found or name already exists)` };
+  }
+
+  return { handled: true, message: `Unknown subcommand: "${subcommand}"\nUsage: /session [list|save|load|delete|rename]` };
+}
+
 function handleMcpCommand(arg: string | null): CommandResult {
   const subcommand = arg?.split(/\s+/)[0]?.toLowerCase() ?? "";
 
@@ -637,6 +718,7 @@ const COMMAND_HANDLERS: Record<string, (arg: string | null) => CommandResult> = 
   "/buscar": (arg) => handleBuscarCommand(arg),
   // /cd — change working directory (similar to Claude Code's project picker)
   "/cd": (arg) => handleCdCommand(arg),
+  "/session": (arg) => handleSessionCommand(arg),
   // Sprint 10: organizar inbox do modo ativo
   "/organize": () => handleOrganizeCommand(),
   // Sprint 11: configurar tools via mini chat

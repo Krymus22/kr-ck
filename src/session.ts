@@ -124,6 +124,39 @@ export function deleteSession(sessionId: string): boolean {
   return true;
 }
 
+/**
+ * Rename a session by creating a copy with the new ID and deleting the old one.
+ * Preserves all session data (messages, cavemanLevel, planMode).
+ * @returns true if renamed successfully, false if session not found
+ */
+export function renameSession(oldId: string, newId: string): boolean {
+  const oldPath = path.join(SESSION_DIR, `${oldId}.json`);
+  const newPath = path.join(SESSION_DIR, `${newId}.json`);
+
+  if (!fs.existsSync(oldPath)) {
+    log.error(`Session not found: ${oldId}`);
+    return false;
+  }
+
+  if (fs.existsSync(newPath)) {
+    log.error(`Session already exists: ${newId}`);
+    return false;
+  }
+
+  try {
+    const data = JSON.parse(fs.readFileSync(oldPath, "utf8"));
+    data.id = newId;
+    data.lastModified = new Date().toISOString();
+    fs.writeFileSync(newPath, JSON.stringify(data, null, 2), "utf8");
+    fs.unlinkSync(oldPath);
+    log.success(`Session renamed: ${oldId} → ${newId}`);
+    return true;
+  } catch (err) {
+    log.error(`Failed to rename session: ${(err as Error).message}`);
+    return false;
+  }
+}
+
 export function autoSave(): string | null {
   try {
     return saveSession();

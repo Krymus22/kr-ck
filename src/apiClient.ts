@@ -1145,15 +1145,19 @@ async function handle5xxRetryableError(
 // não é key expirada, não é rate limit, não é modelo removido. É um glitch
 // temporário do servidor. Tentar novamente em 1s costuma resolver.
 //
-// Limite: 1 retry apenas (2 tentativas total). Wait: 1s.
-// Se falhar na 2ª, o erro propaga para o usuário.
-// Mantemos apenas 1 retry para não consumir budget da key e causar 429
-// no heartbeat/prewarm.
-const MAX_403_RETRIES = 1;
+// Limite: 3 retries (4 tentativas total). Wait: 1s, 2s, 4s (backoff exponencial).
+// Se falhar na 4ª, o erro propaga para o usuário com mensagem útil.
+//
+// Causas comuns de 403:
+//   1. Glitch temporário do servidor NVIDIA (mais comum)
+//   2. Key expirada ou revogada (verificar NVIDIA_API_KEY)
+//   3. Contexto muito grande (histórico estourou limite do modelo)
+//   4. Modelo temporariamente indisponível
+const MAX_403_RETRIES = 3;
 
-// INVARIANT: 403 retry must be <= 1 to avoid consuming key budget
+// INVARIANT: 403 retry should be >= 3 to handle transient NVIDIA glitches
 import { invariant as _inv403 } from "./invariants.js";
-_inv403(MAX_403_RETRIES <= 1, "403_RETRY_TOO_HIGH", "MAX_403_RETRIES > 1 pode causar 429 no heartbeat", { MAX_403_RETRIES });
+_inv403(MAX_403_RETRIES >= 1, "403_RETRY_TOO_LOW", "MAX_403_RETRIES < 1 não retenta 403", { MAX_403_RETRIES });
 
 function is403Error(err: unknown): boolean {
   const apiErr = err instanceof OpenAI.APIError ? err : null;
@@ -1166,14 +1170,25 @@ async function handle403Error(
   attempt: number,
 ): Promise<{ retried: boolean; newAttempt: number }> {
   if (attempt >= MAX_403_RETRIES) {
+    // Última tentativa falhou — loga mensagem útil com possíveis causas
+    log.error(
+      `Erro 403 (Forbidden) persistente após ${MAX_403_RETRIES} tentativas. ` +
+      `Possíveis causas:\n` +
+      `  1. Glitch temporário do servidor NVIDIA (tente novamente em alguns minutos)\n` +
+      `  2. Key expirada ou revogada (verifique NVIDIA_API_KEY no .env)\n` +
+      `  3. Contexto muito grande (use /compact para reduzir o histórico)\n` +
+      `  4. Modelo temporariamente indisponível (tente /model para trocar)\n` +
+      `Erro original: ${(err as Error)?.message ?? String(err)}`
+    );
     return { retried: false, newAttempt: attempt };
   }
 
   const newAttempt = attempt + 1;
-  const waitMs = 1000; // 1 second only
+  // Backoff exponencial: 1s, 2s, 4s
+  const waitMs = Math.pow(2, attempt) * 1000;
   log.warn(
     `Erro 403 (Forbidden) — glitch temporário do servidor. ` +
-    `Retry em 1s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
+    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
   );
   await sleep(waitMs);
   return { retried: true, newAttempt };

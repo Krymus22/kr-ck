@@ -167,6 +167,18 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     provider: "nvidia",
   },
   {
+    id: "mistralai/mistral-medium-3.5-128b",
+    name: "Mistral Medium 3.5 128B",
+    contextWindow: 128_000,
+    maxOutputTokens: 8_192,
+    costPer1MPrompt: 0,
+    costPer1MCompletion: 0,
+    supportsTools: true,
+    supportsParallelTools: false,
+    hasThinking: false,
+    provider: "nvidia",
+  },
+  {
     id: "writer/palmyra-x5",
     name: "Palmyra X5",
     contextWindow: 128_000,

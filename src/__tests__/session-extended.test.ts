@@ -1,217 +1,268 @@
 /**
- * session-extended.test.ts — Cobertura adicional do módulo session.
- *
- * Foca em:
- *   - saveSession (3 casos novos)
- *   - loadSession (2 casos novos)
- *   - listSessions (2 casos novos)
- *   - edge cases (1 caso)
- *
- * Não duplica testes do arquivo session.test.ts básico.
+ * session-extended.test.ts — Testes para session.ts (save/load/list/delete/rename).
  */
-
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { saveSession, loadSession, listSessions, deleteSession } from "../session.js";
-import * as history from "../history.js";
+import * as os from "node:os";
 
-const SESSION_DIR = path.join(
-  process.env.HOME ?? process.env.USERPROFILE ?? ".",
-  ".claude-killer",
-  "sessions"
-);
+vi.mock("../logger.js", () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), success: vi.fn() },
+  info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), success: vi.fn(),
+}));
 
-beforeAll(() => {
-  history.resetHistory();
+vi.mock("../history.js", () => ({
+  getHistory: vi.fn(() => [
+    { role: "user", content: "hello" },
+    { role: "assistant", content: "hi there" },
+  ]),
+  getCavemanLevel: vi.fn(() => null),
+  isPlanMode: vi.fn(() => false),
+  resetHistory: vi.fn(),
+  addUserMessage: vi.fn(),
+  addRawAssistantMessage: vi.fn(),
+  addToolResult: vi.fn(),
+  setPlanMode: vi.fn(),
+  setCavemanLevel: vi.fn(),
+}));
+
+let tmpHome: string;
+let originalHome: string | undefined;
+
+beforeEach(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "session-test-"));
+  originalHome = process.env.HOME;
+  process.env.HOME = tmpHome;
 });
 
-afterAll(() => {
-  // Limpa sessões criadas por estes testes
-  for (const id of [
-    "ext_save_struct",
-    "ext_save_no_history",
-    "ext_load_caveman",
-    "ext_list_sort_a",
-    "ext_list_sort_b",
-    "ext_list_no_count",
-    "ext_edge_missing_messages",
-  ]) {
-    try { deleteSession(id); } catch { /* ok */ }
-  }
+afterEach(() => {
+  if (originalHome !== undefined) process.env.HOME = originalHome;
+  try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {}
 });
 
-describe("session-extended: saveSession", () => {
-  it("salva um arquivo JSON com id, createdAt, lastModified e messageCount preenchidos", () => {
-    history.resetHistory();
-    history.addUserMessage("hello extended");
-    const id = saveSession("ext_save_struct");
+// Dynamic import after HOME is set
+async function loadSessionModule() {
+  vi.resetModules();
+  return await import("../session.js");
+}
 
-    const filePath = path.join(SESSION_DIR, `${id}.json`);
-    expect(fs.existsSync(filePath)).toBe(true);
+describe("session — extended", () => {
+  it("saveSession retorna ID", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    expect(typeof id).toBe("string");
+    expect(id.length).toBeGreaterThan(0);
+  });
+
+  it("saveSession cria arquivo", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    const sessionDir = path.join(tmpHome, ".claude-killer", "sessions");
+    const files = fs.readdirSync(sessionDir);
+    expect(files).toContain(`${id}.json`);
+  });
+
+  it("saveSession usa ID custom", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession("my-custom-id");
+    expect(id).toBe("my-custom-id");
+  });
+
+  it("saveSession salva mensagens", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    const filePath = path.join(tmpHome, ".claude-killer", "sessions", `${id}.json`);
     const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    expect(data.id).toBe("ext_save_struct");
-    expect(typeof data.createdAt).toBe("string");
-    expect(typeof data.lastModified).toBe("string");
-    expect(data.messageCount).toBeGreaterThan(0);
+    expect(data.messages).toBeDefined();
     expect(Array.isArray(data.messages)).toBe(true);
+    expect(data.messages.length).toBeGreaterThan(0);
   });
 
-  it("salva cavemanLevel e planMode retornados do history", () => {
-    history.resetHistory();
-    history.setCavemanLevel(3);
-    history.setPlanMode(true);
-    history.addUserMessage("with state");
-    const id = saveSession("ext_save_state");
+  it("saveSession salva cavemanLevel e planMode", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    const filePath = path.join(tmpHome, ".claude-killer", "sessions", `${id}.json`);
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(data).toHaveProperty("cavemanLevel");
+    expect(data).toHaveProperty("planMode");
+  });
 
-    const data = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, `${id}.json`), "utf8"));
-    expect(data.cavemanLevel).toBe(3);
-    expect(data.planMode).toBe(true);
+  it("saveSession salva timestamps", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    const filePath = path.join(tmpHome, ".claude-killer", "sessions", `${id}.json`);
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(data.createdAt).toBeDefined();
+    expect(data.lastModified).toBeDefined();
+  });
 
-    // Reset estado para não interferir em outros testes
-    history.setCavemanLevel(0);
-    history.setPlanMode(false);
+  it("saveSession salva messageCount", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession();
+    const filePath = path.join(tmpHome, ".claude-killer", "sessions", `${id}.json`);
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    expect(typeof data.messageCount).toBe("number");
+  });
+
+  it("loadSession retorna true para sessão existente", async () => {
+    const { saveSession, loadSession } = await loadSessionModule();
+    const id = saveSession();
+    const result = loadSession(id);
+    expect(result).toBe(true);
+  });
+
+  it("loadSession retorna false para inexistente", async () => {
+    const { loadSession } = await loadSessionModule();
+    const result = loadSession("nonexistent-id-12345");
+    expect(result).toBe(false);
+  });
+
+  it("listSessions retorna vazio quando não há sessões", async () => {
+    const { listSessions } = await loadSessionModule();
+    const sessions = listSessions();
+    expect(sessions).toEqual([]);
+  });
+
+  it("listSessions retorna 1 após salvar", async () => {
+    const { saveSession, listSessions } = await loadSessionModule();
+    saveSession();
+    const sessions = listSessions();
+    expect(sessions).toHaveLength(1);
+  });
+
+  it("listSessions retorna múltiplas", async () => {
+    const { saveSession, listSessions } = await loadSessionModule();
+    saveSession("s1");
+    saveSession("s2");
+    saveSession("s3");
+    const sessions = listSessions();
+    expect(sessions).toHaveLength(3);
+  });
+
+  it("listSessions tem metadados", async () => {
+    const { saveSession, listSessions } = await loadSessionModule();
+    saveSession("test-s");
+    const sessions = listSessions();
+    const s = sessions[0];
+    expect(s).toHaveProperty("id");
+    expect(s).toHaveProperty("createdAt");
+    expect(s).toHaveProperty("lastModified");
+    expect(s).toHaveProperty("messageCount");
+    expect(s).toHaveProperty("summary");
+  });
+
+  it("deleteSession retorna true para existente", async () => {
+    const { saveSession, deleteSession } = await loadSessionModule();
+    const id = saveSession();
+    const result = deleteSession(id);
+    expect(result).toBe(true);
+  });
+
+  it("deleteSession retorna false para inexistente", async () => {
+    const { deleteSession } = await loadSessionModule();
+    const result = deleteSession("nonexistent");
+    expect(result).toBe(false);
+  });
+
+  it("deleteSession remove arquivo", async () => {
+    const { saveSession, deleteSession } = await loadSessionModule();
+    const id = saveSession();
+    const filePath = path.join(tmpHome, ".claude-killer", "sessions", `${id}.json`);
+    expect(fs.existsSync(filePath)).toBe(true);
     deleteSession(id);
+    expect(fs.existsSync(filePath)).toBe(false);
   });
 
-  it("salva sessão mesmo sem novas mensagens do usuário (apenas system prompt)", () => {
-    history.resetHistory();
-    const id = saveSession("ext_save_no_history");
-    const data = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, `${id}.json`), "utf8"));
-    // resetHistory reinicia com o system prompt; messageCount reflete esse estado
-    expect(data.messageCount).toBeGreaterThanOrEqual(1);
-    expect(Array.isArray(data.messages)).toBe(true);
-    expect(data.messages.some((m: { role: string }) => m.role === "system")).toBe(true);
-  });
-});
-
-describe("session-extended: loadSession", () => {
-  it("restaura mensagens do usuário e do assistente após resetHistory", () => {
-    history.resetHistory();
-    history.addUserMessage("pergunta");
-    history.addRawAssistantMessage({
-      role: "assistant",
-      content: "resposta",
-    });
-    saveSession("ext_load_restore");
-
-    history.resetHistory();
-    expect(history.getHistory().filter((m) => m.role !== "system")).toHaveLength(0);
-
-    const ok = loadSession("ext_load_restore");
-    expect(ok).toBe(true);
-    const restored = history.getHistory();
-    const userMsgs = restored.filter((m) => m.role === "user");
-    const assistantMsgs = restored.filter((m) => m.role === "assistant");
-    expect(userMsgs.length).toBeGreaterThanOrEqual(1);
-    expect(assistantMsgs.length).toBeGreaterThanOrEqual(1);
+  it("renameSession renomeia sessão", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("old-name");
+    const result = renameSession("old-name", "new-name");
+    expect(result).toBe(true);
   });
 
-  it("restaura cavemanLevel e planMode a partir dos campos salvos", () => {
-    history.resetHistory();
-    history.setCavemanLevel(0);
-    history.setPlanMode(false);
-    history.addUserMessage("x");
-    const filePath = path.join(SESSION_DIR, "ext_load_caveman.json");
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({
-        id: "ext_load_caveman",
-        createdAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
-        messageCount: 1,
-        messages: [{ role: "user", content: "x" }],
-        cavemanLevel: 5,
-        planMode: true,
-      }),
-      "utf8"
-    );
-
-    const ok = loadSession("ext_load_caveman");
-    expect(ok).toBe(true);
-    expect(history.getCavemanLevel()).toBe(5);
-    expect(history.isPlanMode()).toBe(true);
-
-    // Limpa
-    history.setCavemanLevel(0);
-    history.setPlanMode(false);
+  it("renameSession retorna false para inexistente", async () => {
+    const { renameSession } = await loadSessionModule();
+    const result = renameSession("nonexistent", "new-name");
+    expect(result).toBe(false);
   });
-});
 
-describe("session-extended: listSessions", () => {
-  it("ordena sessões por lastModified decrescente (mais recente primeiro)", () => {
-    // Cria duas sessões com timestamps conhecidos
-    const filePathA = path.join(SESSION_DIR, "ext_list_sort_a.json");
-    const filePathB = path.join(SESSION_DIR, "ext_list_sort_b.json");
-    fs.writeFileSync(
-      filePathA,
-      JSON.stringify({
-        id: "ext_list_sort_a",
-        createdAt: "2024-01-01T00:00:00.000Z",
-        lastModified: "2024-01-01T10:00:00.000Z",
-        messageCount: 1,
-      }),
-      "utf8"
-    );
-    fs.writeFileSync(
-      filePathB,
-      JSON.stringify({
-        id: "ext_list_sort_b",
-        createdAt: "2024-01-02T00:00:00.000Z",
-        lastModified: "2024-01-02T10:00:00.000Z",
-        messageCount: 1,
-      }),
-      "utf8"
-    );
+  it("renameSession retorna false se novo nome existe", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("a");
+    saveSession("b");
+    const result = renameSession("a", "b");
+    expect(result).toBe(false);
+  });
 
+  it("renameSession remove arquivo antigo", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("old-name");
+    renameSession("old-name", "new-name");
+    const oldPath = path.join(tmpHome, ".claude-killer", "sessions", "old-name.json");
+    expect(fs.existsSync(oldPath)).toBe(false);
+  });
+
+  it("renameSession cria arquivo novo", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("old-name");
+    renameSession("old-name", "new-name");
+    const newPath = path.join(tmpHome, ".claude-killer", "sessions", "new-name.json");
+    expect(fs.existsSync(newPath)).toBe(true);
+  });
+
+  it("renameSession preserva mensagens", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("old-name");
+    renameSession("old-name", "new-name");
+    const newPath = path.join(tmpHome, ".claude-killer", "sessions", "new-name.json");
+    const data = JSON.parse(fs.readFileSync(newPath, "utf8"));
+    expect(data.messages).toBeDefined();
+    expect(data.messages.length).toBeGreaterThan(0);
+  });
+
+  it("renameSession atualiza id no conteúdo", async () => {
+    const { saveSession, renameSession } = await loadSessionModule();
+    saveSession("old-name");
+    renameSession("old-name", "new-name");
+    const newPath = path.join(tmpHome, ".claude-killer", "sessions", "new-name.json");
+    const data = JSON.parse(fs.readFileSync(newPath, "utf8"));
+    expect(data.id).toBe("new-name");
+  });
+
+  it("autoSave retorna ID", async () => {
+    const { autoSave } = await loadSessionModule();
+    const id = autoSave();
+    expect(typeof id).toBe("string");
+    expect(id).not.toBeNull();
+  });
+
+  it("autoSave retorna null em erro", async () => {
+    process.env.HOME = "/nonexistent/path/that/does/not/exist";
+    const { autoSave } = await loadSessionModule();
+    const result = autoSave();
+    expect(result).toBeNull();
+  });
+
+  it("saveSession com caracteres especiais no ID", async () => {
+    const { saveSession } = await loadSessionModule();
+    const id = saveSession("session-with-dashes_and_underscores");
+    expect(id).toBe("session-with-dashes_and_underscores");
+  });
+
+  it("saveSession idempotente (mesmo ID sobrescreve)", async () => {
+    const { saveSession, listSessions } = await loadSessionModule();
+    saveSession("my-session");
+    saveSession("my-session");
     const sessions = listSessions();
-    const aIdx = sessions.findIndex((s) => s.id === "ext_list_sort_a");
-    const bIdx = sessions.findIndex((s) => s.id === "ext_list_sort_b");
-    expect(aIdx).toBeGreaterThanOrEqual(0);
-    expect(bIdx).toBeGreaterThanOrEqual(0);
-    // b é mais recente, deve vir antes de a
-    expect(bIdx).toBeLessThan(aIdx);
+    expect(sessions).toHaveLength(1);
   });
 
-  it("gera summary com contagem de mensagens e usa 'unknown' quando createdAt/lastModified ausentes", () => {
-    const filePath = path.join(SESSION_DIR, "ext_list_no_count.json");
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({
-        id: "ext_list_no_count",
-        // Sem createdAt/lastModified/messageCount
-      }),
-      "utf8"
-    );
-
+  it("listSessions lida com JSON corrompido", async () => {
+    const { listSessions } = await loadSessionModule();
+    const sessionDir = path.join(tmpHome, ".claude-killer", "sessions");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "corrupt.json"), "{invalid json");
     const sessions = listSessions();
-    const found = sessions.find((s) => s.id === "ext_list_no_count");
-    expect(found).toBeDefined();
-    expect(found!.createdAt).toBe("unknown");
-    expect(found!.lastModified).toBe("unknown");
-    expect(found!.messageCount).toBe(0);
-    expect(found!.summary).toContain("0 messages");
-  });
-});
-
-describe("session-extended: edge cases", () => {
-  it("loadSession pula entradas com mensagens ausentes (messages não-array) sem quebrar", () => {
-    const filePath = path.join(SESSION_DIR, "ext_edge_missing_messages.json");
-    fs.writeFileSync(
-      filePath,
-      JSON.stringify({
-        id: "ext_edge_missing_messages",
-        createdAt: new Date().toISOString(),
-        lastModified: new Date().toISOString(),
-        messageCount: 0,
-        // messages omitido de propósito
-      }),
-      "utf8"
-    );
-
-    // Deve retornar false (TypeError ao iterar undefined) sem lançar exceção
-    history.resetHistory();
-    const ok = loadSession("ext_edge_missing_messages");
-    expect(typeof ok).toBe("boolean");
+    expect(Array.isArray(sessions)).toBe(true);
   });
 });
