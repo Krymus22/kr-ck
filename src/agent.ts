@@ -29,7 +29,7 @@ import { globSearch } from "./fileSearch.js";
 import { grepSearch, formatGrepResults } from "./contentSearch.js";
 import { gitStatus, gitDiff, gitLog, gitCommit, gitBlame, gitShow, gitBranch, gitCheckout } from "./gitTool.js";
 import { multiFileEdit, type FileEditRequest } from "./multiFileEdit.js";
-import { saveSession, loadSession, listSessions } from "./session.js";
+import { listSessions } from "./session.js";
 import { parseFile } from "./lspAst.js";
 import { withRetry, isRetryableError } from "./retry.js";
 import { readOnlyCache, shouldCacheResult } from "./toolCache.js";

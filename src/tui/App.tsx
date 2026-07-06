@@ -51,7 +51,7 @@ import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 import { getSearxStatus } from "../searxManager.js";
 import { loadConfig as loadDotfileConfig, updateConfig as updateDotfileConfig, saveConfig as saveDotfileConfig } from "../dotfileConfig.js";
-import { saveSession, loadSession, listSessions, deleteSession, renameSession, autoSave } from "../session.js";
+import { listSessions, deleteSession, renameSession, startSession, getLastSession, loadSessionMessages, setActiveSession, getActiveSessionId } from "../session.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -79,16 +79,8 @@ type CommandResult = { handled: boolean; message?: string; exit?: boolean; openH
 
 
 function handleExitCommand(): CommandResult {
-  // Auto-save session before exiting (so user can /session load later)
-  try {
-    const sessionId = autoSave();
-    if (sessionId) {
-      // Log to stderr (less disruptive than stdout in TUI mode)
-      console.error(`[SESSION] Auto-saved: ${sessionId} (use /session load ${sessionId} to resume)`);
-    }
-  } catch {
-    // Auto-save failure should NOT prevent exit
-  }
+  // Sessions are auto-saved (append-only JSONL). No explicit save needed.
+  // Each message was already written to disk as it was added to history.
   shutdownMCPServers();
   return { handled: true, exit: true };
 }
@@ -124,18 +116,18 @@ function handlePluginsCommand(): CommandResult {
 }
 
 /**
- * /session — manage conversation sessions (save, load, list, delete, rename).
+ * /session — manage conversation sessions.
+ *
+ * Sessions are AUTO-SAVED (append-only JSONL). No /session save needed.
+ * Each message is written to disk immediately as it's added to history.
  *
  * Subcommands:
- *   /session                    — list saved sessions
- *   /session list               — alias for /session
- *   /session save [name]        — save current session (optional custom name)
- *   /session load <id>          — load a saved session (replaces current)
- *   /session delete <id>        — delete a saved session
- *   /session rename <old> <new> — rename a session
- *
- * Sessions are stored in ~/.claude-killer/sessions/<id>.json
- * Auto-save happens on /exit.
+ *   /session              — list sessions for current project
+ *   /session list         — alias for /session
+ *   /session load <id>    — load a saved session (replaces current)
+ *   /session delete <id>  — delete a saved session
+ *   /session rename <o> <n> — rename a session
+ *   /session new          — start a new (empty) session
  */
 function handleSessionCommand(arg: string | null): CommandResult {
   const subcommand = arg?.split(/\s+/)[0]?.toLowerCase() ?? "";
@@ -143,45 +135,56 @@ function handleSessionCommand(arg: string | null): CommandResult {
   // /session or /session list
   if (!subcommand || subcommand === "list") {
     const sessions = listSessions();
+    const activeId = getActiveSessionId();
     if (sessions.length === 0) {
       return {
         handled: true,
-        message: "No saved sessions.\n\nUsage:\n  /session save [name]  — save current session\n  /session load <id>   — load a session",
+        message: "No saved sessions for this project.\n\nSessions are auto-saved — just start chatting.",
       };
     }
-    const lines = [`Saved sessions (${sessions.length}):`, ""];
+    const lines = [`Sessions for this project (${sessions.length}):`, ""];
     for (const s of sessions.slice(0, 20)) {
       const date = s.lastModified.slice(0, 19).replace("T", " ");
+      const active = s.id === activeId ? " ← active" : "";
       const summary = s.summary.length > 50 ? s.summary.slice(0, 50) + "..." : s.summary;
-      lines.push(`  ${s.id}  ${date}  ${s.messageCount} msgs  ${summary}`);
+      lines.push(`  ${s.id}  ${date}  ${s.messageCount} msgs  ${summary}${active}`);
     }
     if (sessions.length > 20) {
       lines.push(`  ... and ${sessions.length - 20} more`);
     }
-    lines.push("", "Usage:", "  /session save [name]        — save current", "  /session load <id>          — load", "  /session delete <id>        — delete", "  /session rename <old> <new> — rename");
+    lines.push("", "Usage:", "  /session load <id>          — load a session", "  /session delete <id>        — delete", "  /session rename <old> <new> — rename", "  /session new                — start fresh session");
     return { handled: true, message: lines.join("\n") };
   }
 
-  // /session save [name]
-  if (subcommand === "save") {
-    const name = arg!.slice(4).trim() || undefined;
-    try {
-      const id = saveSession(name);
-      return { handled: true, message: `[OK] Session saved: ${id}\nUse /session load ${id} to resume later.` };
-    } catch (err) {
-      return { handled: true, message: `[ERROR] Failed to save session: ${(err as Error).message}` };
-    }
+  // /session new — start a new empty session
+  if (subcommand === "new") {
+    history.resetHistory();
+    startSession();
+    return { handled: true, resetChat: true, message: "[OK] New session started. Previous session is saved on disk." };
   }
 
   // /session load <id>
   if (subcommand === "load") {
     const id = arg!.split(/\s+/)[1];
     if (!id) return { handled: true, message: "Usage: /session load <id>" };
-    const ok = loadSession(id);
-    if (ok) {
-      return { handled: true, resetChat: true, message: `[OK] Session loaded: ${id}\nChat history restored.` };
+    const messages = loadSessionMessages(id);
+    if (!messages) {
+      return { handled: true, message: `[ERROR] Session not found: ${id}` };
     }
-    return { handled: true, message: `[ERROR] Session not found: ${id}\nUse /session list to see available sessions.` };
+    // Reset and restore history
+    history.resetHistory();
+    for (const msg of messages) {
+      const m = msg as Record<string, unknown>;
+      if (m.role === "user") {
+        history.addUserMessage(m.content as string);
+      } else if (m.role === "assistant") {
+        history.addRawAssistantMessage(m as any);
+      } else if (m.role === "tool") {
+        history.addToolResult(m.tool_call_id as string, m.content as string);
+      }
+    }
+    setActiveSession(id);
+    return { handled: true, resetChat: true, message: `[OK] Session loaded: ${id}\n${messages.length} messages restored.` };
   }
 
   // /session delete <id>
@@ -199,10 +202,10 @@ function handleSessionCommand(arg: string | null): CommandResult {
     const newId = parts[2];
     if (!oldId || !newId) return { handled: true, message: "Usage: /session rename <old-id> <new-id>" };
     const ok = renameSession(oldId, newId);
-    return { handled: true, message: ok ? `[OK] Session renamed: ${oldId} → ${newId}` : `[ERROR] Failed to rename (session not found or name already exists)` };
+    return { handled: true, message: ok ? `[OK] Session renamed: ${oldId} → ${newId}` : `[ERROR] Failed to rename` };
   }
 
-  return { handled: true, message: `Unknown subcommand: "${subcommand}"\nUsage: /session [list|save|load|delete|rename]` };
+  return { handled: true, message: `Unknown subcommand: "${subcommand}"\nUsage: /session [list|load|delete|rename|new]` };
 }
 
 function handleMcpCommand(arg: string | null): CommandResult {
@@ -1146,6 +1149,36 @@ function Autocomplete({ query, selectedIndex, onSelect }: Readonly<AutocompleteP
 
 export function App() {
   const { exit } = useApp();
+
+  // -- Auto-load last session on startup (like Claude Code) ------------------
+  // Checks for the most recent session file for the current project directory.
+  // If found, loads it silently. If not, starts a new session.
+  useState(() => {
+    try {
+      const last = getLastSession();
+      if (last) {
+        const msgs = loadSessionMessages(last.id);
+        if (msgs && msgs.length > 0) {
+          for (const msg of msgs) {
+            const m = msg as Record<string, unknown>;
+            if (m.role === "user") history.addUserMessage(m.content as string);
+            else if (m.role === "assistant") history.addRawAssistantMessage(m as any);
+            else if (m.role === "tool") history.addToolResult(m.tool_call_id as string, m.content as string);
+          }
+          setActiveSession(last.id);
+          console.error(`[SESSION] Resumed: ${last.id} (${msgs.length} messages)`);
+        } else {
+          startSession();
+        }
+      } else {
+        startSession();
+      }
+    } catch {
+      // Session load failure should not prevent app from starting
+      try { startSession(); } catch { /* ignore */ }
+    }
+    return true; // useState initializer must return something
+  });
 
   // -- State --------------------------------------------------------------
   const [messages, setMessages] = useState<ChatMessage[]>([]);

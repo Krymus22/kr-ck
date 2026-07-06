@@ -412,6 +412,8 @@ function ensureHistoryInitialized() {
 export function addUserMessage(content: string): void {
   ensureHistoryInitialized();
   history.push({ role: "user", content });
+  // Auto-persist: append to session file immediately (like Claude Code)
+  tryAppendToSession({ role: "user", content });
 }
 
 /**
@@ -423,6 +425,8 @@ export function addRawAssistantMessage(
 ): void {
   ensureHistoryInitialized();
   history.push(msg as unknown as Message);
+  // Auto-persist: append to session file immediately
+  tryAppendToSession(msg as unknown as Record<string, unknown>);
 }
 
 /** Append a tool result message (role: "tool"). */
@@ -433,6 +437,8 @@ export function addToolResult(toolCallId: string, content: string): void {
     tool_call_id: toolCallId,
     content,
   } as Message);
+  // Auto-persist: append to session file immediately
+  tryAppendToSession({ role: "tool", tool_call_id: toolCallId, content });
 }
 
 /** Append a system message to the history (for memory injection, etc). */
@@ -1034,5 +1040,26 @@ function optimizeToolMessage(i: number): boolean {
 export function optimizeContext(): void {
   for (let i = 0; i < history.length; i++) {
     optimizeToolMessage(i);
+  }
+}
+
+// --- Auto-persist sessions (like Claude Code) --------------------------------
+
+/**
+ * Try to append a message to the active session file.
+ * Uses dynamic import to avoid circular dependency (session.ts imports history.ts).
+ * If session module isn't available or no active session, silently skips.
+ */
+function tryAppendToSession(msg: Record<string, unknown>): void {
+  try {
+    // Dynamic require to avoid circular dependency at module load time
+    const { createRequire } = require("node:module");
+    const req = createRequire(import.meta.url);
+    const session = req("./session.js");
+    if (session.appendMessage) {
+      session.appendMessage(msg);
+    }
+  } catch {
+    // Session module not available — skip silently
   }
 }
