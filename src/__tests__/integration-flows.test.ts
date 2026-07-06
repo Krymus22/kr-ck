@@ -547,14 +547,14 @@ describe("Flow 12: Effort levels consistency", () => {
 import { setLanguage, getLocalizedSlashCommands } from "../i18n.js";
 
 describe("Flow 13: i18n consistency PT-BR vs EN", () => {
-  it("ambos idiomas têm 22 comandos", () => {
+  it("ambos idiomas têm 26 comandos", () => {
     setLanguage("pt-BR");
     const ptCmds = getLocalizedSlashCommands();
     setLanguage("en");
     const enCmds = getLocalizedSlashCommands();
 
     expect(ptCmds.length).toBe(enCmds.length);
-    expect(ptCmds.length).toBe(22);
+    expect(ptCmds.length).toBe(26);
   });
 
   it("ambos idiomas têm os mesmos command names", () => {

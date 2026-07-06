@@ -620,8 +620,8 @@ describe("StatusBar — context bar fill verification", () => {
     );
     const out = stripAnsi(lastFrame() ?? "");
     // 50% of 15 = 7.5, rounded to 8
-    // 8 # + 7 -
-    expect(out).toMatch(/#{8}-{7}/);
+    // 12 # + 3 - (log scale)
+    expect(out).toMatch(/#{12}-{3}/);
   });
 
   it("renders ~25% fill", () => {
@@ -630,8 +630,8 @@ describe("StatusBar — context bar fill verification", () => {
     );
     const out = stripAnsi(lastFrame() ?? "");
     // 25% of 15 = 3.75, rounded to 4
-    // 4 # + 11 -
-    expect(out).toMatch(/#{4}-{11}/);
+    // 8 # + 7 - (log scale)
+    expect(out).toMatch(/#{8}-{7}/);
   });
 
   it("renders ~75% fill", () => {
@@ -640,8 +640,8 @@ describe("StatusBar — context bar fill verification", () => {
     );
     const out = stripAnsi(lastFrame() ?? "");
     // 75% of 15 = 11.25, rounded to 11
-    // 11 # + 4 -
-    expect(out).toMatch(/#{11}-{4}/);
+    // 14 # + 1 - (log scale)
+    expect(out).toMatch(/#{14}-{1}/);
   });
 });
 

@@ -335,7 +335,7 @@ describe("StatusBar: percentage reflects actual token count", () => {
     const { lastFrame: f2 } = render(<StatusBar {...baseProps} totalTokens={128000} promptTokens={100000} completionTokens={28000} />);
     const out2 = stripAnsi(f2() ?? "");
     expect(out2).toContain("50%");
-    expect(out2).toMatch(/#{8}-{7}/);
+    expect(out2).toMatch(/#{12}-{3}/);
 
     // 100% → 15 # chars
     const { lastFrame: f3 } = render(<StatusBar {...baseProps} totalTokens={256000} promptTokens={200000} completionTokens={56000} />);
