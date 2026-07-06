@@ -1,11 +1,18 @@
 name: Mutation Testing (Stryker)
 
-# Reativado: repo agora é público, CI é ilimitado.
+# DESATIVADO: Stryker é incompatível com testes que usam process.chdir()
+# (worker threads não suportam chdir no Node.js) e com testes que dependem
+# de binários externos (selene/stylua/rojo não estão nos sandboxes).
+# Para rodar manualmente quando quiser:
+#   1. https://github.com/Krymus22/kr-ck/actions/workflows/stryker.yml
+#   2. Clica em "Run workflow"
+# Reativar: descomentar as linhas schedule abaixo.
+
 on:
   # Roda toda noite: 20:00 BRT (23:00 UTC) até 08:00 BRT (11:00 UTC)
   # Janela de 12 horas para análise completa
-  schedule:
-    - cron: '0 23 * * *'
+  # schedule:
+  #   - cron: '0 23 * * *'
   # Permite rodar manualmente
   workflow_dispatch:
 
