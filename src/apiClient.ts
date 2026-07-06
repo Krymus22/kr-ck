@@ -615,6 +615,11 @@ function createStreamRequest(
     tool_choice: "auto",
     parallel_tool_calls: true,
     stream: true,
+    // CRITICAL: without stream_options.include_usage=true, NVIDIA's streaming
+    // API does NOT return usage data in the final chunk. Without usage, the
+    // context bar in the TUI never updates (total_tokens stays 0), and
+    // auto-compaction never triggers (it checks total_tokens vs contextWindow).
+    stream_options: { include_usage: true },
     max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(config.model)),
     temperature: config.temperature,
     top_p: config.topP,
