@@ -80,7 +80,7 @@ describe("Config (extended)", () => {
     process.env.MAX_TOKENS = "";
     const { config } = await import("../config.js");
     // Number.parseInt("") é NaN, então fallback
-    expect(config.maxTokens).toBe(8192);
+    expect(config.maxTokens).toBe(131072);
   });
 
   it("optionalInt aceita valor decimal (trunca para int)", async () => {

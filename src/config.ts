@@ -106,9 +106,16 @@ export const config = {
    * to the active model's maxOutputTokens from the registry (capped at the
    * model limit by apiClient via Math.min).
    */
+  // Default: very high (128k). The ACTUAL limit is enforced by apiClient.ts:
+  //   max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(config.model))
+  // So if you use kimi-k2.6 (8k max), it sends 8k. If you use GLM 5.2 (32k max),
+  // it sends 32k. The config default just needs to be high enough to NOT cap
+  // models that support more.
+  // Bug hunter rodada 2 mudou pra getModelMaxOutputTokens(defaultModel) = 8192,
+  // mas isso cortava GLM 5.2 em 8k (Math.min(8192, 32768) = 8192). Corrigido.
   maxTokens: optionalInt(
     "MAX_TOKENS",
-    getModelMaxOutputTokens(process.env.MODEL ?? "moonshotai/kimi-k2.6"),
+    131072, // 128k — higher than any model's maxOutputTokens, so the registry is the real cap
   ),
 
   /**
