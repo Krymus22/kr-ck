@@ -155,7 +155,15 @@ export function StatusBar({
       <Text color={barColor}>{Math.round(pct * 100)}%</Text>
       {tpsTag && <Text color={colors.muted}>{tpsTag}</Text>}
       {effortTag && <Text color={colors.primary} bold>{effortTag}</Text>}
-      {sessionCostStr && <Text color={colors.warning}> ${sessionCostStr}</Text>}
+      {/*
+        BUG FIX: the JSX text was ` ${sessionCostStr}` which in JSX parses
+        as a literal " $" followed by the interpolated {sessionCostStr}.
+        Since sessionCostStr already starts with "$" (e.g. "$0.123"), the
+        rendered output was " $$0.123" (double dollar sign). JSX text is
+        NOT a template literal, so `${...}` is just "$" + {expr}. Removed
+        the literal "$".
+      */}
+      {sessionCostStr && <Text color={colors.warning}> {sessionCostStr}</Text>}
       {turnCostStr && <Text color={colors.muted}>{turnCostStr}</Text>}
       {sessionTokTag && <Text color={colors.muted}>{sessionTokTag}</Text>}
       {mcpTag && <Text color={colors.secondary}>{mcpTag}</Text>}

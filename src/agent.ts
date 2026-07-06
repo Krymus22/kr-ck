@@ -774,12 +774,15 @@ async function dispatchToolCall(
   const startTime = Date.now();
 
   const rawArgs = parseArgs(toolCall.function.arguments);
-  const finalArgs = await resolvePreCallHooks(name, rawArgs);
-  if (finalArgs === null) {
-    // Pre-hook skipped - the override is already in resultOverride
-    const preResult = await executePreToolCallHooks(name, rawArgs);
-    return { resultStr: preResult.resultOverride ?? `[HOOK] Tool "${name}" skipped by pre-hook.`, usedHeal: false };
+  // BUG FIX: previously, when the pre-hook skipped the call, dispatchToolCall
+  // called executePreToolCallHooks AGAIN to recover `resultOverride`. This
+  // ran every pre-hook twice on skip. Now resolvePreCallHooks returns the
+  // override in one call.
+  const preCallResolution = await resolvePreCallHooks(name, rawArgs);
+  if (preCallResolution.args === null) {
+    return { resultStr: preCallResolution.resultOverride ?? `[HOOK] Tool "${name}" skipped by pre-hook.`, usedHeal: false };
   }
+  const finalArgs = preCallResolution.args;
 
   // -- Run gate chain: schema -> poka-yoke -> read-before-write ------------
   const gateBlock = runDispatchGates(name, finalArgs);
@@ -955,11 +958,23 @@ async function dispatchToolCall(
   return result;
 }
 
-/** Returns the (possibly modified) args, or null if the pre-hook skipped the call. */
-async function resolvePreCallHooks(name: string, rawArgs: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+/**
+ * Returns the (possibly modified) args, or null if the pre-hook skipped the call.
+ *
+ * BUG FIX: previously this returned only `null` on skip, forcing the caller
+ * (dispatchToolCall) to call executePreToolCallHooks AGAIN to recover the
+ * `resultOverride`. That meant every pre-hook ran twice on skip — wasteful
+ * and potentially causing side effects (double logging, double counter
+ * increments, etc.). Now we return the full resolution so the caller can
+ * read `resultOverride` without re-running the hook chain.
+ */
+async function resolvePreCallHooks(
+  name: string,
+  rawArgs: Record<string, unknown>,
+): Promise<{ args: Record<string, unknown> | null; resultOverride?: string }> {
   const preResult = await executePreToolCallHooks(name, rawArgs);
-  if (preResult.skip) return null;
-  return preResult.modifiedArgs ?? rawArgs;
+  if (preResult.skip) return { args: null, resultOverride: preResult.resultOverride };
+  return { args: preResult.modifiedArgs ?? rawArgs };
 }
 
 /** Run schema validation, poka-yoke, and read-before-write gates. Returns an error string if blocked, else null. */
@@ -1257,15 +1272,23 @@ async function processToolCalls(toolCalls: ToolCall[]): Promise<void> {
 function fireOnFileTrigger(writeCalls: ToolCall[]): void {
   const fileTools = writeCalls.filter((tc) => FILE_TOOLS.has(tc.function.name));
   if (fileTools.length === 0) return;
-  const triggerCtx: TriggerContext = { cwd: process.cwd() };
+  // BUG FIX: previously, the loop overwrote `triggerCtx.filePath` and
+  // `triggerCtx.toolName` on each iteration, then fired ONE trigger after
+  // the loop — so only the LAST file in the batch actually triggered on_file
+  // hooks. If the IA edited files A, B, and C in one turn, only C's hook
+  // ran. Now we fire one trigger per file so every edited file announces
+  // itself to extensions/hooks listening on "on_file".
   for (const tc of fileTools) {
     const args = parseArgs(tc.function.arguments);
-    triggerCtx.filePath = asString(args.path ?? args.caminho);
-    triggerCtx.toolName = tc.function.name;
+    const triggerCtx: TriggerContext = {
+      cwd: process.cwd(),
+      filePath: asString(args.path ?? args.caminho),
+      toolName: tc.function.name,
+    };
+    executeTrigger("on_file", triggerCtx).catch((err) => {
+      log.warn(`On-file trigger failed for ${tc.function.name}: ${(err as Error).message}`);
+    });
   }
-  executeTrigger("on_file", triggerCtx).catch((err) => {
-    log.warn(`On-file trigger failed: ${(err as Error).message}`);
-  });
 }
 
 function checkAutoHeal(toolCalls: ToolCall[]): void {
@@ -1326,10 +1349,16 @@ async function sendAndProcess(
   // IDEIA 27+#28: Checkpoint writer - proactive state extraction
   try {
     const { shouldCheckpoint, writeCheckpoint, formatCheckpoint } = await import("./checkpointWriter.js");
-    const histLen = history.getHistory().length;
-    const checkpointNum = shouldCheckpoint(histLen);
+    // BUG FIX: shouldCheckpoint expects TOKENS (it divides by MAX_CONTEXT_TOKENS
+    // = 128000 and compares to thresholds 0.20 / 0.45 / 0.70). The previous
+    // code passed `history.getHistory().length` (MESSAGE COUNT), which made
+    // contextPercent = messageCount / 128000 — always near 0 (e.g. 50 msgs
+    // = 0.04%), so checkpoints were NEVER triggered. Pass the token estimate
+    // so the 20% / 45% / 70% thresholds actually fire.
+    const currentTokens = history.estimateTokens();
+    const checkpointNum = shouldCheckpoint(currentTokens);
     if (checkpointNum > 0) {
-      log.info(`[CHECKPOINT] Triggering checkpoint ${checkpointNum} at ${histLen} messages`);
+      log.info(`[CHECKPOINT] Triggering checkpoint ${checkpointNum} at ~${currentTokens} tokens`);
       const done = pushActivity("checkpoint", `checkpoint ${checkpointNum}`);
       try {
         const cp = await writeCheckpoint(checkpointNum);
@@ -2003,6 +2032,15 @@ export async function runAgentLoop(
   lastCheckpointTokens = 0;
   turnTouchedFiles = new Set();
   turnStopHits = 0;
+  // BUG FIX: these per-turn counters were previously only reset at the END of
+  // a successful turn (inside handleChatResponse). If the previous turn ended
+  // via an error (API failure, exception in a hook, etc.), the counters
+  // leaked into the next turn — causing Bug Hunter / Goal Verifier caps to
+  // be reached prematurely or blocking finish on stale state. Reset them at
+  // the START of each turn too, so a fresh user message always starts clean.
+  goalVerifierBlocksThisTurn = 0;
+  bugHunterBlocksThisTurn = 0;
+  bugHunterMediumLowRounds = 0;
   resetGateState();
   resetContextInjection();
   resetSelfValidation();

@@ -1273,9 +1273,15 @@ export async function chat(
   const HANG_TIMEOUT_MS = 180_000; // 3 minutes = hang (not just slow)
 
   for (let attempt = 0; attempt <= MAX_CHAT_RETRIES; attempt++) {
-    // Wrap in timeout that REJECTS (triggers retry) instead of returning error
+    // BUG FIX: previously, the setTimeout below was never cleared when
+    // chatPromise settled first (success or non-timeout error). The timer
+    // kept running for up to HANG_TIMEOUT_MS (3 min) after the call returned,
+    // leaking a timer per attempt. In a long-running TUI session this
+    // accumulates dead timers. We now capture the handle and clear it in a
+    // finally block so it's cancelled as soon as we no longer need it.
+    let hangTimer: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      hangTimer = setTimeout(() => {
         reject(new Error(`__HANG_TIMEOUT__`));
       }, HANG_TIMEOUT_MS);
     });
@@ -1319,6 +1325,10 @@ export async function chat(
 
       // Other errors (403, 429, network) — let existing retry handlers deal with it
       throw err;
+    } finally {
+      // Cancel the hang timer so it doesn't fire after we've already settled.
+      // (If the timeout already fired, this is a harmless no-op.)
+      if (hangTimer) clearTimeout(hangTimer);
     }
   }
 
@@ -1380,6 +1390,13 @@ async function chatWithPool(
       let hedgeHandle: { client: OpenAI; entry: any; release: (success: boolean, httpStatus: number | null, latencyMs: number) => void } | null = null;
       let hedgeWinner: "primary" | "hedge" | null = null;
       let primaryStreamStarted = false;
+      // BUG FIX: hedgeRawStream is hoisted here (was previously scoped inside
+      // the `if (hedgeHandle)` block) so the inner `finally` below can abort
+      // it on the error path. Without this, if the primary stream rejected
+      // during the race, the hedge stream kept running in the background —
+      // consuming tokens, holding the hedge key's mutex via the in-flight
+      // request, and violating the "1 concurrent per key" invariant.
+      let hedgeRawStream: any = null;
 
       // Start primary stream
       const primaryStreamPromise = createStreamRequest(messages, tools, poolHandle.client);
@@ -1420,7 +1437,6 @@ async function chatWithPool(
           const primaryPromise = consumeStream(rawStream, primaryState, undefined, undefined, undefined).then(() => "primary" as const);
           primaryPromise.catch(() => {}); // suppress unhandled rejection no perdedor
 
-          let hedgeRawStream: any = null;
           const hedgeStreamPromise = createStreamRequest(messages, tools, (hedgeHandle as any)!.client)
             .then(hs => {
               hedgeRawStream = hs;
@@ -1471,6 +1487,16 @@ async function chatWithPool(
         return response;
       } finally {
         if (hedgeTimer) clearTimeout(hedgeTimer);
+        // BUG FIX: if we reach the finally with hedgeWinner === null (error
+        // path — one of the racing streams rejected) the OTHER stream is
+        // still running in the background. Abort it so we don't leak the
+        // hedge key's in-flight slot or keep consuming tokens for nothing.
+        // (If primary won, the hedge was already aborted above — calling
+        // abort again is idempotent. If hedge won, hedgeRawStream is the
+        // completed winner and aborting a finished stream is a no-op.)
+        if (hedgeRawStream && hedgeWinner !== "hedge") {
+          abortStreamSafe(hedgeRawStream);
+        }
         if (hedgeHandle) {
           (hedgeHandle as any).release(hedgeWinner === "hedge", null, Date.now() - start);
         }

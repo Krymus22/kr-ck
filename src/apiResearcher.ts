@@ -132,13 +132,17 @@ function getCachePath(): string {
 }
 
 function loadCache(): Map<string, CacheEntry> {
+  const p = getCachePath();
   try {
-    const p = getCachePath();
     if (!fs.existsSync(p)) return new Map();
     const raw = fs.readFileSync(p, "utf8");
     const obj = JSON.parse(raw) as Record<string, CacheEntry>;
     return new Map(Object.entries(obj));
-  } catch {
+  } catch (err) {
+    // BUG FIX: previously this silently returned an empty cache on any error
+    // (corrupt JSON, permission error, etc.). The user got no indication that
+    // their cache was reset. Log a warning so the failure is visible.
+    log.warn(`apiResearcher: cache load failed, starting fresh: ${(err as Error).message}`);
     return new Map();
   }
 }
@@ -249,9 +253,19 @@ function decodeHtmlEntities(text: string): string {
 
 /** Fetch URL using Node.js native fetch (no curl dependency). */
 async function fetchUrl(url: string, timeoutMs: number = 10000): Promise<{ ok: boolean; text: string; status: number }> {
+  // BUG FIX: previously, `clearTimeout(timer)` ran right after `await fetch()`
+  // (headers received) but BEFORE `await response.text()` (body read). Once
+  // the timer was cleared, the AbortController could never fire — so a slow
+  // or stalled body read (large HTML pages, slow servers) hung forever with
+  // no timeout protection. The timer is now cleared in a finally block so
+  // the abort signal stays armed for the ENTIRE fetch+body-read cycle.
+  //
+  // Also: the catch block used to silently return a bare {ok:false,...} with
+  // no error info, so callers logged "fetch failed" with no reason. We now
+  // log the actual error at debug level for diagnosability.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
@@ -261,11 +275,14 @@ async function fetchUrl(url: string, timeoutMs: number = 10000): Promise<{ ok: b
       },
       redirect: "follow",
     });
-    clearTimeout(timer);
     const text = await response.text();
     return { ok: response.ok, text, status: response.status };
   } catch (err: any) {
+    const reason = err?.name === "AbortError" ? `timeout after ${timeoutMs}ms` : (err?.message ?? String(err));
+    log.debug(`[WEB_SEARCH] fetchUrl failed for ${url.slice(0, 80)}: ${reason}`);
     return { ok: false, text: "", status: 0 };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -539,15 +556,16 @@ async function checkSearxAvailable(): Promise<boolean> {
   ];
 
   for (const base of candidates) {
+    // BUG FIX: clearTimeout was called after fetch() but before resp.json(),
+    // so the JSON body read had no timeout protection. Moved to finally.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
     try {
       const testUrl = `${base}/search?q=test&format=json`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3000);
       const resp = await fetch(testUrl, {
         signal: controller.signal,
         headers: { "Accept": "application/json" },
       });
-      clearTimeout(timer);
       if (resp.ok) {
         const data = await resp.json() as any;
         if (data && typeof data === "object" && "results" in data) {
@@ -559,6 +577,8 @@ async function checkSearxAvailable(): Promise<boolean> {
       }
     } catch {
       // Not running on this port, try next
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -574,15 +594,17 @@ async function checkSearxAvailable(): Promise<boolean> {
 async function searchWithSearx(query: string, num: number): Promise<SearchResult[]> {
   if (searxStatus !== "running") return [];
 
+  // BUG FIX: clearTimeout was called after fetch() but before resp.json(),
+  // so the JSON body read had no timeout protection. Moved to finally.
+  // Also: the catch block was bare, swallowing the error with no debug info.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
     const searchUrl = `${searxUrl}/search?q=${encodeURIComponent(query)}&format=json&pageno=1`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     const resp = await fetch(searchUrl, {
       signal: controller.signal,
       headers: { "Accept": "application/json" },
     });
-    clearTimeout(timer);
 
     if (!resp.ok) return [];
     const data = await resp.json() as any;
@@ -602,8 +624,11 @@ async function searchWithSearx(query: string, num: number): Promise<SearchResult
       lastSearchSource = "Searx";
     }
     return results;
-  } catch {
+  } catch (err) {
+    log.debug(`[WEB_SEARCH] Searx query failed: ${(err as Error).message}`);
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -659,6 +684,10 @@ function detectOfficialApi(query: string): OfficialApiType {
  * https://docs.github.com/en/rest/search
  */
 async function searchGitHubApi(query: string, num: number): Promise<SearchResult[]> {
+  // BUG FIX: clearTimeout was after fetch() but before resp.json() — body
+  // read had no timeout protection. Moved to finally.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
     // Extract search terms — remove "github", "repository", etc.
     const searchTerms = query
@@ -667,8 +696,6 @@ async function searchGitHubApi(query: string, num: number): Promise<SearchResult
     if (!searchTerms) return [];
 
     const apiUrl = `https://api.github.com/search/repositories?q=${encodeURIComponent(searchTerms)}&sort=stars&order=desc&per_page=${num}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     const resp = await fetch(apiUrl, {
       signal: controller.signal,
       headers: {
@@ -676,7 +703,6 @@ async function searchGitHubApi(query: string, num: number): Promise<SearchResult
         "User-Agent": "claude-killer/1.0",
       },
     });
-    clearTimeout(timer);
 
     if (!resp.ok) return [];
     const data = await resp.json() as any;
@@ -693,6 +719,8 @@ async function searchGitHubApi(query: string, num: number): Promise<SearchResult
     return results;
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -701,6 +729,10 @@ async function searchGitHubApi(query: string, num: number): Promise<SearchResult
  * https://api.stackexchange.com/docs/search
  */
 async function searchStackOverflowApi(query: string, num: number): Promise<SearchResult[]> {
+  // BUG FIX: clearTimeout was after fetch() but before resp.json() — body
+  // read had no timeout protection. Moved to finally.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
     // StackOverflow search: use intitle for title-based search
     const searchTerms = query
@@ -709,13 +741,10 @@ async function searchStackOverflowApi(query: string, num: number): Promise<Searc
     if (!searchTerms) return [];
 
     const apiUrl = `https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=votes&q=${encodeURIComponent(searchTerms)}&site=stackoverflow&pagesize=${num}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     const resp = await fetch(apiUrl, {
       signal: controller.signal,
       headers: { "Accept": "application/json" },
     });
-    clearTimeout(timer);
 
     if (!resp.ok) return [];
     const data = await resp.json() as any;
@@ -732,6 +761,8 @@ async function searchStackOverflowApi(query: string, num: number): Promise<Searc
     return results;
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -750,16 +781,22 @@ async function searchNpmApi(query: string, num: number): Promise<SearchResult[]>
     if (!packageName) return [];
 
     // Try exact package first
+    // BUG FIX: clearTimeout was after fetch() but before resp.json() — body
+    // read had no timeout protection. Moved to finally.
     const exactUrl = `https://registry.npmjs.org/${encodeURIComponent(packageName)}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
-    const resp = await fetch(exactUrl, {
-      signal: controller.signal,
-      headers: { "Accept": "application/json" },
-    });
-    clearTimeout(timer);
+    let resp: any;
+    try {
+      resp = await fetch(exactUrl, {
+        signal: controller.signal,
+        headers: { "Accept": "application/json" },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
-    if (resp.ok) {
+    if (resp?.ok) {
       const data = await resp.json() as any;
       const latest = data["dist-tags"]?.latest;
       const version = data.versions?.[latest];
@@ -778,13 +815,17 @@ async function searchNpmApi(query: string, num: number): Promise<SearchResult[]>
     const searchUrl = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${num}`;
     const controller2 = new AbortController();
     const timer2 = setTimeout(() => controller2.abort(), SEARCH_TIMEOUT_MS);
-    const resp2 = await fetch(searchUrl, {
-      signal: controller2.signal,
-      headers: { "Accept": "application/json" },
-    });
-    clearTimeout(timer2);
+    let resp2: any;
+    try {
+      resp2 = await fetch(searchUrl, {
+        signal: controller2.signal,
+        headers: { "Accept": "application/json" },
+      });
+    } finally {
+      clearTimeout(timer2);
+    }
 
-    if (!resp2.ok) return [];
+    if (!resp2?.ok) return [];
     const data2 = await resp2.json() as any;
     if (!data2?.objects) return [];
 
@@ -807,6 +848,10 @@ async function searchNpmApi(query: string, num: number): Promise<SearchResult[]>
  * Uses the public search endpoint.
  */
 async function searchMdnApi(query: string, num: number): Promise<SearchResult[]> {
+  // BUG FIX: clearTimeout was after fetch() but before resp.json() — body
+  // read had no timeout protection. Moved to finally.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
   try {
     const searchTerms = query
       .replace(/\b(mdn|javascript|js|typescript|css|html|dom|web api)\b/gi, "")
@@ -814,13 +859,10 @@ async function searchMdnApi(query: string, num: number): Promise<SearchResult[]>
     if (!searchTerms) return [];
 
     const apiUrl = `https://developer.mozilla.org/api/v1/search?q=${encodeURIComponent(searchTerms)}&locale=en-US&size=${num}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     const resp = await fetch(apiUrl, {
       signal: controller.signal,
       headers: { "Accept": "application/json" },
     });
-    clearTimeout(timer);
 
     if (!resp.ok) return [];
     const data = await resp.json() as any;
@@ -837,6 +879,8 @@ async function searchMdnApi(query: string, num: number): Promise<SearchResult[]>
     return results;
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -977,8 +1021,12 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
   }
 
   // Fallback 1: z-ai CLI (only in Super Z environment)
+  // BUG FIX: previously, if JSON.parse threw (malformed output from z-ai),
+  // the catch block swallowed the error AND the tmpFile was never deleted —
+  // leaking a temp file per failed attempt. We now use a finally block to
+  // guarantee cleanup regardless of whether parse succeeds or fails.
+  const tmpFile = path.join(os.tmpdir(), `claude-killer-search-${Date.now()}.json`);
   try {
-    const tmpFile = path.join(os.tmpdir(), `claude-killer-search-${Date.now()}.json`);
     const result = await runCmd(
       "z-ai",
       ["function", "-n", "web_search", "-a", JSON.stringify({ query, num }), "-o", tmpFile],
@@ -986,7 +1034,6 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
     );
     if (result.ok && fs.existsSync(tmpFile)) {
       const data = JSON.parse(fs.readFileSync(tmpFile, "utf8"));
-      fs.unlinkSync(tmpFile);
       if (Array.isArray(data)) {
         return data.slice(0, num).map((r: any) => ({
           url: r.url ?? "",
@@ -995,9 +1042,10 @@ export async function webSearch(query: string, num: number = 5, newsMode?: boole
         }));
       }
     }
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   } catch {
-    // z-ai CLI not available, fall through
+    // z-ai CLI not available or returned malformed output, fall through
+  } finally {
+    try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* ignore */ }
   }
 
   // Fallback 2: DuckDuckGo via native fetch (last resort)
@@ -1182,8 +1230,12 @@ function tryMarkdownUrl(url: string): string | null {
  */
 export async function webRead(url: string): Promise<string> {
   // Try z-ai CLI first (only in Super Z environment)
+  // BUG FIX: previously, if JSON.parse threw (malformed output from z-ai),
+  // the catch block swallowed the error AND the tmpFile was never deleted —
+  // leaking a temp file per failed attempt. We now use a finally block to
+  // guarantee cleanup regardless of whether parse succeeds or fails.
+  const tmpFile = path.join(os.tmpdir(), `claude-killer-page-${Date.now()}.json`);
   try {
-    const tmpFile = path.join(os.tmpdir(), `claude-killer-page-${Date.now()}.json`);
     const result = await runCmd(
       "z-ai",
       ["function", "-n", "page_reader", "-a", JSON.stringify({ url }), "-o", tmpFile],
@@ -1191,13 +1243,14 @@ export async function webRead(url: string): Promise<string> {
     );
     if (result.ok && fs.existsSync(tmpFile)) {
       const data = JSON.parse(fs.readFileSync(tmpFile, "utf8"));
-      fs.unlinkSync(tmpFile);
       const html = data?.data?.html ?? data?.html ?? "";
       const text = extractTextFromHtml(html);
       if (text.length > 100) return text.slice(0, MAX_CONTENT_LENGTH);
     }
-    if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
   } catch { /* z-ai not available */ }
+  finally {
+    try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+  }
 
   // Primary: native fetch with retry and content extraction
   for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {

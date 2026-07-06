@@ -16,6 +16,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+// BUG FIX: extensions.ts previously called `require("node:url")` inside
+// try/catch blocks to get fileURLToPath. This project is ESM ("type":
+// "module"), and `require` is NOT defined in ESM — the calls always threw
+// ReferenceError and were silently swallowed, so the bundled-defaults path
+// resolution (used to find mode skills/MCPs when running from dist/) always
+// fell through to the cwd-based fallback. Statically import fileURLToPath
+// instead so it actually works.
+import { fileURLToPath } from "node:url";
 
 import os from "node:os";
 
@@ -504,6 +512,18 @@ async function startAndInitMCPServer(name: string, config: MCPConfig): Promise<v
     if (server.initialized) {
       console.error(`[MCP] Server "${name}" exited with code ${code}`);
     }
+    // BUG FIX: when the server process exits (crash, kill, normal exit),
+    // any in-flight requests in `pendingRequests` were never resolved or
+    // rejected — callers awaited them until the per-request timeout fired
+    // (up to 60s for tools/call). That meant a crashed MCP server froze
+    // the agent for a full minute per pending call. Reject them all now
+    // with a clear error so callers fail fast and can recover.
+    for (const [id, pending] of server.pendingRequests.entries()) {
+      try {
+        pending.reject(new Error(`MCP server "${name}" exited (code ${code}) before responding to request ${id}`));
+      } catch { /* reject threw — ignore */ }
+    }
+    server.pendingRequests.clear();
     activeMCPServers.delete(name);
   });
 
@@ -638,7 +658,8 @@ function loadMCPsFromModeDir(modeName: string): Record<string, MCPConfig> {
   // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
   const bundledDefaultsDir = (() => {
     try {
-      const { fileURLToPath } = require("node:url");
+      // BUG FIX: was `require("node:url")` which is undefined in ESM (see
+      // top-of-file import note). Use the statically-imported fileURLToPath.
       const here = path.dirname(fileURLToPath(import.meta.url));
       return path.join(here, "..", "defaults", "modes", modeName, "mcps");
     } catch {
@@ -716,7 +737,9 @@ export async function loadAllExtensions() {
         // ESM doesn't have __dirname — use fileURLToPath(import.meta.url) instead.
         if (modeSkills.length === 0) {
           try {
-            const { fileURLToPath } = require("node:url");
+            // BUG FIX: was `require("node:url")` which is undefined in ESM
+            // (see top-of-file import note). Use the statically-imported
+            // fileURLToPath so dist/ bundled skills are actually found.
             const here = path.dirname(fileURLToPath(import.meta.url));
             const distDir = path.join(here, "..", "defaults", "modes", mode.name, "skills");
             if (fs.existsSync(distDir)) {

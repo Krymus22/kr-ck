@@ -66,10 +66,15 @@ const BASE_URL = "https://integrate.api.nvidia.com/v1";
 
 // --- Keepalive agent (reuse the same config as apiClient.ts) -----------------
 
+// BUG FIX: timeout was 0 (infinite). If NVIDIA accepts the TCP connection
+// but never responds (load balancer issue, server hang), the socket would
+// hang forever, freezing any pool-mode request (sub-agents, hedging, etc.).
+// This must match apiClient.ts: a finite socket timeout as defense-in-depth
+// alongside the OpenAI client's request timeout.
 const keepAliveAgent = new https.Agent({
   keepAlive: true,
   keepAliveMsecs: 1_000,
-  timeout: 0,
+  timeout: 5 * 60 * 1000,  // 5 min socket timeout — matches apiClient.ts
   maxSockets: 10,
   scheduling: "lifo",
 });

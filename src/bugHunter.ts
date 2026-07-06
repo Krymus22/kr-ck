@@ -662,9 +662,14 @@ export function formatBugHuntMessage(
   }
 
   const lines: string[] = [];
+  // BUG FIX: when `findings.length > 0` but `shouldBlock === false` (only
+  // medium/low findings), the old header said "Review complete. No issues
+  // found." — directly contradicting the findings listed just below. The AI
+  // would read "No issues found" and skip addressing them. Distinguish the
+  // two cases explicitly so the model knows whether it MUST act.
   lines.push(shouldBlock
     ? `[BUG_HUNTER] ✗ ISSUES FOUND — you MUST fix or dismiss EACH finding before finishing:`
-    : `[BUG_HUNTER] Review complete. No issues found.`
+    : `[BUG_HUNTER] Review complete. No CRITICAL/HIGH issues found, but ${findings.length} medium/low finding(s) below should be reviewed:`
   );
   lines.push("");
   lines.push(`IMPORTANT: You are NOT allowed to finish until every finding below is either FIXED (with a real code change) or EXPLICITLY DISMISSED with a valid reason (e.g., "false positive because X"). Saying "looks fine" without addressing each finding = blocking.`);

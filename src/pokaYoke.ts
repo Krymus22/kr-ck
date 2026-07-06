@@ -156,12 +156,21 @@ function checkEditarArquivo(args: Record<string, unknown>): PokaYokeResult {
 }
 
 function checkDesfazerEdicao(args: Record<string, unknown>): PokaYokeResult {
-  if (!isNonEmptyString(args.caminho)) {
+  // BUG FIX: previously this only checked `args.caminho`. But desfazer_edicao
+  // is in PATH_TAKING_TOOLS, and the path-taking check above (line ~64)
+  // accepts ANY of `caminho | path | filePath | file`. If the model passed
+  // `path` (or `filePath`/`file`) instead of `caminho`, the path-taking
+  // check passed, but this specific check FAILED with "requires 'caminho'",
+  // contradicting the earlier acceptance. The model would be told both
+  // "your path is fine" and "you must pass caminho" — confusing. Accept
+  // the same set of aliases here for consistency.
+  const rawPath = args.caminho ?? args.path ?? args.filePath ?? args.file;
+  if (!isNonEmptyString(rawPath)) {
     return {
       ok: false,
       error:
-        `[POKA-YOKE] desfazer_edicao requires "caminho" (non-empty string) ` +
-        `pointing to the file whose last edit should be undone.`,
+        `[POKA-YOKE] desfazer_edicao requires "caminho" (or "path"/"filePath"/"file") ` +
+        `as a non-empty string pointing to the file whose last edit should be undone.`,
     };
   }
   return { ok: true };

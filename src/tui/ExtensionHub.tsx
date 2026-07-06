@@ -196,8 +196,17 @@ export function ExtensionHub({ onClose, onMessage, onConfigure }: Readonly<Exten
     if (inputChar === "c" || inputChar === "C") {
       if (!isModesTab && onConfigure) {
         const item = visibleItems[cursorIndex];
-        const toolName = item ? item.id.replace(/^tool:/, "").replace(/_\w+$/, "") : null;
-        onConfigure(toolName);
+        // BUG FIX: only open the configurator for TOOL items. Previously
+        // pressing 'C' on a skill/MCP/plugin/feature card would still call
+        // onConfigure with the raw extension id (e.g. "skill:foo"), which
+        // the configurator cannot handle — it expects a bare tool name.
+        // The id-stripping below (replace /^tool:/, ...) is a no-op for
+        // non-tool ids, so the configurator would receive garbage and fail
+        // silently or show a confusing error.
+        if (item && item.category === "tool") {
+          const toolName = item.id.replace(/^tool:/, "").replace(/_\w+$/, "");
+          onConfigure(toolName);
+        }
       }
       return;
     }

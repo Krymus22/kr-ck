@@ -57,9 +57,14 @@ const DANGEROUS_PATTERNS: DangerPattern[] = [
 
   // PlayerData mutations (ProfileStore / Replica patterns)
   { regex: /profile\.Data\s*=/gi, description: "ProfileStore: direct profile.Data assignment (overwrites all data)", severity: "high" },
-  { regex: /profile\.Data\.\w+\s*=/gi, description: "ProfileStore: profile.Data.X = (mutates player data)", severity: "medium" },
+  // BUG FIX: the `=` in these patterns matched `==` (equality comparison) too,
+  // so read-only checks like `if profile.Data.Coins == 0 then` were flagged
+  // as "mutates player data" (severity medium) and forced a slow LLM review
+  // — and on LLM failure the write was blocked. Add `(?!=)` negative
+  // lookahead so we only match assignment (`=` not followed by another `=`).
+  { regex: /profile\.Data\.\w+\s*=(?!=)/gi, description: "ProfileStore: profile.Data.X = (mutates player data)", severity: "medium" },
   { regex: /replica\.Data\s*=/gi, description: "Replica: direct Replica.Data assignment (overwrites)", severity: "high" },
-  { regex: /replica\.Data\.\w+\s*=/gi, description: "Replica: replica.Data.X = (mutates replicated state)", severity: "medium" },
+  { regex: /replica\.Data\.\w+\s*=(?!=)/gi, description: "Replica: replica.Data.X = (mutates replicated state)", severity: "medium" },
   { regex: /:SetValue\s*\(\s*\{/g, description: "Replica:SetValue (mutates replicated state)", severity: "medium" },
   { regex: /:Release\s*\(\s*\)/g, description: "ProfileStore:Release (releases session lock - affects data access)", severity: "low" },
 

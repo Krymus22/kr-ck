@@ -1631,8 +1631,15 @@ export function App() {
       return;
     }
 
-    // If hub is open, don't process other keys here
-    if (showHub || showFolderBrowser) return;
+    // If hub is open, don't process other keys here.
+    // BUG FIX: also bail out when ConfiguratorChat or QuestionPrompt is open.
+    // These overlays register their own useInput handlers AND the main
+    // TextInput is hidden (see render section), but if the App's input state
+    // still starts with "/" (left over from before the overlay opened),
+    // showAutocomplete would be true and arrow/tab keys here would navigate
+    // the autocomplete — stealing keystrokes from the overlay (e.g. pressing
+    // Up in QuestionPrompt would ALSO move the autocomplete cursor).
+    if (showHub || showFolderBrowser || showConfigurator || pendingQuestion) return;
 
     if (!showAutocomplete || acMatches.length === 0) return;
 
@@ -1773,8 +1780,20 @@ export function App() {
         {/* Input row */}
         <Box flexDirection="row">
           <Box flexGrow={1}>
-            {showHub || showFolderBrowser ? (
-              <Text color={colors.muted}>[ Navegador aberto - pressione Esc para fechar ]</Text>
+            {/*
+              BUG FIX: hide the main TextInput whenever ANY overlay that
+              captures keyboard input is open (Hub, FolderBrowser,
+              ConfiguratorChat, QuestionPrompt). Previously only Hub and
+              FolderBrowser were checked, so when ConfiguratorChat or
+              QuestionPrompt was open, the main TextInput was still mounted
+              and receiving stdin — causing every keystroke to go to BOTH
+              the overlay's useInput handler AND the main TextInput's
+              onChange (e.g. typing "hello" in QuestionPrompt's type mode
+              also appended "hello" to the chat input, and pressing Enter
+              submitted the chat input as a new message to the agent).
+            */}
+            {showHub || showFolderBrowser || showConfigurator || pendingQuestion ? (
+              <Text color={colors.muted}>[ Overlay aberto - pressione Esc para fechar ]</Text>
             ) : (
               <>
                 <Text color={colors.primary} bold>{"> "}</Text>

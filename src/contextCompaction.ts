@@ -167,10 +167,24 @@ export async function smartCompact(maxTokens: number = 50000): Promise<{ compact
 
   // Apply heuristic compaction strategies
   const messages = history.getHistory();
-  const { messages: compacted } = compactIntelligently(messages);
+  const { messages: compacted, appliedStrategies } = compactIntelligently(messages);
+
+  // BUG FIX: previously, `compacted` was computed by compactIntelligently but
+  // NEVER applied to the live history — `history.replaceHistory(compacted)`
+  // was missing. The function then reported "saved X tokens" based on the
+  // compacted array's token count, but the actual history array was
+  // unchanged, so the IA kept sending the full un-compacted context to the
+  // API. Worse, the "remove-consecutive-same-role" strategy MUTATES the
+  // original message objects (it concatenates `prev.content += curr.content`),
+  // so the live history ended up with duplicated merged content while still
+  // keeping the now-redundant second message. Now we actually replace
+  // history with the compacted array when at least one strategy applied.
+  if (appliedStrategies.length > 0) {
+    history.replaceHistory(compacted as any);
+  }
 
   // If compaction wasn't enough, fall back to aggressive compaction
-  if (history.estimateTokens(compacted as any) > maxTokens) {
+  if (history.estimateTokens() > maxTokens) {
     const aggressiveResult = history.compactHistory();
     if (aggressiveResult) {
       log.success(`[COMPACTION] Aggressive compaction saved ${aggressiveResult.beforeTokens - aggressiveResult.afterTokens} tokens`);
@@ -178,7 +192,7 @@ export async function smartCompact(maxTokens: number = 50000): Promise<{ compact
     }
   }
 
-  const after = history.estimateTokens(compacted as any);
+  const after = history.estimateTokens();
   const saved = before - after;
   if (saved > 0) {
     log.success(`[COMPACTION] Heuristic compaction saved ${saved} tokens`);
