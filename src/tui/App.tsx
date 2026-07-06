@@ -1271,9 +1271,22 @@ export function App() {
         // from the last stream only).
         streamStartTime = Date.now();
         tokenCount = 0;
+        // BUG FIX (log-desaparece): reset streamContent on EVERY stream start.
+        // Without this, streamContent accumulates across all streams in the
+        // same agent turn — the second stream's content includes the first
+        // stream's content, making the message show duplicated/garbled text.
+        streamContent = "";
         setStatus("streaming");
+        // BUG FIX (log-desaparece): finalize any previous streaming message
+        // before starting a new one. Without this, the first streaming message
+        // keeps isStreaming=true forever, causing visual glitches (missing
+        // empty line separator, content freeze).
         setMessages((prev) => {
-          const updated = [...prev];
+          const updated = prev.map((m) =>
+            m.role === "assistant" && m.isStreaming
+              ? { ...m, isStreaming: false }
+              : m,
+          );
           const last = updated.at(-1);
           if (last?.role === "assistant" && last?.isStreaming) {
             return updated;
