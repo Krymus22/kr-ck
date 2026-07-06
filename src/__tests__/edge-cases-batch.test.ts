@@ -361,17 +361,16 @@ describe("Edge: nested objects/arrays in args", () => {
     expect(args.replace).toBe("val-extracted");
   });
 
-  it("normalizeArgs JSON-stringifies object without content/value/text (then parseJsonStrings re-parses)", () => {
-    // coerceTypes converts object → JSON string when schema says "string",
-    // BUT parseJsonStrings runs after and re-parses strings that start with
-    // `{` or `[` back to objects. So a nested object without content/value/text
-    // ends up as the original object (round-trip).
+  it("normalizeArgs JSON-stringifies object when schema says 'string' (parseJsonStrings respects schema)", () => {
+    // coerceTypes converts object → JSON string when schema says "string".
+    // BUG FIX: parseJsonStrings now SKIPS fields whose schema says type:"string",
+    // so the stringified object stays as a string (not re-parsed back to object).
     const args: any = { replace: { foo: "bar", baz: 42 } };
     const schema = { properties: { replace: { type: "string" } } };
     normalizeArgs("editar_arquivo", args, schema as any);
-    // The object is preserved (coerce+parse round-trip)
-    expect(typeof args.replace).toBe("object");
-    expect(args.replace).toEqual({ foo: "bar", baz: 42 });
+    // The object is converted to JSON string and STAYS string (not re-parsed)
+    expect(typeof args.replace).toBe("string");
+    expect(JSON.parse(args.replace)).toEqual({ foo: "bar", baz: 42 });
   });
 
   it("normalizeArgs coerces number to string when schema says 'string'", () => {
