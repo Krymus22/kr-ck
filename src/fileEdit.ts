@@ -239,20 +239,17 @@ export async function editFile(
         log.warn(`[validator] ${w}`);
       }
 
-      // Append validation summary to the result so the AI (and user) can see
-      // what was validated and what was skipped. This makes the validation
-      // process VISIBLE instead of silent.
-      if (validation.rulesApplied.length > 0 || validation.rulesSkipped.length > 0) {
-        const applied = validation.rulesApplied.length > 0
-          ? `validado por: ${validation.rulesApplied.join(", ")}`
-          : "";
-        const skipped = validation.rulesSkipped.length > 0
-          ? `pulado: ${validation.rulesSkipped.join(", ")}`
-          : "";
-        const summary = [applied, skipped].filter(Boolean).join(" | ");
-        if (summary) {
-          result.content += `\n\n[VALIDAÇÃO] ${summary}`;
-        }
+      // BUG FIX: NÃO adicionar mensagem de validação ao conteúdo do arquivo.
+      // Antes, result.content += `\n\n[VALIDAÇÃO] ${summary}` — isso escrevia
+      // "[VALIDAÇÃO] validado por: selene_lint, stylua_format" DENTRO do arquivo
+      // no disco. Quando o Rojo sincronizava pro Studio, essa mensagem aparecia
+      // como texto no final do script, quebrando o código e revelando uso de IA.
+      // Agora a validação é logada (visível no terminal) mas NÃO escrita no arquivo.
+      if (validation.rulesApplied.length > 0) {
+        log.success(`[VALIDAÇÃO] validado por: ${validation.rulesApplied.join(", ")}`);
+      }
+      if (validation.rulesSkipped.length > 0) {
+        log.debug(`[VALIDAÇÃO] pulado: ${validation.rulesSkipped.join(", ")}`);
       }
     }
   } catch (err) {
