@@ -42,20 +42,30 @@ export default defineConfig({
       "src/__tests__/lspClient-extended.test.ts",
       // Integration tests that may call external services
       "src/__tests__/integration-agent-flow.test.ts",
-      // Tests that use process.chdir() — Stryker runs tests in worker threads,
-      // and process.chdir() throws "not supported in workers" in Node.js.
-      // These tests pass in normal CI (vitest run) but fail in Stryker.
-      "src/__tests__/slash-commands-full.test.tsx",
-      "src/__tests__/taskState.test.ts",
-      "src/__tests__/taskState-extended.test.ts",
-      "src/__tests__/strictQualityGate.test.ts",
-      "src/__tests__/strictQualityGate-extended.test.ts",
-      "src/__tests__/rollbackStore-extended.test.ts",
+      // ALL tests that use process.chdir() — Stryker runs tests in worker
+      // threads, and process.chdir() throws "not supported in workers" in
+      // Node.js. These tests pass in normal CI (vitest run) but fail in Stryker.
+      // Found via: grep -rln "process.chdir\|\.chdir(" src/__tests__/
       "src/__tests__/agent-extended.test.ts",
-      "src/__tests__/modeMigration-extended.test.ts",
-      "src/__tests__/manifestLoader-extended.test.ts",
+      "src/__tests__/agentIntegration.test.ts",
+      "src/__tests__/cross-module-edge-cases.test.ts",
+      "src/__tests__/fileEdit-extended.test.ts",
       "src/__tests__/imagePaste-extended.test.ts",
       "src/__tests__/integration-modes-system.test.ts",
+      "src/__tests__/manifestLoader-extended.test.ts",
+      "src/__tests__/manifestLoader.test.ts",
+      "src/__tests__/modeMigration-extended.test.ts",
+      "src/__tests__/modeMigration.test.ts",
+      "src/__tests__/property-modes-system.test.ts",
+      "src/__tests__/property-new-modules.test.ts",
+      "src/__tests__/rollbackStore-extended.test.ts",
+      "src/__tests__/rollbackStore.test.ts",
+      "src/__tests__/slash-commands-full.test.tsx",
+      "src/__tests__/stress-modes-system.test.ts",
+      "src/__tests__/strictQualityGate-extended.test.ts",
+      "src/__tests__/strictQualityGate.test.ts",
+      "src/__tests__/taskState-extended.test.ts",
+      "src/__tests__/taskState.test.ts",
     ],
     coverage: {
       provider: "v8",
