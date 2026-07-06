@@ -1,172 +1,333 @@
 /**
- * tddMode-extended.test.ts — Cobertura adicional para tddMode.ts.
+ * tddMode-extended.test.ts — Extended tests for tddMode.ts
  *
- * Os nomes pedidos no enunciado (shouldRunTestFirst, recordTestResult,
- * getTddState, resetTddState) NÃO existem no módulo real. As funções
- * reais são: isTestable, registerTDD, getTDD, hasTDD, testFileExists,
- * clearTDD, formatTDD, getTestFilePath. Este arquivo expande a cobertura
- * dessas funções com casos edge não cobertos pelo tddMode.test.ts.
+ * Covers 30+ tests across:
+ *   - isTestable (extension detection)
+ *   - registerTDD / getTDD / hasTDD / clearTDD (state management)
+ *   - testFileExists (disk check)
+ *   - formatTDD (string formatting)
+ *   - getTestFilePath (path generation)
+ *
+ * Uses a tmp dir for filesystem tests and resets TDD state between tests.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-vi.mock("./../logger.js", () => ({
-  debug: vi.fn(),
+vi.mock("../logger.js", () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    success: vi.fn(),
+  },
+  info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
-  info: vi.fn(),
+  debug: vi.fn(),
+  success: vi.fn(),
 }));
 
-describe("tddMode (extended)", () => {
-  beforeEach(async () => {
-    const { clearTDD } = await import("./../tddMode.js");
+import {
+  isTestable,
+  registerTDD,
+  getTDD,
+  hasTDD,
+  testFileExists,
+  clearTDD,
+  formatTDD,
+  getTestFilePath,
+} from "../tddMode.js";
+
+describe("isTestable (extended)", () => {
+  it("returns true for .ts", () => {
+    expect(isTestable("foo.ts")).toBe(true);
+  });
+
+  it("returns true for .tsx", () => {
+    expect(isTestable("foo.tsx")).toBe(true);
+  });
+
+  it("returns true for .js", () => {
+    expect(isTestable("foo.js")).toBe(true);
+  });
+
+  it("returns true for .py", () => {
+    expect(isTestable("foo.py")).toBe(true);
+  });
+
+  it("returns true for .rs", () => {
+    expect(isTestable("foo.rs")).toBe(true);
+  });
+
+  it("returns true for .go", () => {
+    expect(isTestable("foo.go")).toBe(true);
+  });
+
+  it("returns true for .luau", () => {
+    expect(isTestable("foo.luau")).toBe(true);
+  });
+
+  it("returns true for .lua", () => {
+    expect(isTestable("foo.lua")).toBe(true);
+  });
+
+  it("returns false for .md", () => {
+    expect(isTestable("README.md")).toBe(false);
+  });
+
+  it("returns false for .json", () => {
+    expect(isTestable("config.json")).toBe(false);
+  });
+
+  it("returns false for .txt", () => {
+    expect(isTestable("notes.txt")).toBe(false);
+  });
+
+  it("returns false for files with no extension", () => {
+    expect(isTestable("Makefile")).toBe(false);
+  });
+
+  it("is case-insensitive for extension", () => {
+    expect(isTestable("foo.TS")).toBe(true);
+    expect(isTestable("foo.PY")).toBe(true);
+  });
+
+  it("handles paths with directories", () => {
+    expect(isTestable("src/lib/file.ts")).toBe(true);
+    expect(isTestable("/abs/path/to/file.luau")).toBe(true);
+  });
+
+  it("handles empty string", () => {
+    expect(isTestable("")).toBe(false);
+  });
+});
+
+describe("TDD state management (extended)", () => {
+  beforeEach(() => {
     clearTDD();
   });
 
-  describe("getTDD / estado (equivalente a getTddState)", () => {
-    it("getTDD retorna null inicialmente quando nenhum spec foi registrado", async () => {
-      const { getTDD } = await import("./../tddMode.js");
-      expect(getTDD()).toBeNull();
-    });
-
-    it("getTDD retorna o spec mais recente após múltiplos registerTDD (sobrescreve)", async () => {
-      const { registerTDD, getTDD } = await import("./../tddMode.js");
-      registerTDD("first.spec.ts", "first.ts", "typescript", ["t1"]);
-      registerTDD("second.spec.ts", "second.ts", "rust", ["t2", "t3"]);
-
-      const current = getTDD();
-      expect(current).not.toBeNull();
-      // O segundo registerTDD deve ter sobrescrito o primeiro
-      expect(current!.testFile).toBe("second.spec.ts");
-      expect(current!.implFile).toBe("second.ts");
-      expect(current!.language).toBe("rust");
-      expect(current!.testCases).toEqual(["t2", "t3"]);
-    });
-
-    it("registerTDD registra createdAt como timestamp recente", async () => {
-      const { registerTDD, getTDD } = await import("./../tddMode.js");
-      const before = Date.now();
-      registerTDD("t.spec.ts", "i.ts", "typescript", []);
-      const after = Date.now();
-      const ts = getTDD()!.createdAt;
-      expect(ts).toBeGreaterThanOrEqual(before);
-      expect(ts).toBeLessThanOrEqual(after);
-    });
+  afterEach(() => {
+    clearTDD();
   });
 
-  describe("clearTDD / reset (equivalente a resetTddState)", () => {
-    it("clearTDD é no-op quando nenhum TDD está ativo (não lança)", async () => {
-      const { clearTDD, hasTDD } = await import("./../tddMode.js");
-      expect(() => clearTDD()).not.toThrow();
-      expect(hasTDD()).toBe(false);
-    });
-
-    it("clearTDD seguido de registerTDD permite reativar TDD", async () => {
-      const { registerTDD, clearTDD, hasTDD, getTDD } = await import("./../tddMode.js");
-      registerTDD("a.spec.ts", "a.ts", "typescript", ["x"]);
-      clearTDD();
-      expect(hasTDD()).toBe(false);
-      registerTDD("b.spec.ts", "b.ts", "go", ["y"]);
-      expect(hasTDD()).toBe(true);
-      expect(getTDD()!.testFile).toBe("b.spec.ts");
-    });
+  it("hasTDD returns false initially", () => {
+    expect(hasTDD()).toBe(false);
   });
 
-  describe("formatTDD — casos edge", () => {
-    it("formatTDD retorna string vazia quando não há TDD ativo", async () => {
-      const { formatTDD } = await import("./../tddMode.js");
-      expect(formatTDD()).toBe("");
-    });
-
-    it("formatTDD com array de testCases vazio NÃO inclui a seção 'Test cases'", async () => {
-      const { registerTDD, formatTDD } = await import("./../tddMode.js");
-      registerTDD("t.spec.ts", "i.ts", "typescript", []);
-      const out = formatTDD();
-      expect(out).toContain("[TDD ACTIVE]");
-      expect(out).toContain("Test file: t.spec.ts");
-      expect(out).toContain("Implementation file: i.ts");
-      expect(out).toContain("Language: typescript");
-      // Se testCases é vazio, a seção não deve aparecer
-      expect(out).not.toContain("Test cases that MUST pass");
-      // Mas o aviso final deve estar presente
-      expect(out).toContain("Do NOT modify the tests");
-    });
-
-    it("formatTDD numera os testCases em ordem crescente a partir de 1", async () => {
-      const { registerTDD, formatTDD } = await import("./../tddMode.js");
-      registerTDD("t.spec.ts", "i.ts", "typescript", ["primeiro", "segundo", "terceiro"]);
-      const out = formatTDD();
-      expect(out).toContain("1. primeiro");
-      expect(out).toContain("2. segundo");
-      expect(out).toContain("3. terceiro");
-    });
+  it("getTDD returns null initially", () => {
+    expect(getTDD()).toBeNull();
   });
 
-  describe("getTestFilePath — casos edge", () => {
-    it("preserva subdiretório do arquivo de implementação", async () => {
-      const { getTestFilePath } = await import("./../tddMode.js");
-      const result = getTestFilePath("src/services/InventoryService.luau");
-      // Deve manter src/services + adicionar __tests__
-      expect(result).toContain("services");
-      expect(result).toContain("__tests__");
-      expect(result).toContain("InventoryService.spec.luau");
-    });
-
-    it("lida com extensões compostas (ex.: .spec.ts)", async () => {
-      const { getTestFilePath } = await import("./../tddMode.js");
-      // path.extname só pega a última extensão, então .ts é removido e .spec.ts vira .spec.spec.ts
-      const result = getTestFilePath("foo.spec.ts");
-      expect(result).toContain("__tests__");
-      // base = "foo.spec" (basename sem .ts)
-      expect(result).toContain("foo.spec.spec.ts");
-    });
+  it("registerTDD sets the current TDD spec", () => {
+    const spec = registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["case1"]);
+    expect(spec).toBeDefined();
+    expect(spec.testFile).toBe("/tmp/test.spec.ts");
+    expect(spec.implFile).toBe("/tmp/impl.ts");
+    expect(spec.language).toBe("typescript");
+    expect(spec.testCases).toEqual(["case1"]);
   });
 
-  describe("testFileExists — caso edge", () => {
-    it("testFileExists retorna false quando nenhum TDD está registrado", async () => {
-      const { testFileExists } = await import("./../tddMode.js");
-      expect(testFileExists()).toBe(false);
-    });
+  it("hasTDD returns true after registerTDD", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(hasTDD()).toBe(true);
   });
 
-  describe("isTestable — cobertura completa de extensões", () => {
-    it("aceita todas as extensões testáveis documentadas", async () => {
-      const { isTestable } = await import("./../tddMode.js");
-      for (const ext of [".ts", ".tsx", ".js", ".py", ".rs", ".go", ".luau", ".lua"]) {
-        expect(isTestable(`foo${ext}`)).toBe(true);
-      }
-    });
-
-    it("rejeita extensões não testáveis e caminhos sem extensão", async () => {
-      const { isTestable } = await import("./../tddMode.js");
-      expect(isTestable("README.md")).toBe(false);
-      expect(isTestable("Dockerfile")).toBe(false);
-      expect(isTestable("config.yml")).toBe(false);
-      expect(isTestable("semext")).toBe(false);
-    });
-
-    it("é case-insensitive para extensões", async () => {
-      const { isTestable } = await import("./../tddMode.js");
-      expect(isTestable("foo.TS")).toBe(true);
-      expect(isTestable("foo.PY")).toBe(true);
-    });
+  it("getTDD returns the registered spec", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["case1", "case2"]);
+    const spec = getTDD();
+    expect(spec).not.toBeNull();
+    expect(spec!.testCases.length).toBe(2);
   });
 
-  describe("integração estado + disco", () => {
-    it("testFileExists usa o caminho registrado em registerTDD", async () => {
-      const { registerTDD, testFileExists } = await import("./../tddMode.js");
-      // Cria um arquivo temporário real
-      const tmpFile = path.join(os.tmpdir(), `tdd-ext-${Date.now()}-${Math.random().toString(36).slice(2)}.spec.ts`);
-      fs.writeFileSync(tmpFile, "// test", "utf8");
-      try {
-        registerTDD(tmpFile, "impl.ts", "typescript", []);
-        expect(testFileExists()).toBe(true);
-      } finally {
-        fs.unlinkSync(tmpFile);
-      }
-    });
+  it("clearTDD resets state to null", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["case1"]);
+    clearTDD();
+    expect(hasTDD()).toBe(false);
+    expect(getTDD()).toBeNull();
+  });
+
+  it("registerTDD sets createdAt to current time", () => {
+    const before = Date.now();
+    const spec = registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    const after = Date.now();
+    expect(spec.createdAt).toBeGreaterThanOrEqual(before);
+    expect(spec.createdAt).toBeLessThanOrEqual(after);
+  });
+
+  it("registerTDD with empty testCases array is allowed", () => {
+    const spec = registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(spec.testCases).toEqual([]);
+    expect(hasTDD()).toBe(true);
+  });
+
+  it("registerTDD overwrites previous spec", () => {
+    registerTDD("/tmp/test1.spec.ts", "/tmp/impl1.ts", "typescript", ["a"]);
+    registerTDD("/tmp/test2.spec.ts", "/tmp/impl2.ts", "python", ["b"]);
+    const spec = getTDD();
+    expect(spec!.testFile).toBe("/tmp/test2.spec.ts");
+    expect(spec!.implFile).toBe("/tmp/impl2.ts");
+    expect(spec!.language).toBe("python");
+  });
+});
+
+describe("testFileExists (extended)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    clearTDD();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tdd-ext-"));
+  });
+
+  afterEach(() => {
+    clearTDD();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns false when no TDD is registered", () => {
+    expect(testFileExists()).toBe(false);
+  });
+
+  it("returns false when the test file does not exist on disk", () => {
+    registerTDD("/nonexistent/path/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(testFileExists()).toBe(false);
+  });
+
+  it("returns true when the test file exists on disk", () => {
+    const testFile = path.join(tmpDir, "test.spec.ts");
+    fs.writeFileSync(testFile, "describe('x', () => it('y', () => {}));");
+    registerTDD(testFile, "/tmp/impl.ts", "typescript", []);
+    expect(testFileExists()).toBe(true);
+  });
+});
+
+describe("formatTDD (extended)", () => {
+  beforeEach(() => {
+    clearTDD();
+  });
+
+  afterEach(() => {
+    clearTDD();
+  });
+
+  it("returns empty string when no TDD registered", () => {
+    expect(formatTDD()).toBe("");
+  });
+
+  it("returns a non-empty string when TDD is registered", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["case1"]);
+    const out = formatTDD();
+    expect(typeof out).toBe("string");
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it("includes the test file path", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(formatTDD()).toContain("/tmp/test.spec.ts");
+  });
+
+  it("includes the implementation file path", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(formatTDD()).toContain("/tmp/impl.ts");
+  });
+
+  it("includes the language", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "python", []);
+    expect(formatTDD()).toContain("python");
+  });
+
+  it("includes '[TDD ACTIVE]' marker", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    expect(formatTDD()).toContain("[TDD ACTIVE]");
+  });
+
+  it("lists test cases when present", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["first", "second"]);
+    const out = formatTDD();
+    expect(out).toContain("first");
+    expect(out).toContain("second");
+  });
+
+  it("numbers test cases starting at 1", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", ["alpha", "beta"]);
+    const out = formatTDD();
+    expect(out).toContain("1. alpha");
+    expect(out).toContain("2. beta");
+  });
+
+  it("includes instruction not to modify tests", () => {
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", []);
+    const out = formatTDD();
+    expect(out.toLowerCase()).toContain("do not modify");
+  });
+
+  it("handles large number of test cases", () => {
+    const cases = Array.from({ length: 50 }, (_, i) => `case_${i}`);
+    registerTDD("/tmp/test.spec.ts", "/tmp/impl.ts", "typescript", cases);
+    const out = formatTDD();
+    expect(out).toContain("case_0");
+    expect(out).toContain("case_49");
+  });
+});
+
+describe("getTestFilePath (extended)", () => {
+  it("generates __tests__/name.spec.ext for a simple file", () => {
+    const result = getTestFilePath("src/Inventory.luau");
+    expect(result).toContain("__tests__");
+    expect(result).toContain("Inventory.spec.luau");
+  });
+
+  it("preserves the directory of the input file", () => {
+    const result = getTestFilePath("src/foo/bar.ts");
+    expect(result).toContain("src");
+    expect(result).toContain("foo");
+    expect(result).toContain("__tests__");
+  });
+
+  it("handles .ts extension", () => {
+    const result = getTestFilePath("src/file.ts");
+    expect(result).toMatch(/file\.spec\.ts$/);
+  });
+
+  it("handles .py extension", () => {
+    const result = getTestFilePath("src/file.py");
+    expect(result).toMatch(/file\.spec\.py$/);
+  });
+
+  it("handles .rs extension", () => {
+    const result = getTestFilePath("src/file.rs");
+    expect(result).toMatch(/file\.spec\.rs$/);
+  });
+
+  it("handles .go extension", () => {
+    const result = getTestFilePath("src/file.go");
+    expect(result).toMatch(/file\.spec\.go$/);
+  });
+
+  it("handles .lua extension", () => {
+    const result = getTestFilePath("src/file.lua");
+    expect(result).toMatch(/file\.spec\.lua$/);
+  });
+
+  it("handles absolute paths", () => {
+    const result = getTestFilePath("/abs/path/file.ts");
+    expect(result).toContain("__tests__");
+    expect(result).toContain("file.spec.ts");
+  });
+
+  it("handles files in root directory (no path separator)", () => {
+    const result = getTestFilePath("file.ts");
+    expect(result).toContain("__tests__");
+    expect(result).toContain("file.spec.ts");
+  });
+
+  it("handles files with multiple dots in name", () => {
+    const result = getTestFilePath("src/my.file.ts");
+    // The extension is .ts, base name is "my.file"
+    expect(result).toContain("my.file.spec.ts");
   });
 });

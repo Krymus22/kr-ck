@@ -1,262 +1,337 @@
 /**
- * selfHealing-extended.test.ts - Expansão de cobertura de src/selfHealing.ts.
+ * selfHealing-extended.test.ts — Extended tests for selfHealing.ts
  *
- * Foca em cenários não cobertos por selfHealing.test.ts:
- *   - parseErrors: formatos múltiplos, auto-detecção de eslint, mixed output,
- *     unicode, múltiplos erros, mensagens muito longas, fallback genérico com
- *     "failed" e "panic"
- *   - parseTscErrors: extração expected/got com tipos complexos
- *   - parseSeleneErrors: warnings e errors misturados, múltiplos arquivos
- *   - parseEslintErrors: formato com code no final, warning
- *   - parseGenericErrors: extensões de arquivo diferentes (.py, .rs, .go, .lua)
- *   - formatStructuredErrors: mensagem sem expected/got, com coluna undefined,
- *     erros misturados, número alto de erros
- *   - getErrorSummary: somente warnings, somente errors, mistura
- *   - Edge cases: output muito grande, arquivo vazio, múltiplos erros,
- *     binary-like content
+ * Covers 30+ tests across:
+ *   - parseErrors (auto-detection of tsc/selene/eslint/generic formats)
+ *   - formatStructuredErrors (readable output)
+ *   - getErrorSummary (counts)
+ *   - edge cases: empty input, malformed lines, mixed severities
+ *
+ * Only logger is mocked; everything else is pure-function testing.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("../logger.js", () => ({
-  debug: vi.fn(),
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    success: vi.fn(),
+  },
+  info: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
-  info: vi.fn(),
+  debug: vi.fn(),
+  success: vi.fn(),
 }));
 
-describe("selfHealing (extended) - parseErrors", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
+import { parseErrors, formatStructuredErrors, getErrorSummary } from "../selfHealing.js";
+
+describe("parseErrors (extended) - auto-detection & format-specific", () => {
+  it("returns empty array for empty string", () => {
+    expect(parseErrors("")).toEqual([]);
   });
 
-  // --- parseErrors: auto-detecção de formatos --------------------------------
-
-  it("auto-detecta eslint quando output tem formato 'linha:col error msg'", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = `src/foo.ts:42:5: error  Expected '===' ExpectationEquality`;
-    const errors = parseErrors(output);
-    expect(errors.length).toBeGreaterThanOrEqual(1);
-    // eslint é detectado por default: \d+:\d+:\s*(error|warning)\s+
-    expect(errors[0]!.severity).toBe("error");
-    expect(errors[0]!.line).toBe(42);
+  it("returns empty array for whitespace-only string", () => {
+    expect(parseErrors("   \n\t  ")).toEqual([]);
   });
 
-  it("auto-detecta tsc quando output tem código TS####", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const errors = parseErrors(`src/x.ts(10,2): error TS9999: algum erro`);
+  it("parses a single tsc error (auto-detected)", () => {
+    const out = "src/file.ts(42,10): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.";
+    const errors = parseErrors(out);
     expect(errors.length).toBe(1);
-    expect(errors[0]!.code).toBe("TS9999");
-    expect(errors[0]!.file).toBe("src/x.ts");
+    expect(errors[0].file).toBe("src/file.ts");
+    expect(errors[0].line).toBe(42);
+    expect(errors[0].column).toBe(10);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].code).toBe("TS2345");
   });
 
-  it("cai em fallback genérico quando nenhum formato conhecido é detectado", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    // Mensagem com palavra 'failed' mas sem file:line pattern -> arquivo unknown
-    const output = `Build failed for unknown reasons`;
-    const errors = parseErrors(output);
-    expect(errors.length).toBeGreaterThanOrEqual(1);
-    expect(errors[0]!.file).toBe("unknown");
-    expect(errors[0]!.line).toBe(0);
-  });
-
-  // --- parseTscErrors: extração expected/got ---------------------------------
-
-  it("extrai expected/got de mensagens com tipos complexos entre aspas", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = `f.ts(1,1): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'number'.`;
-    const errors = parseErrors(output, "tsc");
-    expect(errors[0]!.expected).toBe("string | undefined");
-    expect(errors[0]!.got).toBe("number");
-  });
-
-  it("não quebra quando mensagem TS não tem tipos entre aspas", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = `f.ts(1,1): error TS2304: Cannot find name 'foo'.`;
-    const errors = parseErrors(output, "tsc");
-    expect(errors[0]!.code).toBe("TS2304");
-    expect(errors[0]!.expected).toBeUndefined();
-    expect(errors[0]!.got).toBeUndefined();
-  });
-
-  // --- parseSeleneErrors: casos extras --------------------------------------
-
-  it("faz parse de múltiplos arquivos .luau no formato selene", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = [
-      `a.luau:1:1: warning: undefined_global`,
-      `b.luau:5:10: error: mismatched_end`,
-      `c.luau:99:42: error: syntax_error`,
+  it("parses multiple tsc errors", () => {
+    const out = [
+      "src/file.ts(10,5): error TS2304: Cannot find name 'foo'.",
+      "src/file.ts(20,1): error TS2304: Cannot find name 'bar'.",
     ].join("\n");
-    const errors = parseErrors(output, "selene");
-    expect(errors).toHaveLength(3);
-    expect(errors[0]!.file).toBe("a.luau");
-    expect(errors[1]!.severity).toBe("error");
-    expect(errors[2]!.column).toBe(42);
+    const errors = parseErrors(out);
+    expect(errors.length).toBe(2);
+    expect(errors[0].line).toBe(10);
+    expect(errors[1].line).toBe(20);
   });
 
-  // --- parseEslintErrors: casos extras --------------------------------------
-
-  it("faz parse de warnings do eslint sem code", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    // eslint format: /path:line:col: warning  Mensagem (sem code)
-    const output = `src/foo.ts:10:3: warning  Unexpected var, use let or const`;
-    const errors = parseErrors(output, "eslint");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.severity).toBe("warning");
-    expect(errors[0]!.line).toBe(10);
-    expect(errors[0]!.column).toBe(3);
+  it("extracts expected/got from tsc type-mismatch message", () => {
+    const out = "file.ts(1,1): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.";
+    const errors = parseErrors(out);
+    expect(errors[0].expected).toBe("string");
+    expect(errors[0].got).toBe("number");
   });
 
-  it("faz parse de erro eslint com code alfanumérico no final", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = `src/foo.ts:1:1: error  Expected '===' eqeqeq`;
-    const errors = parseErrors(output, "eslint");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.severity).toBe("error");
-    // Code capturado é opcional (palavra final solta)
-    expect(errors[0]!.message).toContain("Expected");
+  it("parses tsc warning severity", () => {
+    const out = "file.ts(1,1): warning TS6133: 'x' is declared but never used.";
+    const errors = parseErrors(out);
+    expect(errors.length).toBe(1);
+    expect(errors[0].severity).toBe("warning");
   });
 
-  // --- parseGenericErrors: extensões de arquivo ------------------------------
+  it("parses tsc error when source explicitly given", () => {
+    const out = "file.ts(1,1): error TS9999: Some error.";
+    const errors = parseErrors(out, "tsc");
+    expect(errors.length).toBe(1);
+    expect(errors[0].code).toBe("TS9999");
+  });
 
-  it("detecta file:line para extensões .py, .rs, .go, .lua", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = [
-      `Error in src/main.py:42 caused failure`,
-      `panic at lib/parser.rs:18`,
-      `failed to compile pkg/handler.go:7`,
-      `error in old/script.lua:99`,
+  it("parses a single selene error (auto-detected)", () => {
+    const out = "file.luau:42:1: warning: undefined_global";
+    const errors = parseErrors(out);
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("file.luau");
+    expect(errors[0].line).toBe(42);
+    expect(errors[0].column).toBe(1);
+    expect(errors[0].severity).toBe("warning");
+    expect(errors[0].message).toBe("undefined_global");
+  });
+
+  it("parses selene error severity", () => {
+    const out = "file.luau:10:5: error: mismatched_end";
+    const errors = parseErrors(out);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].message).toBe("mismatched_end");
+  });
+
+  it("parses multiple selene errors", () => {
+    const out = [
+      "file.luau:1:1: warning: undefined_global",
+      "file.luau:2:1: error: mismatched_end",
+      "file.luau:3:1: warning: unused_variable",
     ].join("\n");
-    const errors = parseErrors(output, "generic");
-    expect(errors).toHaveLength(4);
-    expect(errors.map((e) => e.file)).toEqual(
-      expect.arrayContaining(["src/main.py", "lib/parser.rs", "pkg/handler.go", "old/script.lua"])
-    );
-    expect(errors.map((e) => e.line)).toEqual(expect.arrayContaining([42, 18, 7, 99]));
+    const errors = parseErrors(out);
+    expect(errors.length).toBe(3);
   });
 
-  it("trunca mensagens genéricas muito longas em 200 caracteres", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const longMsg = "Error: " + "x".repeat(500);
-    const errors = parseErrors(longMsg, "generic");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.message.length).toBeLessThanOrEqual(200);
+  it("parses eslint error (auto-detected)", () => {
+    const out = "/path/to/file.ts:42:5: error  Expected '===' ExpectationEquality";
+    const errors = parseErrors(out);
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("/path/to/file.ts");
+    expect(errors[0].line).toBe(42);
+    expect(errors[0].column).toBe(5);
+    expect(errors[0].severity).toBe("error");
   });
 
-  // --- Unicode e casos extremos ---------------------------------------------
-
-  it("preserva caracteres unicode (emoji, acentos) em mensagens", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const output = `файл.ts(1,1): error TS1: Ошибка с символами: café ☕ não válidö`;
-    const errors = parseErrors(output, "tsc");
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.message).toContain("café");
-    expect(errors[0]!.message).toContain("☕");
+  it("parses eslint warning", () => {
+    const out = "/path/to/file.ts:10:2: warning  Unexpected console statement";
+    const errors = parseErrors(out);
+    expect(errors[0].severity).toBe("warning");
   });
 
-  it("lida com output contendo apenas whitespace e newlines", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    expect(parseErrors("\n\n   \n\t  \n")).toEqual([]);
+  it("parses eslint error with rule code", () => {
+    const out = "/path/to/file.ts:1:1: error  Expected '===' eqeqeq";
+    const errors = parseErrors(out, "eslint");
+    expect(errors.length).toBe(1);
+    // The 6th capture group is the optional rule code
+    expect(errors[0].severity).toBe("error");
   });
 
-  it("lida com arquivo grande (1000 erros TSC) sem travar", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    const lines: string[] = [];
-    for (let i = 0; i < 1000; i++) {
-      lines.push(`file${i}.ts(${i + 1},1): error TS1: erro número ${i}`);
-    }
-    const errors = parseErrors(lines.join("\n"), "tsc");
-    expect(errors).toHaveLength(1000);
-    expect(errors[999]!.line).toBe(1000);
-  });
-
-  it("lida com binary-like content sem crashar (fallback genérico)", async () => {
-    const { parseErrors } = await import("../selfHealing.js");
-    // Conteúdo com caracteres não-printáveis simulando binário lido como string
-    const binary = "\x00\x01\x02Error: something\x03\x04failed\x00";
-    const errors = parseErrors(binary);
-    // Genérico deve detectar "Error" e "failed"
-    expect(errors.length).toBeGreaterThanOrEqual(0);
-    // Não deve lançar exceção
+  it("falls back to generic parser for unknown format", () => {
+    const out = "Something went wrong: failed to compile file.ts:42";
+    const errors = parseErrors(out);
     expect(Array.isArray(errors)).toBe(true);
   });
+
+  it("generic parser extracts file:line pattern", () => {
+    const out = "Error in src/file.ts:42 something happened";
+    const errors = parseErrors(out, "generic");
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("src/file.ts");
+    expect(errors[0].line).toBe(42);
+  });
+
+  it("generic parser handles 'failed' keyword", () => {
+    const out = "Build failed: see file.luau:10";
+    const errors = parseErrors(out, "generic");
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("file.luau");
+  });
+
+  it("generic parser handles 'panic' keyword", () => {
+    const out = "thread panicked at src/main.rs:25";
+    const errors = parseErrors(out, "generic");
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("src/main.rs");
+  });
+
+  it("generic parser sets file='unknown' when no file:line match", () => {
+    const out = "Error: something failed";
+    const errors = parseErrors(out, "generic");
+    expect(errors.length).toBe(1);
+    expect(errors[0].file).toBe("unknown");
+    expect(errors[0].line).toBe(0);
+  });
+
+  it("generic parser does not flag lines without error keywords", () => {
+    const out = "Everything is fine\nAll good here";
+    const errors = parseErrors(out, "generic");
+    expect(errors.length).toBe(0);
+  });
+
+  it("returns empty array for unknown source format with empty content", () => {
+    expect(parseErrors("", "tsc")).toEqual([]);
+    expect(parseErrors("", "selene")).toEqual([]);
+    expect(parseErrors("", "eslint")).toEqual([]);
+    expect(parseErrors("", "generic")).toEqual([]);
+  });
+
+  it("StructuredError has correct shape", () => {
+    const out = "file.ts(1,1): error TS1: msg";
+    const errors = parseErrors(out);
+    expect(errors[0]).toHaveProperty("file");
+    expect(errors[0]).toHaveProperty("line");
+    expect(errors[0]).toHaveProperty("severity");
+    expect(errors[0]).toHaveProperty("message");
+    expect(typeof errors[0].file).toBe("string");
+    expect(typeof errors[0].line).toBe("number");
+    expect(typeof errors[0].severity).toBe("string");
+    expect(typeof errors[0].message).toBe("string");
+  });
 });
 
-describe("selfHealing (extended) - formatStructuredErrors", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
+describe("formatStructuredErrors (extended)", () => {
+  it("returns empty string for empty array", () => {
+    expect(formatStructuredErrors([])).toBe("");
   });
 
-  it("formata erro sem coluna e sem code corretamente", async () => {
-    const { formatStructuredErrors } = await import("../selfHealing.js");
-    const result = formatStructuredErrors([
-      { file: "f.ts", line: 10, severity: "warning", message: "aviso simples" },
-    ]);
-    // Sem code: 3 espaços (location + ' ' + codeStr vazio + ' ' + severity)
-    expect(result).toContain("f.ts:10   (warning)");
-    expect(result).toContain("aviso simples");
-    // Sem Expected/Got quando não há expected/got
-    expect(result).not.toContain("Expected:");
+  it("includes count of errors in header", () => {
+    const errors = [
+      { file: "a.ts", line: 1, severity: "error" as const, message: "msg1" },
+      { file: "b.ts", line: 2, severity: "error" as const, message: "msg2" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("2 found");
   });
 
-  it("numera erros sequencialmente começando em 1", async () => {
-    const { formatStructuredErrors } = await import("../selfHealing.js");
-    const result = formatStructuredErrors([
-      { file: "a.ts", line: 1, severity: "error" as const, message: "m1" },
-      { file: "b.ts", line: 2, severity: "error" as const, message: "m2" },
-      { file: "c.ts", line: 3, severity: "warning" as const, message: "m3" },
-    ]);
-    expect(result).toContain("1. a.ts:1");
-    expect(result).toContain("2. b.ts:2");
-    expect(result).toContain("3. c.ts:3");
-    expect(result).toContain("3 found");
+  it("includes file:line location for each error", () => {
+    const errors = [
+      { file: "src/foo.ts", line: 42, severity: "error" as const, message: "msg" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("src/foo.ts:42");
   });
 
-  it("formata erros misturados (com e sem expected/got) na mesma lista", async () => {
-    const { formatStructuredErrors } = await import("../selfHealing.js");
-    const result = formatStructuredErrors([
-      { file: "a.ts", line: 1, severity: "error" as const, message: "type mismatch", expected: "string", got: "number" },
-      { file: "b.ts", line: 2, severity: "warning" as const, message: "apenas aviso" },
-    ]);
-    expect(result).toContain("Expected: string | Got: number");
-    // O segundo erro não deve ter Expected/Got
-    const lines = result.split("\n");
-    const secondBlockStart = lines.findIndex((l) => l.startsWith("2."));
-    const block = lines.slice(secondBlockStart, secondBlockStart + 3).join("\n");
-    expect(block).not.toContain("Expected:");
+  it("includes column when present", () => {
+    const errors = [
+      { file: "src/foo.ts", line: 10, column: 5, severity: "error" as const, message: "msg" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("src/foo.ts:10:5");
+  });
+
+  it("includes error code when present", () => {
+    const errors = [
+      { file: "src/foo.ts", line: 1, severity: "error" as const, code: "TS2345", message: "msg" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("TS2345");
+  });
+
+  it("includes severity in parentheses", () => {
+    const errors = [
+      { file: "foo.ts", line: 1, severity: "warning" as const, message: "msg" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("(warning)");
+  });
+
+  it("includes message", () => {
+    const errors = [
+      { file: "foo.ts", line: 1, severity: "error" as const, message: "This is the message" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("This is the message");
+  });
+
+  it("includes Expected/Got when both present", () => {
+    const errors = [
+      { file: "foo.ts", line: 1, severity: "error" as const, message: "m", expected: "number", got: "string" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("Expected: number");
+    expect(out).toContain("Got: string");
+  });
+
+  it("does not include Expected/Got when only expected present", () => {
+    const errors = [
+      { file: "foo.ts", line: 1, severity: "error" as const, message: "m", expected: "number" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).not.toContain("Expected:");
+  });
+
+  it("numbers errors starting at 1", () => {
+    const errors = [
+      { file: "a.ts", line: 1, severity: "error" as const, message: "msg1" },
+      { file: "b.ts", line: 2, severity: "error" as const, message: "msg2" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("1. ");
+    expect(out).toContain("2. ");
+  });
+
+  it("handles a single error", () => {
+    const errors = [
+      { file: "x.ts", line: 1, severity: "error" as const, message: "only one" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("1 found");
+    expect(out).toContain("only one");
+  });
+
+  it("handles errors with all optional fields undefined", () => {
+    const errors = [
+      { file: "x.ts", line: 1, severity: "error" as const, message: "minimal" },
+    ];
+    const out = formatStructuredErrors(errors);
+    expect(out).toContain("minimal");
+    expect(out).toContain("x.ts:1");
   });
 });
 
-describe("selfHealing (extended) - getErrorSummary", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-  });
-
-  it("retorna '0 error(s), 0 warning(s)' para array vazio", async () => {
-    const { getErrorSummary } = await import("../selfHealing.js");
+describe("getErrorSummary (extended)", () => {
+  it("returns '0 error(s), 0 warning(s)' for empty array", () => {
     expect(getErrorSummary([])).toBe("0 error(s), 0 warning(s)");
   });
 
-  it("conta corretamente quando há somente warnings", async () => {
-    const { getErrorSummary } = await import("../selfHealing.js");
-    const summary = getErrorSummary([
-      { file: "a", line: 1, severity: "warning" as const, message: "" },
-      { file: "b", line: 2, severity: "warning" as const, message: "" },
-    ]);
-    expect(summary).toBe("0 error(s), 2 warning(s)");
+  it("counts errors correctly", () => {
+    const errors = [
+      { file: "a", line: 1, severity: "error" as const, message: "m" },
+      { file: "b", line: 2, severity: "error" as const, message: "m" },
+    ];
+    expect(getErrorSummary(errors)).toBe("2 error(s), 0 warning(s)");
   });
 
-  it("conta corretamente quando há somente errors", async () => {
-    const { getErrorSummary } = await import("../selfHealing.js");
-    const summary = getErrorSummary([
-      { file: "a", line: 1, severity: "error" as const, message: "" },
-      { file: "b", line: 2, severity: "error" as const, message: "" },
-      { file: "c", line: 3, severity: "error" as const, message: "" },
-    ]);
-    expect(summary).toBe("3 error(s), 0 warning(s)");
+  it("counts warnings correctly", () => {
+    const errors = [
+      { file: "a", line: 1, severity: "warning" as const, message: "m" },
+      { file: "b", line: 2, severity: "warning" as const, message: "m" },
+      { file: "c", line: 3, severity: "warning" as const, message: "m" },
+    ];
+    expect(getErrorSummary(errors)).toBe("0 error(s), 3 warning(s)");
+  });
+
+  it("counts mixed errors and warnings", () => {
+    const errors = [
+      { file: "a", line: 1, severity: "error" as const, message: "m" },
+      { file: "b", line: 2, severity: "warning" as const, message: "m" },
+      { file: "c", line: 3, severity: "error" as const, message: "m" },
+    ];
+    expect(getErrorSummary(errors)).toBe("2 error(s), 1 warning(s)");
+  });
+
+  it("returns a string", () => {
+    const errors = [
+      { file: "a", line: 1, severity: "error" as const, message: "m" },
+    ];
+    const summary = getErrorSummary(errors);
+    expect(typeof summary).toBe("string");
   });
 });

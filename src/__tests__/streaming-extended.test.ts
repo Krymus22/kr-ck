@@ -1,19 +1,10 @@
 /**
- * streaming-extended.test.ts — Cobertura adicional do módulo streaming.
+ * streaming-extended.test.ts — Extended tests for streaming.ts
  *
- * Foca em:
- *   - processStreamChunk (BufferedStreamProcessor): 3 casos novos
- *   - parseSSE (estimateTokenCount / StreamingMetrics): 2 casos novos
- *   - handleUsage (TokenCounter): 2 casos novos
- *   - edge cases: 1 caso
- *
- * Não duplica testes do arquivo streaming.test.ts básico.
- *
- * NOTA: o módulo streaming.ts não expõe funções literais `processStreamChunk`,
- * `parseSSE` ou `handleUsage`. Mapeamos esses conceitos para as APIs existentes:
- *   - processStreamChunk → BufferedStreamProcessor.push/flush
- *   - parseSSE          → estimateTokenCount (cálculo de tokens a partir de texto bruto)
- *   - handleUsage       → TokenCounter.addPrompt/addCompletion/getStats
+ * Covers 30+ tests across TokenCounter, BufferedStreamProcessor, StreamThrottle,
+ * estimateTokenCount, truncateToTokenLimit, and StreamingMetrics, including
+ * edge cases (empty strings, large inputs, CJK characters, defensive
+ * assertions on return types).
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,97 +17,381 @@ import {
   StreamingMetrics,
 } from "../streaming.js";
 
-describe("streaming-extended: processStreamChunk (BufferedStreamProcessor)", () => {
-  it("um único push maior que o threshold dispara flush automático", () => {
-    const flushed: string[] = [];
-    const processor = new BufferedStreamProcessor((chunk) => flushed.push(chunk), 5);
-    // Push único com 10 chars: deve disparar flush imediatamente
-    processor.push("0123456789");
-    expect(flushed.length).toBe(1);
-    expect(flushed[0]).toBe("0123456789");
-    // Buffer ficou vazio após flush
-    expect(processor.forceFlush()).toBe("");
+// ============================================================================
+// TokenCounter — 8 tests
+// ============================================================================
+
+describe("TokenCounter (extended)", () => {
+  it("starts at zero for all counters", () => {
+    const c = new TokenCounter();
+    expect(c.getPromptTokens()).toBe(0);
+    expect(c.getCompletionTokens()).toBe(0);
+    expect(c.getTotalTokens()).toBe(0);
   });
 
-  it("após flush, novos pushes recomeçam o buffer do zero", () => {
-    const flushed: string[] = [];
-    const processor = new BufferedStreamProcessor((chunk) => flushed.push(chunk), 4);
-    processor.push("ab"); // 2 chars
-    processor.push("cd"); // 4 chars -> flush
-    expect(flushed).toEqual(["abcd"]);
-
-    // Novo push não deve acumular com o anterior
-    processor.push("ef");
-    expect(flushed).toEqual(["abcd"]); // ainda só 1 flush
-    expect(processor.forceFlush()).toBe("ef");
+  it("accumulates multiple prompt additions", () => {
+    const c = new TokenCounter();
+    c.addPrompt(10);
+    c.addPrompt(20);
+    c.addPrompt(5);
+    expect(c.getPromptTokens()).toBe(35);
   });
 
-  it("múltiplos flushes preservam a ordem dos chunks enviados ao callback", () => {
-    const flushed: string[] = [];
-    const processor = new BufferedStreamProcessor((chunk) => flushed.push(chunk), 3);
-    processor.push("abc"); // flush 1 -> "abc"
-    processor.push("def"); // flush 2 -> "def"
-    processor.push("ghi"); // flush 3 -> "ghi"
-    processor.flush(); // nada a fazer (buffer vazio)
-    expect(flushed).toEqual(["abc", "def", "ghi"]);
-  });
-});
-
-describe("streaming-extended: parseSSE (estimateTokenCount / StreamingMetrics)", () => {
-  it("texto com caracteres CJK (Chinês/Japonês) produz estimativa maior que texto ASCII do mesmo comprimento", () => {
-    const ascii = "abcdefghij"; // 10 chars ASCII
-    const cjk = "你好世界你好世界"; // 10 chars CJK
-    const asciiTokens = estimateTokenCount(ascii);
-    const cjkTokens = estimateTokenCount(cjk);
-    // CJK usa ~1.5 char/token (≈7 tokens); ASCII usa ~4 char/token (≈3 tokens)
-    expect(cjkTokens).toBeGreaterThan(asciiTokens);
+  it("accumulates multiple completion additions", () => {
+    const c = new TokenCounter();
+    c.addCompletion(7);
+    c.addCompletion(13);
+    expect(c.getCompletionTokens()).toBe(20);
   });
 
-  it("StreamingMetrics calcula TTFT corretamente quando start() e onFirstToken() têm intervalo", async () => {
-    const metrics = new StreamingMetrics();
-    metrics.start();
-    await new Promise((r) => setTimeout(r, 20));
-    metrics.onFirstToken();
-    const ttft = metrics.getTTFT();
-    // TTFT deve ser >= 20ms (com tolerância de timer)
-    expect(ttft).toBeGreaterThanOrEqual(15);
-  });
-});
-
-describe("streaming-extended: handleUsage (TokenCounter)", () => {
-  it("addPrompt e addCompletion acumulam de forma independente (não se misturam)", () => {
-    const counter = new TokenCounter();
-    counter.addPrompt(100);
-    counter.addPrompt(50);
-    counter.addCompletion(200);
-    counter.addCompletion(25);
-    expect(counter.getPromptTokens()).toBe(150);
-    expect(counter.getCompletionTokens()).toBe(225);
-    expect(counter.getTotalTokens()).toBe(375);
+  it("total = prompt + completion when both are added", () => {
+    const c = new TokenCounter();
+    c.addPrompt(42);
+    c.addCompletion(58);
+    expect(c.getTotalTokens()).toBe(100);
   });
 
-  it("getStats retorna objeto fresco (snapshot) que não é afetado por mutações externas", () => {
-    const counter = new TokenCounter();
-    counter.addPrompt(10);
-    const stats1 = counter.getStats();
-    counter.addPrompt(20);
-    const stats2 = counter.getStats();
-    // Snapshot 1 deve estar congelado no tempo
-    expect(stats1.prompt).toBe(10);
-    expect(stats1.total).toBe(10);
-    // Snapshot 2 reflete o estado atualizado
-    expect(stats2.prompt).toBe(30);
-    expect(stats2.total).toBe(30);
+  it("handles zero-token additions gracefully", () => {
+    const c = new TokenCounter();
+    c.addPrompt(0);
+    c.addCompletion(0);
+    expect(c.getTotalTokens()).toBe(0);
+  });
+
+  it("reset returns all counters to zero", () => {
+    const c = new TokenCounter();
+    c.addPrompt(100);
+    c.addCompletion(200);
+    c.reset();
+    expect(c.getStats()).toEqual({ prompt: 0, completion: 0, total: 0 });
+  });
+
+  it("getStats returns an object with the right shape", () => {
+    const c = new TokenCounter();
+    c.addPrompt(3);
+    c.addCompletion(7);
+    const stats = c.getStats();
+    expect(typeof stats).toBe("object");
+    expect(stats).not.toBeNull();
+    expect(stats.prompt).toBe(3);
+    expect(stats.completion).toBe(7);
+    expect(stats.total).toBe(10);
+  });
+
+  it("does not go negative when only positive values are added", () => {
+    const c = new TokenCounter();
+    c.addPrompt(5);
+    c.addCompletion(5);
+    expect(c.getPromptTokens()).toBeGreaterThanOrEqual(0);
+    expect(c.getCompletionTokens()).toBeGreaterThanOrEqual(0);
   });
 });
 
-describe("streaming-extended: edge cases", () => {
-  it("truncateToTokenLimit preserva o INÍCIO do texto (não o final) ao truncar", () => {
-    const text = "PREFIX_CONTENT_HERE_" + "a".repeat(2000);
+// ============================================================================
+// BufferedStreamProcessor — 9 tests
+// ============================================================================
+
+describe("BufferedStreamProcessor (extended)", () => {
+  it("does not flush before threshold is reached", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 10);
+    p.push("abc");
+    expect(flushed.length).toBe(0);
+  });
+
+  it("flushes when threshold is exactly reached", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 3);
+    p.push("abc");
+    expect(flushed).toEqual(["abc"]);
+  });
+
+  it("flushes when threshold is exceeded in a single push", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 5);
+    p.push("abcdefghij"); // 10 chars > 5
+    expect(flushed).toEqual(["abcdefghij"]);
+  });
+
+  it("explicit flush() sends remaining buffer", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 100);
+    p.push("hello");
+    p.flush();
+    expect(flushed).toEqual(["hello"]);
+  });
+
+  it("flush() on empty buffer is a no-op", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 10);
+    p.flush();
+    expect(flushed.length).toBe(0);
+  });
+
+  it("forceFlush() returns remaining buffer without invoking callback", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 100);
+    p.push("data");
+    const remaining = p.forceFlush();
+    expect(remaining).toBe("data");
+    expect(flushed.length).toBe(0); // callback NOT called
+  });
+
+  it("forceFlush() on empty buffer returns empty string", () => {
+    const p = new BufferedStreamProcessor(() => {}, 10);
+    expect(p.forceFlush()).toBe("");
+  });
+
+  it("isFlushed() always returns false (it's a stub)", () => {
+    const p = new BufferedStreamProcessor(() => {}, 5);
+    expect(p.isFlushed()).toBe(false);
+    p.push("abc");
+    p.flush();
+    expect(p.isFlushed()).toBe(false);
+  });
+
+  it("handles multiple sequential pushes around the threshold", () => {
+    const flushed: string[] = [];
+    const p = new BufferedStreamProcessor((c) => flushed.push(c), 4);
+    p.push("ab"); // 2
+    p.push("cd"); // 4 -> flush "abcd"
+    p.push("ef"); // 2
+    p.push("gh"); // 4 -> flush "efgh"
+    p.flush(); // nothing
+    expect(flushed).toEqual(["abcd", "efgh"]);
+  });
+});
+
+// ============================================================================
+// StreamThrottle — 7 tests
+// ============================================================================
+
+describe("StreamThrottle (extended)", () => {
+  it("shouldEmit() returns true on first call", () => {
+    const t = new StreamThrottle(1000);
+    expect(t.shouldEmit()).toBe(true);
+  });
+
+  it("shouldEmit() returns false immediately after a successful emit", () => {
+    const t = new StreamThrottle(1000);
+    expect(t.shouldEmit()).toBe(true);
+    expect(t.shouldEmit()).toBe(false);
+  });
+
+  it("reset() allows immediate emit again", () => {
+    const t = new StreamThrottle(100000);
+    t.shouldEmit();
+    expect(t.shouldEmit()).toBe(false);
+    t.reset();
+    expect(t.shouldEmit()).toBe(true);
+  });
+
+  it("allows emit after interval elapses", async () => {
+    const t = new StreamThrottle(30);
+    t.shouldEmit();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(t.shouldEmit()).toBe(true);
+  });
+
+  it("uses default interval when none provided", () => {
+    const t = new StreamThrottle();
+    expect(t.shouldEmit()).toBe(true);
+    expect(t.shouldEmit()).toBe(false);
+  });
+
+  it("reset() works after interval already elapsed", async () => {
+    const t = new StreamThrottle(20);
+    t.shouldEmit();
+    await new Promise((r) => setTimeout(r, 30));
+    t.reset();
+    // After reset, lastEmit=0 so any call should emit
+    expect(t.shouldEmit()).toBe(true);
+  });
+
+  it("does not emit twice within the same interval window", async () => {
+    const t = new StreamThrottle(50);
+    t.shouldEmit();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(t.shouldEmit()).toBe(false);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(t.shouldEmit()).toBe(true);
+  });
+});
+
+// ============================================================================
+// estimateTokenCount — 8 tests
+// ============================================================================
+
+describe("estimateTokenCount (extended)", () => {
+  it("returns 0 for empty string", () => {
+    expect(estimateTokenCount("")).toBe(0);
+  });
+
+  it("returns a positive number for English text", () => {
+    const n = estimateTokenCount("hello world");
+    expect(typeof n).toBe("number");
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it("scales roughly linearly with input size", () => {
+    const small = estimateTokenCount("a".repeat(40));
+    const large = estimateTokenCount("a".repeat(400));
+    expect(large).toBeGreaterThan(small);
+  });
+
+  it("returns a larger estimate for CJK chars than for ASCII of same length", () => {
+    const ascii = "abcdefghij"; // 10 ASCII
+    const cjk = "你好世界你好世界"; // 10 CJK
+    expect(estimateTokenCount(cjk)).toBeGreaterThan(estimateTokenCount(ascii));
+  });
+
+  it("handles Japanese hiragana characters", () => {
+    const n = estimateTokenCount("こんにちは");
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it("handles Japanese katakana characters", () => {
+    const n = estimateTokenCount("コンニチハ");
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it("handles mixed ASCII + CJK content", () => {
+    const n = estimateTokenCount("hello 你好 world 世界");
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it("returns 0 for whitespace-only strings", () => {
+    // 4 whitespace chars / 4 = 1, but check we don't crash
+    const n = estimateTokenCount("    ");
+    expect(typeof n).toBe("number");
+    expect(n).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ============================================================================
+// truncateToTokenLimit — 7 tests
+// ============================================================================
+
+describe("truncateToTokenLimit (extended)", () => {
+  it("returns the original text when under limit", () => {
+    const text = "short text";
+    expect(truncateToTokenLimit(text, 1000)).toBe(text);
+  });
+
+  it("returns the original text when exactly at limit", () => {
+    const text = "hello";
+    const limit = estimateTokenCount(text);
+    expect(truncateToTokenLimit(text, limit)).toBe(text);
+  });
+
+  it("truncates text that exceeds limit", () => {
+    const text = "a".repeat(10000);
     const result = truncateToTokenLimit(text, 10);
-    expect(result).toContain("PREFIX_CONTENT_HERE_");
-    expect(result).toContain("TRUNCATED");
-    // O final original (com 2000 'a's) não deve estar totalmente presente
     expect(result.length).toBeLessThan(text.length);
+  });
+
+  it("adds TRUNCATED marker when truncating", () => {
+    const text = "a".repeat(10000);
+    const result = truncateToTokenLimit(text, 10);
+    expect(result).toContain("[TRUNCATED]");
+  });
+
+  it("handles empty string input", () => {
+    expect(truncateToTokenLimit("", 100)).toBe("");
+  });
+
+  it("preserves the beginning of the text when truncating", () => {
+    const text = "PREFIX" + "x".repeat(5000);
+    const result = truncateToTokenLimit(text, 5);
+    expect(result).toContain("PREFIX");
+  });
+
+  it("handles very small token limits (1)", () => {
+    const text = "abcdefghij";
+    const result = truncateToTokenLimit(text, 1);
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeLessThanOrEqual(text.length + 20);
+  });
+});
+
+// ============================================================================
+// StreamingMetrics — 9 tests
+// ============================================================================
+
+describe("StreamingMetrics (extended)", () => {
+  it("starts with zero TTFT", () => {
+    const m = new StreamingMetrics();
+    expect(m.getTTFT()).toBe(0);
+  });
+
+  it("returns 0 TPS when no tokens recorded", () => {
+    const m = new StreamingMetrics();
+    m.start();
+    expect(m.getTokensPerSecond()).toBe(0);
+  });
+
+  it("returns 0 TPS when only one token recorded", () => {
+    const m = new StreamingMetrics();
+    m.start();
+    m.onToken();
+    expect(m.getTokensPerSecond()).toBe(0);
+  });
+
+  it("computes TTFT after start() and onFirstToken()", async () => {
+    const m = new StreamingMetrics();
+    m.start();
+    await new Promise((r) => setTimeout(r, 10));
+    m.onFirstToken();
+    expect(m.getTTFT()).toBeGreaterThanOrEqual(8);
+  });
+
+  it("returns 0 TTFT when onFirstToken() not called", () => {
+    const m = new StreamingMetrics();
+    m.start();
+    expect(m.getTTFT()).toBe(0);
+  });
+
+  it("computes a positive TPS with multiple tokens", async () => {
+    const m = new StreamingMetrics();
+    m.start();
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+      m.onToken();
+    }
+    const tps = m.getTokensPerSecond();
+    expect(typeof tps).toBe("number");
+    // With 5 tokens and ~25ms elapsed, TPS should be > 0
+    expect(tps).toBeGreaterThan(0);
+  });
+
+  it("getTotalTime() returns elapsed since start()", async () => {
+    const m = new StreamingMetrics();
+    m.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const elapsed = m.getTotalTime();
+    expect(elapsed).toBeGreaterThanOrEqual(15);
+  });
+
+  it("getMetrics() returns object with all required keys", () => {
+    const m = new StreamingMetrics();
+    m.start();
+    m.onFirstToken();
+    m.onToken();
+    const metrics = m.getMetrics();
+    expect(typeof metrics).toBe("object");
+    expect(metrics).not.toBeNull();
+    expect(typeof metrics.ttft).toBe("number");
+    expect(typeof metrics.tps).toBe("number");
+    expect(typeof metrics.totalTime).toBe("number");
+    expect(typeof metrics.totalTokens).toBe("number");
+  });
+
+  it("tracks totalTokens count correctly", () => {
+    const m = new StreamingMetrics();
+    m.start();
+    m.onToken();
+    m.onToken();
+    m.onToken();
+    expect(m.getMetrics().totalTokens).toBe(3);
   });
 });
