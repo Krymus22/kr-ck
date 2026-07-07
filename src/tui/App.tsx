@@ -18,6 +18,7 @@ import os from "node:os";
 import { runAgentLoop } from "../agent.js";
 import * as history from "../history.js";
 import * as todo from "../todo.js";
+import { clearReadPaths } from "../readBeforeWrite.js";
 
 import { config } from "../config.js";
 import { shutdownMCPServers, getActiveSkills, getActiveMCPServers } from "../extensions.js";
@@ -92,6 +93,10 @@ function handleHelpCommand(): CommandResult {
 
 function handleResetCommand(): CommandResult {
   history.resetHistory();
+  // BUG FIX (BS-18): clear readBeforeWrite state too — otherwise the safety
+  // gate is bypassed by stale paths from the previous session, allowing the
+  // IA to edit files it hasn't read in the NEW session.
+  clearReadPaths();
   return { handled: true, message: "History reset." };
 }
 
@@ -159,6 +164,9 @@ function handleSessionCommand(arg: string | null): CommandResult {
   // /session new — start a new empty session
   if (subcommand === "new") {
     history.resetHistory();
+    // BUG FIX (BS-18): clear readBeforeWrite state — new session means
+    // the IA hasn't read any files yet in this context.
+    clearReadPaths();
     startSession();
     return { handled: true, resetChat: true, message: "[OK] New session started. Previous session is saved on disk." };
   }
@@ -176,10 +184,23 @@ function handleSessionCommand(arg: string | null): CommandResult {
     setActiveSession(id);
     // Reset history and load directly (no re-persisting to session file).
     history.resetHistory();
+    // BUG FIX (BS-18): clear readBeforeWrite state — the loaded session's
+    // files may differ from the current read-paths set. The IA must re-read
+    // files before editing in the loaded context.
+    clearReadPaths();
     if (loaded.lastSnapshot && loaded.lastSnapshot.messages.length > 0) {
-      // Compaction happened — restore the exact compacted state (guaranteed
-      // to fit in context because it was the IA's context at last compaction).
-      history.loadHistoryDirect(loaded.lastSnapshot.messages as any);
+      // BUG FIX (BS-3): merge snapshot + postSnapshotMessages.
+      // Previously: only loaded the snapshot, losing messages that arrived
+      // AFTER compaction (including the user's last question). The IA would
+      // respond to a question it couldn't see in context.
+      // Now: snapshot (compacted state) + postSnapshotMessages (recent msgs).
+      // This is guaranteed to fit because: snapshot was the IA's context
+      // (fits), and postSnapshotMessages are new msgs added since (small).
+      const merged = [
+        ...loaded.lastSnapshot.messages,
+        ...loaded.postSnapshotMessages,
+      ];
+      history.loadHistoryDirect(merged as any);
     } else {
       // No compaction — full message list IS what the IA had at shutdown.
       history.loadHistoryDirect(loaded.messages as any);
@@ -985,6 +1006,8 @@ function handleModeCommand(arg: string | null): CommandResult {
   if (contextAction === "new") {
     // Clear chat history (same as /reset)
     history.resetHistory();
+    // BUG FIX (BS-18): clear readBeforeWrite state on context reset too.
+    clearReadPaths();
     return {
       handled: true,
       resetChat: true,
@@ -1290,14 +1313,20 @@ export function App() {
           // Set active session FIRST — prevents appendMessage from
           // auto-creating a new session file (double-write bug fix).
           setActiveSession(last.id);
+          // BUG FIX (BS-18): clear readBeforeWrite state on auto-load too.
+          clearReadPaths();
 
           // ── IA context: use snapshot if available, else full messages ──
           if (loaded.lastSnapshot && loaded.lastSnapshot.messages.length > 0) {
-            // Compaction happened during the session — restore the EXACT
-            // compacted state (summary + recent messages). This is
-            // guaranteed to fit because it was the IA's context at the
-            // last compaction.
-            history.loadHistoryDirect(loaded.lastSnapshot.messages as any);
+            // BUG FIX (BS-3): merge snapshot + postSnapshotMessages.
+            // Previously: only loaded the snapshot, losing messages that
+            // arrived AFTER compaction (including the user's last question).
+            // Now: snapshot (compacted state) + postSnapshotMessages (recent).
+            const merged = [
+              ...loaded.lastSnapshot.messages,
+              ...loaded.postSnapshotMessages,
+            ];
+            history.loadHistoryDirect(merged as any);
           } else {
             // No compaction happened — the full message list IS what the
             // IA had at shutdown. Load directly (no re-persisting).

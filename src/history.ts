@@ -454,6 +454,14 @@ export function addToolResult(toolCallId: string, content: string): void {
  *
  * @param messages  The messages to set as the current history. Should include
  *                  the system prompt at index 0.
+ *
+ * BUG FIX (BS-4): Detects and repairs "orphan tool_calls" — when the session
+ * file has an assistant message with `tool_calls` but NO matching `tool`
+ * role message (happens when terminal closed mid-tool-call). The OpenAI API
+ * rejects this with 400, permanently breaking the session. Now we inject a
+ * synthetic tool result `[ERROR] Session interrupted — tool did not complete`
+ * for each orphan tool_call_id, so the API accepts the history and the IA
+ * can recover gracefully.
  */
 export function loadHistoryDirect(messages: Message[]): void {
   // Replace history entirely — no ensureHistoryInitialized (messages already
@@ -464,6 +472,48 @@ export function loadHistoryDirect(messages: Message[]): void {
     // If no system prompt, prepend one (defensive — shouldn't happen normally)
     history = [{ role: "system", content: getSystemPrompt() }, ...messages];
   }
+
+  // ── Repair orphan tool_calls (BS-4) ─────────────────────────────────────
+  // Collect all tool_call_ids from assistant messages, and all tool_call_ids
+  // that have matching tool results. Any assistant tool_call_id WITHOUT a
+  // matching tool result is an "orphan" — inject a synthetic error result.
+  const toolCallIds = new Set<string>();
+  const toolResultIds = new Set<string>();
+  for (const m of history) {
+    if (m.role === "assistant" && Array.isArray((m as any).tool_calls)) {
+      for (const tc of (m as any).tool_calls) {
+        if (tc?.id) toolCallIds.add(tc.id);
+      }
+    }
+    if (m.role === "tool" && typeof (m as any).tool_call_id === "string") {
+      toolResultIds.add((m as any).tool_call_id);
+    }
+  }
+
+  // Find orphans: tool_call_ids without matching tool results.
+  const orphans = [...toolCallIds].filter((id) => !toolResultIds.has(id));
+  if (orphans.length > 0) {
+    // Inject synthetic tool results for each orphan, placed right after the
+    // last assistant message that contains that tool_call_id. We insert them
+    // immediately after the assistant message to maintain chronological order.
+    for (const orphanId of orphans) {
+      // Find the assistant message that has this tool_call_id
+      const assistantIdx = history.findIndex(
+        (m) => m.role === "assistant" && Array.isArray((m as any).tool_calls) &&
+          (m as any).tool_calls.some((tc: any) => tc?.id === orphanId)
+      );
+      if (assistantIdx >= 0) {
+        // Insert synthetic tool result right after the assistant message
+        history.splice(assistantIdx + 1, 0, {
+          role: "tool",
+          tool_call_id: orphanId,
+          content: "[ERROR] Session interrupted — tool did not complete. The terminal was closed mid-tool-call. Please retry or check the current state.",
+        } as Message);
+      }
+    }
+    console.warn(`[SESSION] Repaired ${orphans.length} orphan tool_call(s) with synthetic error results (BS-4 fix)`);
+  }
+
   // NOTE: intentionally does NOT call tryAppendToSession — these messages
   // are being LOADED from the session file, not newly created.
 }

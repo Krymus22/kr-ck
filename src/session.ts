@@ -179,6 +179,11 @@ export function getLastSession(cwd?: string): { id: string; path: string } | nul
  * Result of loading a session: separates regular messages (for visual
  * display — the full conversation history) from compaction snapshots
  * (for IA context — the exact compacted state at the last compaction).
+ *
+ * BUG FIX (BS-3): added `postSnapshotMessages` — messages that arrived
+ * AFTER the last compaction snapshot. These must be appended to the
+ * snapshot when restoring the IA's context, otherwise the IA "forgets"
+ * recent messages (including the user's last question).
  */
 export interface LoadedSession {
   /** All regular messages (user/assistant/tool/system) — for VISUAL display. */
@@ -190,6 +195,16 @@ export interface LoadedSession {
    * fit in the context window because it was the context the IA had.
    */
   lastSnapshot: { messages: unknown[]; method: string; ts: number } | null;
+  /**
+   * Messages that arrived AFTER the last compaction snapshot.
+   * These are NOT in the snapshot (the snapshot was taken before them).
+   * They MUST be appended to the snapshot when restoring IA context,
+   * otherwise the IA forgets the user's most recent messages.
+   *
+   * If lastSnapshot is null (no compaction happened), this is the same
+   * as `messages` (all messages are "post-snapshot" in that case).
+   */
+  postSnapshotMessages: unknown[];
 }
 
 /**
@@ -222,7 +237,7 @@ export function loadSessionMessages(sessionId: string, cwd?: string): LoadedSess
       if (fs.existsSync(oldPath)) {
         try {
           const data = JSON.parse(fs.readFileSync(oldPath, "utf8"));
-          return { messages: data.messages ?? [], lastSnapshot: null };
+          return { messages: data.messages ?? [], lastSnapshot: null, postSnapshotMessages: data.messages ?? [] };
         } catch {
           return null;
         }
@@ -235,6 +250,10 @@ export function loadSessionMessages(sessionId: string, cwd?: string): LoadedSess
     const lines = fs.readFileSync(filePath, "utf8").split("\n").filter(Boolean);
     const messages: unknown[] = [];
     let lastSnapshot: LoadedSession["lastSnapshot"] = null;
+    // BUG FIX (BS-3): track messages that arrive AFTER the last snapshot.
+    // These must be appended to the snapshot when restoring IA context.
+    let postSnapshotMessages: unknown[] = [];
+    let snapshotSeen = false;
 
     for (const line of lines) {
       try {
@@ -249,15 +268,29 @@ export function loadSessionMessages(sessionId: string, cwd?: string): LoadedSess
             method: parsed.method ?? "unknown",
             ts: parsed.ts ?? 0,
           };
+          // Reset post-snapshot tracking: only messages AFTER the LAST
+          // snapshot matter (older post-snapshot messages are already
+          // captured inside this snapshot's predecessor, which was
+          // superseded when this snapshot was written).
+          snapshotSeen = true;
+          postSnapshotMessages = [];
           continue; // don't add to regular messages
         }
 
         messages.push(parsed);
+        // If we've seen a snapshot, this message came after it.
+        if (snapshotSeen) {
+          postSnapshotMessages.push(parsed);
+        }
       } catch {
         // skip malformed lines
       }
     }
-    return { messages, lastSnapshot };
+    // If no snapshot was seen, all messages are "post-snapshot" (no compaction).
+    if (!snapshotSeen) {
+      postSnapshotMessages = messages;
+    }
+    return { messages, lastSnapshot, postSnapshotMessages };
   } catch {
     return null;
   }
