@@ -432,39 +432,14 @@ export function addRawAssistantMessage(
 }
 
 /** Append a tool result message (role: "tool"). */
-/**
- * Maximum length of a tool result stored in history (chars).
- * Results longer than this are truncated with a note telling the IA
- * it can re-read the file if needed.
- *
- * This matches Claude Code's approach: tool results are kept in context
- * but capped to prevent context bloat. The IA can always re-call
- * ler_arquivo() to get the full content again.
- *
- * Default: 8000 chars (~2000 tokens). Configurable via MAX_TOOL_RESULT_CHARS.
- */
-const MAX_TOOL_RESULT_CHARS = (() => {
-  const env = process.env.MAX_TOOL_RESULT_CHARS;
-  const parsed = env ? Number.parseInt(env, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8000;
-})();
-
 export function addToolResult(toolCallId: string, content: string): void {
   ensureHistoryInitialized();
-  // Truncate tool results that are too large for context.
-  // The full content is still persisted to the session file (for reload).
-  let storedContent = content;
-  if (content.length > MAX_TOOL_RESULT_CHARS) {
-    storedContent = content.slice(0, MAX_TOOL_RESULT_CHARS) +
-      `\n\n[... TRUNCATED: ${content.length - MAX_TOOL_RESULT_CHARS} chars omitidos. ` +
-      `Use ler_arquivo(path) para re-ler o conteúdo completo se precisar.]`;
-  }
   history.push({
     role: "tool",
     tool_call_id: toolCallId,
-    content: storedContent,
+    content,
   } as Message);
-  // Auto-persist: append FULL content to session file (not truncated)
+  // Auto-persist: append to session file immediately
   tryAppendToSession({ role: "tool", tool_call_id: toolCallId, content });
 }
 
