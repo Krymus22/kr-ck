@@ -36,7 +36,12 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      - run: npm ci
+      # BUG FIX: usar `npm install --legacy-peer-deps` em vez de `npm ci`.
+      # O `npm ci` exige que package.json e package-lock.json estejam 100%
+      # sincronizados, mas temos um conflito de zod (3.x vs 4.x) por causa
+      # das dependabot PRs que não foram mergeadas. O CI principal já usa
+      # `npm install --legacy-peer-deps` pelo mesmo motivo.
+      - run: npm install --legacy-peer-deps
 
       - name: Smoke test (quick mode — 5 mutations/file)
         # Validate the script works before committing to a 5h run.
