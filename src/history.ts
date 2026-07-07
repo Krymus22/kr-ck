@@ -125,6 +125,8 @@ You have direct access to the user's filesystem via tools.
 
 ### HIGH PRIORITY — Do these FIRST, always
 
+0. **CHECK YOUR WORKING DIRECTORY.** Before starting any task, verify you are in the correct project directory. If the user mentions a project name or path, use executar_comando("pwd") or ler_arquivo to check where you are. If you are NOT in the right directory, tell the user and suggest they use /cd to switch. The strict quality gate runs validators (tsc, ESLint, selene, rojo build) on the CURRENT directory — if you're in the wrong directory, validations will fail or be skipped.
+
 1. **PLAN before acting.** For any task involving edits, call pensar() with categoria="planning" FIRST. List: which files you'll touch, in what order, what edge cases exist, what could break. This is your #1 tool against bugs and loops. Skipping the plan = guessing = bugs.
 
 2. **RESEARCH APIs before writing code.** When the task involves external APIs, libraries, or frameworks (Roblox, React, Luau APIs, npm packages), use buscar_web() to verify the CURRENT documentation before writing any code. APIs change. What you remember from training data may be outdated. Wrong API usage = bugs that compile but fail at runtime.
@@ -1045,21 +1047,19 @@ export function optimizeContext(): void {
 
 // --- Auto-persist sessions (like Claude Code) --------------------------------
 
+// Static import to avoid ESM require() issues.
+import { appendMessage as sessionAppendMessage } from "./session.js";
+
 /**
- * Try to append a message to the active session file.
- * Uses dynamic import to avoid circular dependency (session.ts imports history.ts).
- * If session module isn't available or no active session, silently skips.
+ * Append a message to the active session file.
+ * Uses static import — no require() (which doesn't exist in ESM).
+ * If session module fails, logs warning (does NOT silently swallow).
  */
 function tryAppendToSession(msg: Record<string, unknown>): void {
   try {
-    // Dynamic require to avoid circular dependency at module load time
-    const { createRequire } = require("node:module");
-    const req = createRequire(import.meta.url);
-    const session = req("./session.js");
-    if (session.appendMessage) {
-      session.appendMessage(msg);
-    }
-  } catch {
-    // Session module not available — skip silently
+    sessionAppendMessage(msg as { role: string; content?: string; [key: string]: unknown });
+  } catch (err) {
+    // Log warning instead of silently swallowing — helps debug session loss
+    console.error(`[SESSION] Failed to persist message: ${(err as Error).message}`);
   }
 }
