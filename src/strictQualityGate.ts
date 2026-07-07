@@ -82,18 +82,24 @@ export function getGateState(): { consecutiveBlocks: number; totalBlocks: number
 // --- Helpers -----------------------------------------------------------------
 
 /**
- * Find the project root by walking up from cwd looking for package.json.
- * Falls back to cwd if none is found.
+ * Find the project root by looking for package.json or default.project.json
+ * in the CURRENT directory only (not walking up — that would find the
+ * claude-killer's own package.json when working on Roblox projects).
+ *
+ * If neither exists, returns cwd (Roblox/Luau project without package.json).
+ * This prevents the strict gate from running tsc/ESLint on the claude-killer
+ * framework itself when the user is working on a different project.
  */
 function findProjectRoot(): string {
-  let dir = process.cwd();
-  for (let i = 0; i < 15; i++) {
-    if (fs.existsSync(path.join(dir, "package.json"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return process.cwd();
+  const cwd = process.cwd();
+  // If cwd has package.json → TypeScript/Node project
+  if (fs.existsSync(path.join(cwd, "package.json"))) return cwd;
+  // If cwd has default.project.json → Roblox/Rojo project (NOT TypeScript)
+  if (fs.existsSync(path.join(cwd, "default.project.json"))) return cwd;
+  // If cwd has tsconfig.json → TypeScript project without package.json
+  if (fs.existsSync(path.join(cwd, "tsconfig.json"))) return cwd;
+  // Fallback: return cwd (could be any project type)
+  return cwd;
 }
 
 /**
