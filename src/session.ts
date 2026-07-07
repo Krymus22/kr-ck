@@ -134,23 +134,34 @@ export function getLastSession(cwd?: string): { id: string; path: string } | nul
 /**
  * Load a session from disk. Returns array of messages (excluding header).
  * Does NOT modify history — caller is responsible for that.
+ *
+ * Supports partial ID match: if exact ID not found, looks for files
+ * that START WITH the given prefix. This lets users type
+ * /session load 2026-07 instead of the full timestamp ID.
  */
 export function loadSessionMessages(sessionId: string, cwd?: string): unknown[] | null {
   const dir = getProjectSessionDir(cwd);
-  const filePath = path.join(dir, `${sessionId}.jsonl`);
+  let filePath = path.join(dir, `${sessionId}.jsonl`);
 
+  // If exact match not found, try partial match (prefix)
   if (!fs.existsSync(filePath)) {
-    // Also check old .json format
-    const oldPath = path.join(SESSIONS_BASE_DIR, `${sessionId}.json`);
-    if (fs.existsSync(oldPath)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(oldPath, "utf8"));
-        return data.messages ?? [];
-      } catch {
-        return null;
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith(".jsonl")) : [];
+    const match = files.find(f => f.startsWith(sessionId));
+    if (match) {
+      filePath = path.join(dir, match);
+    } else {
+      // Also check old .json format
+      const oldPath = path.join(SESSIONS_BASE_DIR, `${sessionId}.json`);
+      if (fs.existsSync(oldPath)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(oldPath, "utf8"));
+          return data.messages ?? [];
+        } catch {
+          return null;
+        }
       }
+      return null;
     }
-    return null;
   }
 
   try {
@@ -249,22 +260,42 @@ export function listSessions(cwd?: string): SessionMeta[] {
 }
 
 /**
- * Delete a session file.
+ * Resolve a session ID (exact or partial prefix match).
+ * Returns the full ID if found, or the input if no match.
+ */
+function resolveSessionId(sessionId: string, dir: string): string {
+  // Exact match
+  const exactPath = path.join(dir, `${sessionId}.jsonl`);
+  if (fs.existsSync(exactPath)) return sessionId;
+
+  // Partial match (prefix)
+  if (fs.existsSync(dir)) {
+    const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
+    const match = files.find(f => f.replace(".jsonl", "").startsWith(sessionId));
+    if (match) return match.replace(".jsonl", "");
+  }
+  return sessionId;
+}
+
+/**
+ * Delete a session file. Supports partial ID match.
  */
 export function deleteSession(sessionId: string, cwd?: string): boolean {
   const dir = getProjectSessionDir(cwd);
-  const filePath = path.join(dir, `${sessionId}.jsonl`);
+  const fullId = resolveSessionId(sessionId, dir);
+  const filePath = path.join(dir, `${fullId}.jsonl`);
   if (!fs.existsSync(filePath)) return false;
   fs.unlinkSync(filePath);
   return true;
 }
 
 /**
- * Rename a session by copying + deleting.
+ * Rename a session by copying + deleting. Supports partial ID match.
  */
 export function renameSession(oldId: string, newId: string, cwd?: string): boolean {
   const dir = getProjectSessionDir(cwd);
-  const oldPath = path.join(dir, `${oldId}.jsonl`);
+  const fullOldId = resolveSessionId(oldId, dir);
+  const oldPath = path.join(dir, `${fullOldId}.jsonl`);
   const newPath = path.join(dir, `${newId}.jsonl`);
 
   if (!fs.existsSync(oldPath)) return false;
