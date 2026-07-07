@@ -1,0 +1,31 @@
+name: Dependency Vulnerability Scan (OSV)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '0 1 * * *'  # Daily 01:00 UTC (22:00 BRT)
+  workflow_dispatch:
+
+jobs:
+  osv-scan:
+    name: OSV-Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google/osv-scanner-action@v1.9.0
+        with:
+          scan-args: |-
+            --recursive
+            --lockfile package-lock.json
+            ./
+      - name: Upload OSV results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osv-results
+          path: osv-results.json
+          retention-days: 30
