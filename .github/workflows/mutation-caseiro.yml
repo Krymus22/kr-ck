@@ -5,6 +5,15 @@ name: Mutation Testing (Caseiro)
 # binários externos (selene/stylua) que o Stryker não suporta.
 #
 # Roda toda noite às 22:00 BRT (01:00 UTC) e pode ser disparado manualmente.
+#
+# BUG FIX: o workflow anterior falhava porque:
+# 1. `[ -f reports/mutation/*.json ]` não funciona com glob em bash `[ -f`
+#    (espera arquivo único). Trocado por `compgen -G`.
+# 2. O script exita 1 quando há mutações sobreviventes (esperado), mas o
+#    `|| true` já trata isso. Adicionado set +e pra garantir.
+# 3. Adicionado step de "smoke test" antes do full — roda em quick mode
+#    (5 mutações/arquivo) pra validar que o script funciona. Se o quick
+#    passar, roda o full.
 
 on:
   schedule:
@@ -28,22 +37,74 @@ jobs:
           node-version: "20"
           cache: "npm"
       - run: npm ci
-      - name: Run mutation tests (full mode)
+
+      - name: Smoke test (quick mode — 5 mutations/file)
+        # Validate the script works before committing to a 5h run.
+        # If this fails, the full run would also fail — fail fast.
         run: |
-          # Full mode: all mutations per file (not just 5)
-          # Estimated: ~3150 mutations × ~6s = ~5h15m
-          # Timeout: 10h (ample margin)
-          # Exit code 1 = some mutations survived (expected — that's the point)
-          # We capture output and always succeed so artifact uploads
-          python3 scripts/mutation-test.py 2>&1 || true
-      - name: Check report exists
-        run: |
-          if [ -f reports/mutation/*.json ]; then
-            echo "Report found!"
-            cat reports/mutation/*.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Mutation Score: {d[\"mutation_score\"]}%'); print(f'Survived: {d[\"survived\"]}')"
+          set +e
+          python3 scripts/mutation-test.py --quick 2>&1 | tee smoke-test.log
+          # Smoke test should complete and produce a report.
+          # Exit code 1 = mutations survived (expected, not a failure).
+          # Exit code 0 = all killed (also fine).
+          # Any other exit code = script error (real failure).
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 1 ]; then
+            echo "Smoke test OK (exit $EXIT_CODE)"
+            exit 0
           else
-            echo "No report found — script may have timed out"
+            echo "Smoke test FAILED (exit $EXIT_CODE)"
+            exit $EXIT_CODE
           fi
+
+      - name: Run mutation tests (full mode)
+        # Full mode: all mutations per file (not just 5).
+        # Exit code 1 = some mutations survived (expected — that's the point).
+        # We capture output and always succeed so artifact uploads.
+        run: |
+          set +e
+          python3 scripts/mutation-test.py 2>&1 | tee full-run.log
+          echo "Mutation test exit code: $?"
+          exit 0
+
+      - name: Show report summary
+        if: always()
+        run: |
+          # Use compgen -G to check for glob matches (works with multiple files)
+          # BUG FIX: `[ -f reports/mutation/*.json ]` doesn't work with globs.
+          if compgen -G "reports/mutation/*.json" > /dev/null; then
+            echo "=== Report found ==="
+            # Use the latest report (or mutation-report-latest.json)
+            LATEST="reports/mutation/mutation-report-latest.json"
+            if [ -f "$LATEST" ]; then
+              echo "Reading: $LATEST"
+              python3 -c "
+          import json
+          with open('$LATEST') as f:
+              d = json.load(f)
+          print(f\"Mutation Score: {d['mutation_score']}%\")
+          print(f\"Total: {d['total_mutations']}\")
+          print(f\"Killed: {d['killed']}\")
+          print(f\"Survived: {d['survived']}\")
+          print(f\"Timed out: {d['timed_out']}\")
+          print(f\"Elapsed: {d['elapsed_seconds']}s ({d['elapsed_seconds']/60:.1f}min)\")
+          if d['survived_details']:
+              print(f\"\nSurvived mutations (top 10):\")
+              for s in d['survived_details'][:10]:
+                  print(f\"  {s['file']}:{s['line']} — {s['desc']}\")
+              if len(d['survived_details']) > 10:
+                  print(f\"  ... and {len(d['survived_details']) - 10} more\")
+          "
+            else
+              echo "Latest report not found, listing available:"
+              ls -la reports/mutation/
+            fi
+          else
+            echo "⚠️ No report found — script may have crashed before generating one"
+            echo "=== Last 50 lines of full run log ==="
+            tail -50 full-run.log 2>/dev/null || echo "(no log found)"
+          fi
+
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4
@@ -51,3 +112,13 @@ jobs:
           name: mutation-report
           path: reports/mutation/
           retention-days: 30
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-logs
+          path: |
+            smoke-test.log
+            full-run.log
+          retention-days: 7
