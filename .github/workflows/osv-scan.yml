@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: google/osv-scanner-action@v1.7.0
+      - uses: google/osv-scanner-action@v2.3.8
         with:
           scan-args: |-
             --recursive
