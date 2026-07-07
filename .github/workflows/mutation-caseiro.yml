@@ -33,7 +33,17 @@ jobs:
           # Full mode: all mutations per file (not just 5)
           # Estimated: ~3150 mutations × ~6s = ~5h15m
           # Timeout: 10h (ample margin)
-          python3 scripts/mutation-test.py || true
+          # Exit code 1 = some mutations survived (expected — that's the point)
+          # We capture output and always succeed so artifact uploads
+          python3 scripts/mutation-test.py 2>&1 || true
+      - name: Check report exists
+        run: |
+          if [ -f reports/mutation/*.json ]; then
+            echo "Report found!"
+            cat reports/mutation/*.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'Mutation Score: {d[\"mutation_score\"]}%'); print(f'Survived: {d[\"survived\"]}')"
+          else
+            echo "No report found — script may have timed out"
+          fi
       - name: Upload mutation report
         if: always()
         uses: actions/upload-artifact@v4
