@@ -13,10 +13,19 @@
     "start": "npm run build && node --no-warnings=DEP0040 dist/index.js",
     "clean": "rimraf dist",
     "lint": "eslint src/ --no-warn-ignored",
+    "lint:report": "eslint src/ --no-warn-ignored --max-warnings 9999 || true",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" --ignore-path .prettierignore",
+    "knip": "knip --reporter json || true",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "postinstall": "node scripts/postinstall-searx.cjs"
+    "postinstall": "node scripts/postinstall-searx.cjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "prettier --check --ignore-path .prettierignore"
+    ]
   },
   "keywords": [
     "cli",
@@ -53,7 +62,11 @@
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
     "fast-check": "^4.8.0",
+    "husky": "^9.1.7",
     "ink-testing-library": "^4.0.0",
+    "knip": "^6.25.0",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.4",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.0",

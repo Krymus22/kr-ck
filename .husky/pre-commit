@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+
+# Pre-commit hook: runs Prettier check and ESLint on staged files.
+# Does NOT modify files — only reports issues.
+# Does NOT block commits (continue-on-error pattern).
+
+echo "[pre-commit] Checking formatting (report only, not blocking)..."
+npx prettier --check "$(git diff --cached --name-only --diff-filter=d | grep -E '\.(ts|tsx)$' | tr '\n' ' ')" --ignore-path .prettierignore 2>/dev/null || true
+
+echo "[pre-commit] Checking lint (report only, not blocking)..."
+npx eslint $(git diff --cached --name-only --diff-filter=d | grep -E '^src/.*\.(ts|tsx)$' | tr '\n' ' ') --no-warn-ignored --max-warnings 9999 2>/dev/null || true
+
+echo "[pre-commit] Checks complete (non-blocking)."

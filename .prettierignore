@@ -1,0 +1,10 @@
+dist/
+node_modules/
+coverage/
+reports/
+.stryker-tmp/
+e2e/
+scripts/
+*.lock
+*.tsbuildinfo
+package-lock.json

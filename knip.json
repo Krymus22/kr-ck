@@ -1,0 +1,13 @@
+{
+  "entry": ["src/index.ts"],
+  "project": ["src/**/*.ts", "src/**/*.tsx"],
+  "ignore": [
+    "src/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "vitest-setup.ts",
+    "*.config.ts",
+    "*.config.js"
+  ],
+  "ignoreBinaries": ["rojo", "selene", "stylua", "lune", "wally", "rokit"]
+}

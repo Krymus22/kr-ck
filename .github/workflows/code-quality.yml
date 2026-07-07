@@ -1,0 +1,47 @@
+name: Code Quality (Knip + Prettier)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  knip:
+    name: Dead Code Detection (Knip)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Run Knip (report only, non-blocking)
+        run: npx knip --reporter standard || true
+        continue-on-error: true
+      - name: Upload Knip report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-report
+          path: knip-report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  prettier:
+    name: Formatting Check (Prettier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Check formatting (report only, non-blocking)
+        run: npx prettier --check "src/**/*.{ts,tsx}" --ignore-path .prettierignore
+        continue-on-error: true
