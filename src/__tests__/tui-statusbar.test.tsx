@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
+import React from "react";
+import { render } from "ink-testing-library";
 import { StatusBar } from "../tui/StatusBar.js";
 import { colors } from "../tui/theme.js";
+
+function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 function formatTok(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
@@ -248,6 +255,81 @@ describe("StatusBar component", () => {
         + (completionTokens / 1000) * costPerKCompletion;
       const turnCostStr = turnCost > 0 ? ` (+$${turnCost.toFixed(3)})` : "";
       expect(turnCostStr).toBe("");
+    });
+  });
+
+  // ─── Activity indicator (play/stop button) ───────────────────────────────
+
+  describe("activity indicator (play/stop button)", () => {
+    const baseProps = {
+      promptTokens: 1000,
+      completionTokens: 200,
+      totalTokens: 1200,
+      contextWindow: 256000,
+      warnThreshold: 0.6,
+      compactThreshold: 0.75,
+      costPerKPrompt: 0.01,
+      costPerKCompletion: 0.03,
+      planMode: false,
+      mcpCount: 0,
+      skillsCount: 0,
+    };
+
+    it("shows ▶ (play triangle) when idle", () => {
+      const { lastFrame } = render(
+        <StatusBar {...baseProps} activityStatus="idle" />,
+      );
+      const out = stripAnsi(lastFrame() ?? "");
+      expect(out).toContain("▶");
+      expect(out).not.toContain("■");
+    });
+
+    it("shows ■ (stop square) when thinking", () => {
+      const { lastFrame } = render(
+        <StatusBar {...baseProps} activityStatus="thinking" />,
+      );
+      const out = stripAnsi(lastFrame() ?? "");
+      expect(out).toContain("■");
+      expect(out).not.toContain("▶");
+    });
+
+    it("shows ■ (stop square) when streaming", () => {
+      const { lastFrame } = render(
+        <StatusBar {...baseProps} activityStatus="streaming" />,
+      );
+      const out = stripAnsi(lastFrame() ?? "");
+      expect(out).toContain("■");
+      expect(out).not.toContain("▶");
+    });
+
+    it("shows ■ (stop square) when compacting", () => {
+      const { lastFrame } = render(
+        <StatusBar {...baseProps} activityStatus="compacting" />,
+      );
+      const out = stripAnsi(lastFrame() ?? "");
+      expect(out).toContain("■");
+      expect(out).not.toContain("▶");
+    });
+
+    it("defaults to idle (▶) when activityStatus is not provided", () => {
+      const { lastFrame } = render(<StatusBar {...baseProps} />);
+      const out = stripAnsi(lastFrame() ?? "");
+      expect(out).toContain("▶");
+      expect(out).not.toContain("■");
+    });
+
+    it("activity icon is the leftmost element on the status line", () => {
+      // The icon should appear BEFORE the token count (formatTok/totalTokens).
+      // This ensures it's the first thing the eye catches.
+      const { lastFrame } = render(
+        <StatusBar {...baseProps} activityStatus="streaming" />,
+      );
+      const out = stripAnsi(lastFrame() ?? "");
+      const iconIdx = out.indexOf("■");
+      const tokenIdx = out.indexOf("1.2k"); // formatTok(1200) = "1.2k"
+      expect(iconIdx).toBeGreaterThanOrEqual(0);
+      expect(tokenIdx).toBeGreaterThanOrEqual(0);
+      expect(iconIdx).toBeLessThan(tokenIdx);
     });
   });
 });

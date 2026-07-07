@@ -2,7 +2,13 @@
  * StatusBar.tsx — Context window usage bar + session cost + effort level + tok/s.
  * Compact single-line format, right-aligned inside its parent container.
  *
- * Layout: [tokens] [bar] [%] [tok/s] [effort] [$sessionCost] [turnCost] [MCPs:N] [Skills:N] [PLAN]
+ * Layout: [ACTIVITY] [tokens] [bar] [%] [tok/s] [effort] [$sessionCost] [turnCost] [MCPs:N] [Skills:N] [PLAN]
+ *
+ * Activity indicator (leftmost, like a play/stop button):
+ *   - ■ (square, color = secondary) when the AI/CLI is running (thinking/
+ *     streaming/compacting) — visually analogous to a "stop" button.
+ *   - ▶ (triangle, color = success) when idle — visually analogous to a
+ *     "play" button, signaling the CLI is ready for input.
  *
  * Cost display:
  *   - $sessionCost (warning color) — CUMULATIVE across the whole session
@@ -55,6 +61,14 @@ interface StatusBarProps {
   sessionCompletionTokens?: number;
   /** Cumulative session cost in USD (all turns). */
   sessionCost?: number;
+  /**
+   * Current CLI activity state — drives the play/stop indicator.
+   * - "idle"      → ▶ (play triangle, success color) — CLI is ready for input
+   * - "thinking"  → ■ (stop square, secondary color) — IA is reasoning/tool-calling
+   * - "streaming" → ■ (stop square, secondary color) — IA is streaming tokens
+   * - "compacting"→ ■ (stop square, warning color) — context is being compacted
+   */
+  activityStatus?: "idle" | "thinking" | "streaming" | "compacting";
 }
 
 function formatTok(n: number): string {
@@ -93,6 +107,7 @@ export function StatusBar({
   sessionPromptTokens = 0,
   sessionCompletionTokens = 0,
   sessionCost = 0,
+  activityStatus = "idle",
 }: Readonly<StatusBarProps>) {
   // Bar reflects CURRENT context usage (last turn), not cumulative.
   // Cumulative would always max out the bar after a few turns.
@@ -149,8 +164,23 @@ export function StatusBar({
     ? ` ses:${formatTok(sessionPromptTokens + sessionCompletionTokens)}`
     : "";
 
+  // Activity indicator — like a media player's play/stop button.
+  // ■ when the AI/CLI is busy (thinking/streaming/compacting), ▶ when idle.
+  // Placed leftmost so it's the first thing the eye catches on the status line.
+  const isActive = activityStatus !== "idle";
+  const activityIcon = isActive ? "■" : "▶";
+  // Compacting uses warning color (yellow) to signal it's a special state;
+  // active (thinking/streaming) uses secondary (violet) to match the
+  // Claude-Killer brand color; idle uses success (green) to signal "ready".
+  const activityColor = activityStatus === "compacting"
+    ? colors.warning
+    : isActive
+      ? colors.secondary
+      : colors.success;
+
   return (
     <Box flexDirection="row" justifyContent="flex-end" width="100%">
+      <Text color={activityColor} bold>{activityIcon} </Text>
       <Text color={colors.muted}>
         {formatTok(totalTokens)}/{formatTok(contextWindow)}
       </Text>

@@ -1931,6 +1931,7 @@ export function App() {
               sessionPromptTokens={sessionPromptTokens}
               sessionCompletionTokens={sessionCompletionTokens}
               sessionCost={sessionCost}
+              activityStatus={status}
             />
           </Box>
         )}
