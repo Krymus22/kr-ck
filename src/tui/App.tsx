@@ -1152,7 +1152,8 @@ export function App() {
 
   // -- Auto-load last session on startup (like Claude Code) ------------------
   // Checks for the most recent session file for the current project directory.
-  // If found, loads it silently. If not, starts a new session.
+  // If found, loads it silently. If not, DON'T create a session yet —
+  // session is auto-created on first message (lazy init in appendMessage).
   useState(() => {
     try {
       const last = getLastSession();
@@ -1167,15 +1168,14 @@ export function App() {
           }
           setActiveSession(last.id);
           console.error(`[SESSION] Resumed: ${last.id} (${msgs.length} messages)`);
-        } else {
-          startSession();
         }
-      } else {
-        startSession();
+        // If session has 0 messages, don't load it and don't create new —
+        // lazy init will handle it on first real message.
       }
+      // Don't call startSession() here — let appendMessage create it lazily
+      // when the first real message is sent. This avoids empty session files.
     } catch {
       // Session load failure should not prevent app from starting
-      try { startSession(); } catch { /* ignore */ }
     }
     return true; // useState initializer must return something
   });

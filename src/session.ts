@@ -47,11 +47,13 @@ function ensureSessionDir(dir: string): void {
 
 /**
  * Generate a session ID: YYYY-MM-DD_HH-MM-SS_random4
+ * Uses LOCAL time (not UTC) so the ID matches the user's timezone.
  */
 function generateSessionId(): string {
   const now = new Date();
-  const date = now.toISOString().slice(0, 10);
-  const time = now.toISOString().slice(11, 19).replaceAll(":", "-");
+  // Use local time components instead of toISOString() (which is UTC)
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const time = `${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
   const rand = Math.random().toString(36).slice(2, 6);
   return `${date}_${time}_${rand}`;
 }
@@ -77,7 +79,7 @@ export function startSession(cwd?: string, customId?: string): string {
   const header = JSON.stringify({
     type: "session-header",
     id,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date().toLocaleString("sv-SE"), // local time ISO format
     cwd: cwd ?? process.cwd(),
   });
   fs.writeFileSync(filePath, header + "\n", "utf8");
