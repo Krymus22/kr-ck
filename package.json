@@ -50,7 +50,7 @@
     "ora": "^8.1.0",
     "react": "^19.2.7",
     "tree-sitter-wasms": "^0.1.13",
-    "web-tree-sitter": "^0.20.8"
+    "web-tree-sitter": "^0.26.10"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
