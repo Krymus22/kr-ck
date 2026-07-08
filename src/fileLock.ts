@@ -51,6 +51,27 @@ function isExpired(entry: LockEntry): boolean {
  * Try to acquire a lock without blocking.
  * Returns a release function if successful, null if already locked.
  *
+ * Concurrency Audit Part 2 — Race #5 (FIX):
+ * Previously, if the same `holderId` tried to acquire a lock it already
+ * held, the code treated it as a "re-entrant" nested call and returned a
+ * no-op release function. This was unsafe because `holderId` cannot
+ * distinguish a genuinely nested call (e.g., editFile calling another
+ * editFile internally — which never happens in this codebase) from two
+ * PARALLEL calls that happen to share the same `holderId`. The latter is
+ * a real scenario: parallel powerful sub-agents share
+ * `process.env.CLAUDE_KILLER_AGENT_ID` (see subAgents.ts comment at line
+ * ~300), so two sub-agents would both identify as e.g. "sub-A" and both
+ * "re-acquire" the lock, both proceed to edit the same file, and corrupt
+ * each other's writes (read V1 → compute V2 → write V2 racing with
+ * read V1 → compute V2' → write V2').
+ *
+ * Fix: same-holderId re-acquisition is no longer treated as re-entrant.
+ * It returns null (blocked), exactly like a different-holderId attempt.
+ * The caller must release its lock before re-acquiring. Production code
+ * (fileEdit.ts) acquires exactly once per editFile() call and releases
+ * in the finally — no nested acquisition. Tests that asserted the old
+ * re-entrant behavior have been updated to assert the safer behavior.
+ *
  * @param filePath - Absolute path of the file to lock
  * @param holderId - ID of the agent requesting the lock (e.g. "main", "sub-1")
  * @param ttlMs - Auto-release after this many ms (default 30s)
@@ -68,27 +89,8 @@ export function tryAcquireLock(
       // Lock is stale - take it over
       log.debug(`[FILE_LOCK] Stealing expired lock for ${filePath} (was held by ${existing.holderId})`);
     } else {
-      // Lock is active - check if same holder (re-entrant)
-      if (existing.holderId === holderId) {
-        // Same holder re-acquiring - extend TTL (never shorten) and return
-        // no-op release.
-        //
-        // BUG FIX (Bug Hunter #7): previously this did `existing.ttlMs = ttlMs`
-        // unconditionally, which meant a re-entrant call with a SHORTER TTL
-        // would silently shorten the outer lock's TTL. If the outer call
-        // expected 30s and the inner call used the default 30s but happened
-        // 25s in, the lock would expire 5s after the inner call instead of
-        // 30s after the inner call — potentially allowing another agent to
-        // steal the lock while the outer edit was still in progress.
-        //
-        // Fix: extend the TTL to max(remaining, newTtl) measured from now.
-        const nowMs = now();
-        const remainingMs = (existing.acquiredAt + existing.ttlMs) - nowMs;
-        existing.acquiredAt = nowMs;
-        existing.ttlMs = Math.max(remainingMs, ttlMs);
-        return () => { /* no-op: lock will be released by outer call */ };
-      }
-      // Different holder - reject
+      // Lock is active - reject ALL callers, even the same holderId.
+      // (See Concurrency Audit Part 2 — Race #5 in the docstring above.)
       return null;
     }
   }

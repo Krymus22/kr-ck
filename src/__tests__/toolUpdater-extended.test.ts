@@ -143,6 +143,71 @@ describe("toolUpdater (extended)", () => {
     expect(result.error).toBe("could not fetch latest");
   });
 
+  // ─── Kills L152-154 catch-block return mutation in getLatestGitHubVersion ─
+  //
+  // Mutation: removing/inverting `return null;` in the catch block of
+  // getLatestGitHubVersion. When JSON.parse throws on invalid JSON, the catch
+  // MUST return `null` so the caller reports "could not fetch latest". A
+  // mutation that drops the return would yield `undefined`, which would fail
+  // the `toBeNull()` assertion below. The previous test only exercised the
+  // `!result.ok` early-return path (curl code != 0), NOT the catch block, so
+  // the mutation survived.
+
+  it("checkToolUpdate retorna latest=null quando curl retorna JSON inválido (catch block)", async () => {
+    const { checkToolUpdate } = await import("./../toolUpdater.js");
+    mockRun.responses.set("rojo", { stdout: "7.6.1\n", stderr: "", code: 0 });
+    // curl returns code 0 but with invalid JSON → JSON.parse throws → catch
+    mockRun.responses.set("curl", { stdout: "not-valid-json{", stderr: "", code: 0 });
+    const result = await checkToolUpdate("rojo");
+    expect(result.installed).toBe("7.6.1");
+    // latest MUST be exactly null (not undefined) — this kills the mutation
+    expect(result.latest).toBeNull();
+    expect(result.error).toBe("could not fetch latest");
+  });
+
+  // ─── Direct contract test for getLatestGitHubVersion catch block ──────────
+  //
+  // checkToolUpdate masks the catch-block return mutation via defense-in-depth
+  // (`if (!latest)` treats both null and undefined as falsy, then explicitly
+  // sets `latest: null` in the error return). To kill mutations that change
+  // `return null;` to `return undefined;` or remove the return entirely, we
+  // export getLatestGitHubVersion and test its contract directly: when
+  // JSON.parse throws, the function MUST return exactly `null`.
+
+  it("getLatestGitHubVersion retorna null quando JSON.parse falha (catch block direto)", async () => {
+    const { getLatestGitHubVersion } = await import("./../toolUpdater.js");
+    mockRun.responses.set("curl", { stdout: "not-valid-json{", stderr: "", code: 0 });
+    const result = await getLatestGitHubVersion("rojo-rbx/rojo");
+    // MUST be exactly null (not undefined) — kills the catch-return mutation
+    expect(result).toBeNull();
+    expect(result).not.toBeUndefined();
+  });
+
+  it("getLatestGitHubVersion retorna null quando curl falha (code != 0)", async () => {
+    const { getLatestGitHubVersion } = await import("./../toolUpdater.js");
+    mockRun.responses.set("curl", { stdout: "", stderr: "network error", code: 1 });
+    const result = await getLatestGitHubVersion("rojo-rbx/rojo");
+    expect(result).toBeNull();
+  });
+
+  it("getLatestGitHubVersion retorna null quando tag_name está ausente", async () => {
+    const { getLatestGitHubVersion } = await import("./../toolUpdater.js");
+    mockRun.responses.set("curl", { stdout: JSON.stringify({}), stderr: "", code: 0 });
+    const result = await getLatestGitHubVersion("rojo-rbx/rojo");
+    expect(result).toBeNull();
+  });
+
+  it("getLatestGitHubVersion retorna versão (sem prefixo v) quando tag_name existe", async () => {
+    const { getLatestGitHubVersion } = await import("./../toolUpdater.js");
+    mockRun.responses.set("curl", {
+      stdout: JSON.stringify({ tag_name: "v7.6.1" }),
+      stderr: "",
+      code: 0,
+    });
+    const result = await getLatestGitHubVersion("rojo-rbx/rojo");
+    expect(result).toBe("7.6.1");
+  });
+
   // ─── performUpdateCheck ──────────────────────────────────────────────────
 
   it("performUpdateCheck retorna [] e não checa quando disabled", async () => {

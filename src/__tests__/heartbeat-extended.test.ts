@@ -182,7 +182,11 @@ describe("edge cases", () => {
     // Stats refletem falhas
     const stats = getHeartbeatStats();
     expect(stats.totalFailures).toBeGreaterThanOrEqual(5);
-    expect(stats.consecutiveFailures).toBeGreaterThanOrEqual(3);
+    // BUG FIX: após auto-stop, consecutiveFailures é resetado para 0 para que
+    // o heartbeat possa ser reiniciado limpo por uma chamada futura de
+    // startHeartbeat(). Antes do fix, o contador ficava >= 5 e a primeira
+    // falha de um restart re-triggerava auto-stop imediatamente.
+    expect(stats.consecutiveFailures).toBe(0);
     expect(stats.lastHeartbeatOk).toBe(false);
   });
 });

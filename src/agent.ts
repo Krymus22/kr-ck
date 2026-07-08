@@ -107,6 +107,7 @@ import {
   appendTaskStateItem,
   type TaskState,
 } from "./taskState.js";
+import { setAgentLoopRunningChecker } from "./readBeforeWrite.js";
 
 type ToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
 type ToolResult = { resultStr: string; usedHeal: boolean };
@@ -131,6 +132,38 @@ let bugHunterBlocksThisTurn = 0;
 let bugHunterMediumLowRounds = 0;
 /** Max stops per turn (safety) */
 const MAX_STOPS_PER_TURN = 12;
+
+/**
+ * Re-entrancy guard for runAgentLoop.
+ *
+ * RACE CONDITION (Concurrency Audit Part 2):
+ * The agent loop reads/writes a lot of module-level mutable state
+ * (sessionFileChanges, turnTouchedFiles, currentOnToolCall, etc.). If a
+ * second runAgentLoop() call starts while the first is still running
+ * (e.g. a test calling it in parallel, a future caller bypassing the
+ * TUI's isProcessing ref, or /compact firing while the previous turn's
+ * tail is still unwinding), the two turns corrupt each other's state.
+ *
+ * The TUI guards against this via `isProcessing.current` (App.tsx), but
+ * the agent itself had no defensive guard. This flag closes that hole:
+ * a second call rejects immediately with a clear error, and other
+ * modules (readBeforeWrite, stateCleanup) can read isAgentLoopRunning()
+ * to decide whether to defer destructive state clears.
+ */
+let agentLoopRunning = false;
+
+/** Returns true while a runAgentLoop() call is in progress. */
+export function isAgentLoopRunning(): boolean {
+  return agentLoopRunning;
+}
+
+// Register the agent-loop-running checker so readBeforeWrite.ts can refuse
+// to clear state mid-turn (Concurrency Audit Part 2 — Race #2/#3). Done at
+// module load via the setter (rather than a static import) to avoid a
+// circular dependency: readBeforeWrite.ts is imported by agent.ts.
+// Must run AFTER `agentLoopRunning` is declared above so the closure
+// captures an initialized binding.
+setAgentLoopRunningChecker(() => agentLoopRunning);
 
 /**
  * Tool call/result callbacks set by runAgentLoop at the start of each turn.
@@ -2082,6 +2115,23 @@ export async function runAgentLoop(
    */
   allowUserQuestions: boolean = true,
 ): Promise<string> {
+  // --- Re-entrancy guard (Concurrency Audit Part 2) --------------------------
+  // The agent loop mutates module-level state (sessionFileChanges,
+  // turnTouchedFiles, currentOnToolCall, agentLoopRunning itself, etc.).
+  // Two concurrent runAgentLoop() calls would corrupt that state. The TUI
+  // guards via `isProcessing.current`, but programmatic callers (tests,
+  // future entry points) could bypass it. Reject hard here.
+  if (agentLoopRunning) {
+    throw new Error(
+      "[AGENT_LOOP] Another runAgentLoop() is already in progress. " +
+      "Concurrent agent turns are not supported because they share module-level " +
+      "state (session traces, turn counters, tool callbacks). " +
+      "The TUI serializes turns via isProcessing.current; programmatic callers " +
+      "must do the same (await the previous turn before starting a new one)."
+    );
+  }
+  agentLoopRunning = true;
+
   startSession();
   sessionStartTime = new Date().toISOString();
   sessionFileChanges = [];
@@ -2212,6 +2262,10 @@ export async function runAgentLoop(
     currentOnToolCall = undefined;
     currentOnToolResult = undefined;
     clearAskUserCallback();
+    // Release the re-entrancy guard so the next turn can start.
+    // This MUST be in the finally so a thrown error doesn't permanently
+    // lock out future turns (which would force the user to restart the CLI).
+    agentLoopRunning = false;
   }
 
   // Save session trace

@@ -42,6 +42,46 @@ const readPaths = new Set<string>();
 // (readBeforeWrite: false) ainda bloqueava edições sem ler primeiro.
 let enabled = process.env.READ_BEFORE_WRITE === "false" ? false : true;
 
+/**
+ * Concurrency Audit Part 2 — Race #2 / #3.
+ *
+ * `readPaths` is module-level mutable state shared between the agent loop
+ * (which adds to it via recordRead/recordWrite and reads it via
+ * checkReadBeforeWrite) and slash commands like `/reset` and `/session new`
+ * (which clear it via clearReadPaths()).
+ *
+ * Race scenario:
+ *   1. Agent loop is mid-turn. It has read /tmp/foo.ts and recorded the path.
+ *   2. The IA's chat() call resolves with a tool_call to editar_arquivo.
+ *   3. dispatchToolCall calls checkReadBeforeWrite() → passes (path is in set).
+ *   4. dispatchToolCall awaits editFile (which is async).
+ *   5. While awaiting, a programmatic caller (test, future code path) calls
+ *      clearReadPaths() — wiping the Set.
+ *   6. The in-progress edit completes successfully, but any LATER tool call
+ *      in the SAME turn that touches the same file is now incorrectly blocked
+ *      ("you haven't read this file") because the readPaths set was cleared
+ *      out from under the running turn.
+ *
+ * The TUI guards against this via `isProcessing.current` (App.tsx), so the
+ * user cannot trigger /reset mid-turn. But programmatic callers can bypass
+ * that guard. To close the hole, clearReadPaths() refuses to run while the
+ * agent loop is active. The agent loop itself resets readPaths at the START
+ * of each turn (see runAgentLoop), so skipping a mid-turn clear is safe —
+ * the next turn will start with a fresh set anyway.
+ *
+ * The checker is injected via setter (rather than a static import) to avoid
+ * a circular module dependency between readBeforeWrite.ts and agent.ts.
+ */
+let agentLoopRunningChecker: (() => boolean) | null = null;
+
+/**
+ * Register a callback that returns true while the agent loop is running.
+ * Called by agent.ts at module load. This avoids a circular import.
+ */
+export function setAgentLoopRunningChecker(fn: (() => boolean) | null): void {
+  agentLoopRunningChecker = fn;
+}
+
 export function setReadBeforeWriteEnabled(on: boolean): void {
   enabled = on;
   // Sprint C: também atualizar a env var pra consistência
@@ -134,6 +174,19 @@ function checkSingleFileRead(args: Record<string, unknown>, toolName: string): {
 }
 
 export function clearReadPaths(): void {
+  // Concurrency Audit Part 2 — Race #2 / #3:
+  // Refuse to clear while the agent loop is running. The loop relies on
+  // readPaths being stable for the duration of a turn. The next turn will
+  // start with a fresh set (runAgentLoop resets it), so skipping a mid-turn
+  // clear does NOT leak stale state across turns.
+  if (agentLoopRunningChecker?.()) {
+    log.warn(
+      "[READ-BEFORE-WRITE] clearReadPaths() skipped — agent loop is running. " +
+      "Clearing readPaths mid-turn would cause later write tools in the SAME turn " +
+      "to be incorrectly blocked. The next turn will start with a fresh readPaths set."
+    );
+    return;
+  }
   readPaths.clear();
 }
 

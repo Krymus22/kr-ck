@@ -64,21 +64,29 @@ describe("tryAcquireLock (extended)", () => {
     expect(release).toBeNull();
   });
 
-  it("allows same holder to re-acquire (re-entrant)", () => {
+  it("BLOCKS same holder from re-acquiring while lock is held (Concurrency Audit Part 2 — Race #5)", () => {
+    // FIX: previously this test asserted "re-entrant" behavior where the
+    // same holderId could re-acquire its own lock and get a no-op release.
+    // That was unsafe (see fileLock.ts docstring for Race #5). Parallel
+    // sub-agents sharing process.env.CLAUDE_KILLER_AGENT_ID would bypass
+    // each other's locks. Now same-holderId re-acquire returns null.
     const r1 = tryAcquireLock("/test/file3.luau", "main");
     const r2 = tryAcquireLock("/test/file3.luau", "main");
     expect(r1).not.toBeNull();
-    expect(r2).not.toBeNull();
+    expect(r2).toBeNull(); // blocked — same holderId cannot re-acquire
+    r1!();
   });
 
-  it("re-entrant acquire returns a no-op release function", () => {
+  it("same holder can re-acquire only AFTER releasing (no re-entrant shortcut)", () => {
     const r1 = tryAcquireLock("/test/file4.luau", "main");
-    const r2 = tryAcquireLock("/test/file4.luau", "main");
-    // Calling r2 (the no-op) should not release the lock
-    r2!();
-    const holder = getLockHolder("/test/file4.luau");
-    expect(holder).not.toBeNull();
+    expect(r1).not.toBeNull();
+    // While held: blocked
+    expect(tryAcquireLock("/test/file4.luau", "main")).toBeNull();
+    // After release: can re-acquire
     r1!();
+    const r2 = tryAcquireLock("/test/file4.luau", "main");
+    expect(r2).not.toBeNull();
+    r2!();
   });
 
   it("calling the release function makes the lock available", () => {
@@ -457,11 +465,16 @@ describe("fileLock edge cases (extended)", () => {
     r!();
   });
 
-  it("release function from re-entrant acquire does not release the lock", () => {
+  it("release function from same-holderId re-acquire attempt is null (no no-op release to call)", () => {
+    // Concurrency Audit Part 2 — Race #5:
+    // Previously, a same-holderId re-acquire returned a no-op release
+    // function. Now it returns null (blocked), so there's nothing to call.
+    // The original holder's release function (r1) is the only one that
+    // can free the lock.
     const r1 = tryAcquireLock("/test/reentrant.luau", "main");
     const r2 = tryAcquireLock("/test/reentrant.luau", "main");
-    // r2 should be a no-op release
-    r2!();
+    expect(r2).toBeNull(); // blocked — no no-op release to call
+    // Lock still held by r1
     expect(getLockHolder("/test/reentrant.luau")).not.toBeNull();
     r1!();
     expect(getLockHolder("/test/reentrant.luau")).toBeNull();

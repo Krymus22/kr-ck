@@ -350,6 +350,39 @@ describe("bugHunter: snapshotFileBeforeEdit / generateDiffAfterEdit", () => {
       expect(diff).toContain(path.basename(tmpFile));
     }
   });
+
+  // ─── Diff direction markers (kills L137/L138 marker-swap mutation) ───────
+  //
+  // Mutation: swapping the `-`/`+` markers on L137/L138 of bugHunter.ts.
+  // The current code is correct (`-` for removed lines, `+` for added lines),
+  // but no existing test asserted the DIRECTION of the markers — only that
+  // the diff was non-empty. These tests pin the contract: a removed line
+  // produces a `-` marker (and NOT a `+` marker), and an added line produces
+  // a `+` marker (and NOT a `-` marker).
+
+  it("generateDiffAfterEdit marca linha REMOVIDA com '-' (não '+')", () => {
+    // before has 3 lines, after has 2 → line 3 was removed
+    fs.writeFileSync(tmpFile, "line1\nline2\nline3\n");
+    snapshotFileBeforeEdit(tmpFile);
+    fs.writeFileSync(tmpFile, "line1\nline2\n");
+    const diff = generateDiffAfterEdit(tmpFile);
+    expect(diff).toContain("- L3:");
+    expect(diff).toContain("line3");
+    // A purely-removed line must NOT produce a `+` marker for that line
+    expect(diff).not.toContain("+ L3:");
+  });
+
+  it("generateDiffAfterEdit marca linha ADICIONADA com '+' (não '-')", () => {
+    // before has 2 lines, after has 3 → line 3 was added
+    fs.writeFileSync(tmpFile, "line1\nline2\n");
+    snapshotFileBeforeEdit(tmpFile);
+    fs.writeFileSync(tmpFile, "line1\nline2\nline3\n");
+    const diff = generateDiffAfterEdit(tmpFile);
+    expect(diff).toContain("+ L3:");
+    expect(diff).toContain("line3");
+    // A purely-added line must NOT produce a `-` marker for that line
+    expect(diff).not.toContain("- L3:");
+  });
 });
 
 // ─── runProjectVerification (spawn detached) ──────────────────────────────

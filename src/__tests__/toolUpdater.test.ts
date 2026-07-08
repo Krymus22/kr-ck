@@ -77,8 +77,39 @@ describe("toolUpdater", () => {
       expect(shouldCheckNow()).toBe(true);
     });
 
+    // ─── Kills L31 return-inversion mutation ───────────────────────────────
+    //
+    // Mutation: inverting `return true;` → `return false;` on L31 of
+    // toolUpdater.ts (the envBool "true"/"1" branch). The existing
+    // "should check if TOOL_UPDATER_ENABLED=true (default)" test only DELETES
+    // the env var, which exercises the fallback branch (`return fallback`),
+    // NOT the `return true;` branch. So a mutation that returns `false` for
+    // explicit "true"/"1" survived. These tests pin the contract: explicit
+    // "true"/"1" MUST yield enabled=true → shouldCheckNow()=true.
+
+    it("should check when TOOL_UPDATER_ENABLED is explicitly 'true' (envBool true-branch)", async () => {
+      process.env.TOOL_UPDATER_ENABLED = "true";
+      const { shouldCheckNow } = await import("./../toolUpdater.js");
+      expect(shouldCheckNow()).toBe(true);
+      delete process.env.TOOL_UPDATER_ENABLED;
+    });
+
+    it("should check when TOOL_UPDATER_ENABLED is explicitly '1' (envBool true-branch)", async () => {
+      process.env.TOOL_UPDATER_ENABLED = "1";
+      const { shouldCheckNow } = await import("./../toolUpdater.js");
+      expect(shouldCheckNow()).toBe(true);
+      delete process.env.TOOL_UPDATER_ENABLED;
+    });
+
     it("should not check if TOOL_UPDATER_ENABLED=false", async () => {
       process.env.TOOL_UPDATER_ENABLED = "false";
+      const { shouldCheckNow } = await import("./../toolUpdater.js");
+      expect(shouldCheckNow()).toBe(false);
+      delete process.env.TOOL_UPDATER_ENABLED;
+    });
+
+    it("should not check if TOOL_UPDATER_ENABLED=0 (envBool false-branch)", async () => {
+      process.env.TOOL_UPDATER_ENABLED = "0";
       const { shouldCheckNow } = await import("./../toolUpdater.js");
       expect(shouldCheckNow()).toBe(false);
       delete process.env.TOOL_UPDATER_ENABLED;

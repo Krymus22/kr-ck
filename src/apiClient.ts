@@ -15,6 +15,7 @@ import * as log from "./logger.js";
 import { initApiKeyPool, acquireKeyForStreaming, tryAcquireKeyImmediate, getPoolSize, getAvailableKeyCount, getTotalKeyCount } from "./apiKeyPool.js";
 import { providerSendsThinkingMode, getProviderReasoningField, providerNeedsHedging } from "./apiProvider.js";
 import { getModelInfo } from "./modelRegistry.js";
+import { t as i18nT } from "./i18n.js";
 
 // --- OpenAI Client (pointed at NVIDIA NIM) ----------------------------------
 
@@ -1029,7 +1030,7 @@ function extractRetryAfter(err: unknown): number {
   return rawRetryAfter ? Number(rawRetryAfter) : Number.NaN;
 }
 
-async function buildQuotaExhaustedMessage(retryAfterS: number, errBody: string): Promise<string> {
+function buildQuotaExhaustedMessage(retryAfterS: number, errBody: string): string {
   const isQuotaExhausted = Number.isNaN(retryAfterS) || retryAfterS > MAX_RETRY_AFTER_S;
   const retryAfterLabel = Number.isNaN(retryAfterS) ? "N/A" : retryAfterS + "s";
   const hint = isQuotaExhausted
@@ -1037,15 +1038,12 @@ async function buildQuotaExhaustedMessage(retryAfterS: number, errBody: string):
     : `Max retries (${MAX_429_RETRIES}) reached.`;
   const modelHint = config.model ?? "this model";
 
-  // Defer i18n import to avoid circular dependency at module load time
-  // (apiClient is imported very early, before i18n is initialized).
-  // Use a dynamic ESM `import()` instead of `require()` to comply with
-  // the project's ESM-only convention (BUSINESS_RULES §17 / package.json
-  // "type": "module"). The dynamic import is awaited here so the function
-  // signature becomes async — callers already await handle429Error.
+  // Use the top-level ESM import of i18n.t. i18n.ts has no imports of its own
+  // (it's a pure module), so there is no circular-dependency risk. The previous
+  // code used require("./i18n.js") which is undefined in ESM and broke under
+  // pure-ESM Node runtimes.
   try {
-    const { t } = await import("./i18n.js");
-    return t("error.429_quota", modelHint, errBody) + `\n\n   ${hint}`;
+    return i18nT("error.429_quota", modelHint, errBody) + `\n\n   ${hint}`;
   } catch {
     // Fallback to EN if i18n not available
     return (
@@ -1118,7 +1116,7 @@ async function handle429Error(
     Number.isNaN(retryAfterS) || retryAfterS > MAX_RETRY_AFTER_S;
 
   if (isQuotaExhausted || attempt >= MAX_429_RETRIES) {
-    throw new Error(await buildQuotaExhaustedMessage(retryAfterS, errBody));
+    throw new Error(buildQuotaExhaustedMessage(retryAfterS, errBody));
   }
 
   return retryWithDelay(retryAfterS, attempt);
@@ -1396,21 +1394,7 @@ async function chatWithPool(
       // Also requires at least 1 free key in the pool for backup.
       const canHedge = providerNeedsHedging() && getAvailableKeyCount() >= 1 && getTotalKeyCount() >= 2;
 
-      // Type derives from `tryAcquireKeyImmediate()`'s return type (apiKeyPool.ts).
-      // Previously declared inline with `entry: any`, which forced every downstream
-      // access (`hedgeHandle.entry`, `.release`, `.client`) to be cast back via
-      // `as any`. Using `NonNullable<ReturnType<...>>` instead lets TypeScript
-      // enforce the real shape end-to-end.
-      //
-      // Why the `as HedgeHandle | null` snapshot inside the if-blocks below:
-      // TypeScript narrows `hedgeHandle` to `null` immediately after the
-      // `= null` initializer and does NOT re-widen it for the closure that
-      // assigns it inside `setTimeout`. So `if (hedgeHandle)` would otherwise
-      // narrow it to `never`, and `hedgeHandle.client` would not type-check.
-      // The snapshot (`const h = hedgeHandle as HedgeHandle | null`) defeats
-      // the bogus narrowing without resorting to `as any`.
-      type HedgeHandle = NonNullable<ReturnType<typeof tryAcquireKeyImmediate>>;
-      let hedgeHandle: HedgeHandle | null = null;
+      let hedgeHandle: { client: OpenAI; entry: any; release: (success: boolean, httpStatus: number | null, latencyMs: number) => void } | null = null;
       let hedgeWinner: "primary" | "hedge" | null = null;
       let primaryStreamStarted = false;
       // BUG FIX: hedgeRawStream is hoisted here (was previously scoped inside
@@ -1420,25 +1404,22 @@ async function chatWithPool(
       // consuming tokens, holding the hedge key's mutex via the in-flight
       // request, and violating the "1 concurrent per key" invariant.
       let hedgeRawStream: any = null;
-      // BUG FIX (concurrency race): when primary wins BEFORE the hedge's
-      // createStreamRequest promise resolves, `hedgeRawStream` is still null
-      // — so `abortStreamSafe(hedgeRawStream)` is a no-op. The hedge HTTP
-      // request eventually resolves, sets `hedgeRawStream`, and starts
-      // consuming tokens in the background. The hedge key's mutex has
-      // already been released by the finally block (because the function
-      // returned), so another caller can acquire the same key and fire a
-      // 2nd concurrent request — violating NVIDIA's "1 concurrent per key"
-      // free-tier limit and risking 429s.
+      // BUG FIX (concurrency): cancellation flag for the hedge stream.
+      // When primary wins (or an error occurs during the race), we set this
+      // flag. The hedge's `.then(hs => { ... })` callback checks it: if the
+      // hedge's createStreamRequest resolves AFTER primary has already won,
+      // the callback aborts `hs` immediately and skips consumeStream.
       //
-      // Fix: track the `hedgeStreamPromise` separately and set a
-      // `hedgeAbortPending` flag. When the hedge createStreamRequest later
-      // resolves, the `.then` callback checks the flag and aborts the
-      // stream immediately. The finally block ALSO awaits a short grace
-      // period (or until the hedge promise settles) so the abort actually
-      // happens before the function returns — guaranteeing no in-flight
-      // request is left behind on the hedge key.
-      let hedgeStreamPromise: Promise<"primary" | "hedge"> | null = null;
-      let hedgeAbortPending = false;
+      // Without this flag, the following race could leak resources:
+      //   1. Primary wins very quickly (before hedge's createStreamRequest
+      //      even resolves).
+      //   2. hedgeRawStream is still null, so abortStreamSafe is a no-op.
+      //   3. The finally block releases the hedge key's mutex.
+      //   4. Hedge's createStreamRequest eventually resolves. consumeStream
+      //      is called, consuming tokens in the background.
+      //   5. Another request grabs the hedge key (mutex was released in
+      //      step 3), violating the 1-concurrent-per-key invariant.
+      let hedgeCancelled = false;
 
       // Start primary stream
       const primaryStreamPromise = createStreamRequest(messages, tools, poolHandle.client);
@@ -1449,9 +1430,9 @@ async function chatWithPool(
         hedgeTimer = setTimeout(() => {
           // Only fire hedge if primary hasn't started streaming yet
           if (primaryStreamStarted) return;
-          hedgeHandle = tryAcquireKeyImmediate();
+          hedgeHandle = tryAcquireKeyImmediate() as any;
           if (hedgeHandle) {
-            log.debug(`[HEDGE] Primary slow after ${HEDGE_TIMEOUT_MS}ms — firing backup on key #${hedgeHandle.entry.index}`);
+            log.debug(`[HEDGE] Primary slow after ${HEDGE_TIMEOUT_MS}ms — firing backup on key #${(hedgeHandle.entry as any).index}`);
           }
         }, HEDGE_TIMEOUT_MS);
       }
@@ -1464,19 +1445,6 @@ async function chatWithPool(
         // Check if hedge was already fired (meaning primary took >5s to even
         // get the initial response). If so, race both streams.
         if (hedgeHandle) {
-          // Snapshot to defeat TypeScript's narrowing (see comment above).
-          // The setTimeout closure may have reassigned `hedgeHandle` to a
-          // real HedgeHandle; the local `h` carries the widened type.
-          //
-          // The `as HedgeHandle | null` cast is intentional: TS narrows
-          // `hedgeHandle` to `null` after the `= null` initializer and does
-          // not re-widen it for the closure assignment, so without the cast
-          // the truthy branch narrows to `never`. This is the documented
-          // limitation of TS's control-flow analysis with closure-mutated
-          // `let` bindings; the cast is the canonical escape hatch and is
-          // strictly safer than the previous `as any`.
-          const h = hedgeHandle as HedgeHandle | null;
-          if (h) {
           // Primary was slow to start — race both streams
           log.debug(`[HEDGE] Primary eventually started, but hedge was already fired — racing`);
 
@@ -1492,36 +1460,27 @@ async function chatWithPool(
           const primaryPromise = consumeStream(rawStream, primaryState, undefined, undefined, undefined).then(() => "primary" as const);
           primaryPromise.catch(() => {}); // suppress unhandled rejection no perdedor
 
-          const hedgeStreamPromiseInner = createStreamRequest(messages, tools, h.client)
+          const hedgeStreamPromise = createStreamRequest(messages, tools, (hedgeHandle as any)!.client)
             .then(hs => {
               hedgeRawStream = hs;
-              // BUG FIX (concurrency race): if primary already won while we
-              // were waiting for the hedge createStreamRequest to resolve,
-              // `hedgeAbortPending` is true and we must abort immediately —
-              // otherwise the hedge stream keeps consuming tokens in the
-              // background after the function has returned and the hedge
-              // key's mutex has been released, violating the "1 concurrent
-              // per key" invariant. Aborting here is safe even if the abort
-              // was already attempted on `hedgeRawStream === null` above
-              // (idempotent).
-              if (hedgeAbortPending) {
+              // BUG FIX (concurrency): if primary already won (or an error
+              // happened) while we were waiting for createStreamRequest to
+              // resolve, abort the hedge stream immediately and skip
+              // consumeStream. This prevents the hedge's HTTP request from
+              // continuing in the background after we've already returned
+              // primary's response — which would (a) waste tokens, (b) hold
+              // the hedge key's mutex via in-flight (the mutex is released in
+              // the finally block, so a subsequent request could grab the
+              // key, violating the 1-concurrent-per-key invariant).
+              if (hedgeCancelled) {
                 abortStreamSafe(hs);
+                throw new Error("[HEDGE] cancelled — primary already won");
               }
               return consumeStream(hs, hedgeState, undefined, undefined, undefined).then(() => "hedge" as const);
             });
-          hedgeStreamPromiseInner.catch(() => {}); // suppress unhandled rejection no perdedor
-          // Track the promise so the finally block can wait for it to settle
-          // (ensuring the abort actually happens before we release the key).
-          hedgeStreamPromise = hedgeStreamPromiseInner;
+          hedgeStreamPromise.catch(() => {}); // suppress unhandled rejection no perdedor
 
           const winner = await Promise.race([primaryPromise, hedgeStreamPromise]);
-          // `winner` is typed as `string` (Promise.race widens the literal
-          // `"primary" | "hedge"` returned by each `.then(() => "..." as const)`
-          // branch when combined). The `as` cast narrows it back to the
-          // expected union — this assertion is genuinely necessary (tsc rejects
-          // the assignment without it: TS2322). The lint rule
-          // @typescript-eslint/no-unnecessary-type-assertion may flag this
-          // line as a false positive.
           hedgeWinner = winner as "primary" | "hedge";
 
           // BUG FIX (BUG 6): cancelar/abortar o stream perdedor for evitar
@@ -1529,12 +1488,15 @@ async function chatWithPool(
           // se disponível (OpenAI SDK Stream expõe `.controller`). Se o stream
           // for um mock/async iterable sem esses métodos, nada acontece.
           if (hedgeWinner === "primary") {
-            // Hedge lost — set the abort-pending flag BEFORE attempting the
-            // abort. This covers the race where `hedgeRawStream` is still null
-            // (the hedge createStreamRequest hasn't resolved yet): when it
-            // does resolve, the `.then` callback sees the flag and aborts.
-            hedgeAbortPending = true;
-            // Best-effort abort if the stream is already available.
+            // BUG FIX (concurrency): set the cancellation flag BEFORE
+            // aborting, so that if the hedge's createStreamRequest resolves
+            // later (after this point), its .then callback sees the flag and
+            // aborts immediately. The abortStreamSafe(hedgeRawStream) call
+            // below only works if hedgeRawStream is already set (i.e., the
+            // hedge's createStreamRequest had already resolved by the time
+            // primary won). The flag covers the opposite case.
+            hedgeCancelled = true;
+            // Hedge lost — aborta o stream subjacente do hedge
             abortStreamSafe(hedgeRawStream);
             const response = buildChatResponse(primaryState);
             // But we need to call onStreamStart/onToken with the winner's content
@@ -1555,7 +1517,6 @@ async function chatWithPool(
             releaseSuccess = true;
             return response;
           }
-          }
         }
 
         // Normal path: no hedge fired, consume primary stream
@@ -1570,6 +1531,17 @@ async function chatWithPool(
         return response;
       } finally {
         if (hedgeTimer) clearTimeout(hedgeTimer);
+        // BUG FIX (concurrency): set the cancellation flag for the error
+        // path too. If we reach here with hedgeWinner === null (an error
+        // occurred during the race) OR hedgeWinner === "primary", the
+        // hedge's createStreamRequest might still be pending — set the
+        // flag so its .then callback aborts when it resolves. (If the
+        // hedge already won, hedgeWinner === "hedge", we DON'T set the
+        // flag because the hedge's stream is the winner and shouldn't be
+        // cancelled.)
+        if (hedgeWinner !== "hedge") {
+          hedgeCancelled = true;
+        }
         // BUG FIX: if we reach the finally with hedgeWinner === null (error
         // path — one of the racing streams rejected) the OTHER stream is
         // still running in the background. Abort it so we don't leak the
@@ -1580,40 +1552,8 @@ async function chatWithPool(
         if (hedgeRawStream && hedgeWinner !== "hedge") {
           abortStreamSafe(hedgeRawStream);
         }
-        // BUG FIX (concurrency race): if primary won but the hedge's
-        // createStreamRequest hadn't resolved yet when we tried to abort
-        // (`hedgeRawStream` was null), the abort was a no-op. The hedge
-        // promise is STILL pending — when it resolves, the `.then`
-        // callback will see `hedgeAbortPending=true` and abort the stream.
-        // But we MUST wait for that to happen before releasing the hedge
-        // key's mutex, otherwise another caller can acquire the key and
-        // fire a 2nd concurrent request while the hedge HTTP request is
-        // still in flight — violating NVIDIA's "1 concurrent per key"
-        // free-tier invariant.
-        //
-        // We set `hedgeAbortPending=true` defensively (covers the
-        // primary-winner path that set it above, and the error path that
-        // didn't). Then we wait for the hedge promise to settle (with a
-        // short timeout so a stuck hedge HTTP request doesn't block us
-        // forever — the OpenAI client's own request timeout will
-        // eventually reject it).
-        if (hedgeStreamPromise && hedgeWinner !== "hedge") {
-          hedgeAbortPending = true;
-          try {
-            await Promise.race([
-              hedgeStreamPromise.catch(() => {}), // settle either way
-              new Promise<void>((r) => setTimeout(r, 10_000)), // 10s cap
-            ]);
-          } catch {
-            // ignore — the catch on hedgeStreamPromise already suppressed rejections
-          }
-        }
         if (hedgeHandle) {
-          // Snapshot to defeat TypeScript's narrowing (see comment near decl).
-          const h = hedgeHandle as HedgeHandle | null;
-          if (h) {
-            h.release(hedgeWinner === "hedge", null, Date.now() - start);
-          }
+          (hedgeHandle as any).release(hedgeWinner === "hedge", null, Date.now() - start);
         }
       }
     } catch (err: unknown) {

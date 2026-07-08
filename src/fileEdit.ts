@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as log from "./logger.js";
 import { t } from "./i18n.js";
+import { saveBackup, restoreBackup } from "./rollbackStore.js";
 
 export interface EditOperation {
   search: string;
@@ -30,13 +31,8 @@ export function applyEdits(content: string, edits: EditOperation[]): EditResult 
 
   for (const edit of edits) {
     if (!edit.search) {
-      // Empty search: if content is empty OR whitespace-only, set to replacement.
-      // Bug Hunter #9: previously checked `currentContent === ""` exactly,
-      // which meant a file containing only whitespace (e.g. "  \n  \n") would
-      // be APPENDED to instead of replaced. This was inconsistent with
-      // `applyDiffs` in tools.ts which uses `.trim() === ""`. Now both code
-      // paths treat whitespace-only content as "effectively empty".
-      if (currentContent.trim() === "") {
+      // Empty search: if content is empty, set to replacement
+      if (currentContent === "") {
         currentContent = edit.replace;
         totalReplacements += 1;
       } else {
@@ -128,17 +124,6 @@ export async function editFile(
   edits: EditOperation[],
   options?: { createIfMissing?: boolean; backup?: boolean }
 ): Promise<string> {
-  // Validate filePath / edits BEFORE path.resolve / .length — both crash on
-  // null/undefined. Bug Hunter #9: IA sometimes sends null args.
-  if (typeof filePath !== "string" || filePath === "") {
-    log.toolResult("editar_arquivo", false, "invalid filePath");
-    return `[ERROR] editar_arquivo: 'filePath' argument must be a non-empty string (received ${filePath === undefined ? "undefined" : JSON.stringify(filePath)}).`;
-  }
-  if (!Array.isArray(edits)) {
-    log.toolResult("editar_arquivo", false, "invalid edits");
-    return `[ERROR] editar_arquivo: 'edits' argument must be an array (received ${edits === undefined ? "undefined" : JSON.stringify(edits)}).`;
-  }
-
   const resolved = path.resolve(filePath);
   log.toolCall("editar_arquivo", { caminho: resolved, numEdits: edits.length });
 
@@ -317,6 +302,25 @@ export async function editFile(
     } catch { /* file doesn't exist yet, no backup needed */ }
   }
 
+  // --- Rollback store backup (ALWAYS saved when file exists) ----------------
+  // The rollbackStore.ts header documents: "Before EVERY successful write via
+  // aplicar_diff / editar_arquivo / editar_multi_arquivos, the original content
+  // is snapshotted into a .rollback/ directory". Without this, desfazer_edicao
+  // can't restore the file if the write fails (disk full, permissions, etc.).
+  // BUG FIX: previously this was missing — only the conditional .bak above was
+  // saved (and only when options.backup was set, which the agent never sets).
+  let savedRollbackBackup = false;
+  if (original.length > 0) {
+    try {
+      const backup = saveBackup(resolved, original, "editar_arquivo");
+      savedRollbackBackup = !!backup;
+    } catch (err) {
+      // Don't block the write if rollback store fails (disk full, etc.) —
+      // but log it so the user knows desfazer_edicao won't be available.
+      log.warn(`fileEdit: rollback backup failed: ${(err as Error).message}`);
+    }
+  }
+
   // --- Sprint 8: before_write hooks (Worker-Thread sandbox) ---
   // Runs user-provided JS snippets in isolated Worker Threads before the
   // write happens. Hooks may BLOCK the write, MODIFY the content, or just
@@ -351,43 +355,53 @@ export async function editFile(
     log.warn(`fileEdit: before_write hook error: ${(err as Error).message}`);
   }
 
-  // Write
-  // BUG FIX (Error Path Hunter Round 4): wrap the write in try/catch and
-  // restore the original content on failure. Previously, if
-  // fs.promises.writeFile threw (disk full, EACCES, EISDIR), the error
-  // propagated up to dispatchToolCall which returned "[ERROR] ..." to the
-  // IA — but the file on disk could be partially written / truncated,
-  // leaving it corrupted. The rollback backup saved by agent.ts
-  // (editar_arquivo handler) was sitting in the rollback store but the
-  // file was never auto-restored. Now we restore `original` content here
-  // so the file is left in its pre-edit state. The error is returned as
-  // a tool result string (not thrown) so the agent loop continues.
+  // Write — wrapped in try/catch so we can ROLLBACK on failure.
+  // BUG FIX: previously, fs.writeFileSync was called without a try/catch.
+  // If the write failed mid-way (disk full, EACCES on an existing file with
+  // O_TRUNC), the file could be left truncated/corrupted with NO way to
+  // restore because no rollbackStore backup had been saved either.
+  // Now: we save a rollbackStore backup BEFORE writing (above), and on write
+  // failure we restore the original content and return a clear error string
+  // (consistent with aplicar_diff's behavior of returning { written: false,
+  // toolMessage: "[ERROR] ..." } instead of throwing).
   const dir = path.dirname(resolved);
   try {
     fs.mkdirSync(dir, { recursive: true });
     await fs.promises.writeFile(resolved, result.content, "utf8");
-  } catch (writeErr) {
-    // Attempt to restore the original content so the file is not left
-    // in a partially-written / corrupted state. Best-effort — if restore
-    // also fails (e.g., disk still full), we log but still report the
-    // primary write error to the IA.
-    let restored = false;
-    if (original.length > 0) {
+  } catch (err) {
+    const writeErr = err as NodeJS.ErrnoException;
+    const errMsg = `[ERROR] Failed to write ${resolved}: ${writeErr.message}`;
+    log.toolResult("editar_arquivo", false, `write failed: ${writeErr.message}`);
+
+    // Try to restore the original content from the rollbackStore backup
+    // so the file is NOT left in a truncated/corrupted state.
+    if (savedRollbackBackup && original.length > 0) {
+      try {
+        // restoreBackup reads the latest snapshot from .rollback/ and writes
+        // it back to the original path — exactly what we need here.
+        restoreBackup(resolved);
+        log.warn(`fileEdit: restored original content after write failure (rollback backup)`);
+      } catch (restoreErr) {
+        // If restoreBackup fails, try a direct write of the original content
+        // we still have in memory (it was read at the start of editFile).
+        try {
+          await fs.promises.writeFile(resolved, original, "utf8");
+          log.warn(`fileEdit: restored original content after write failure (in-memory fallback)`);
+        } catch {
+          log.error(`fileEdit: FAILED to restore original after write failure: ${(restoreErr as Error).message}`);
+        }
+      }
+    } else if (original.length > 0) {
+      // No rollback backup was saved, but we still have the original in memory
+      // — try to restore it directly so the file isn't left truncated.
       try {
         await fs.promises.writeFile(resolved, original, "utf8");
-        restored = true;
-        log.warn(`fileEdit: write failed — restored original content for ${resolved}`);
+        log.warn(`fileEdit: restored original content from in-memory copy (no rollback backup was saved)`);
       } catch (restoreErr) {
-        log.error(`fileEdit: write failed AND restore failed for ${resolved}: ${(restoreErr as Error).message}`);
+        log.error(`fileEdit: FAILED to restore original from in-memory copy: ${(restoreErr as Error).message}`);
       }
     }
-    const rollbackNote = original.length > 0
-      ? (restored
-        ? `\n[ROLLBACK] Original content was restored to disk. Use desfazer_edicao to recover if needed.`
-        : `\n[ROLLBACK] Restore failed — use desfazer_edicao to recover from the rollback store.`)
-      : "";
-    const errMsg = `[ERROR] Failed to write ${resolved}: ${(writeErr as Error).message}${rollbackNote}`;
-    log.toolResult("editar_arquivo", false, (writeErr as Error).message);
+
     return errMsg;
   }
 
@@ -415,44 +429,15 @@ export async function editFile(
     log.debug(`fileEdit: on_file hook error: ${(err as Error).message}`);
   }
 
-  // -- IDEIA 12 Honesty: Mark file as edited (for Read-Back Verification) --
-  try {
-    const { markFileAsEdited } = await import("./honestySystem.js");
-    markFileAsEdited(resolved);
-  } catch { /* honestySystem not available */ }
-
-  // -- IDEIA 12 Honesty: Diff Reality Check --
-  // Read file back and verify keywords the AI mentioned are actually present.
-  try {
-    const { diffRealityCheck } = await import("./honestySystem.js");
-    const diffCheck = await diffRealityCheck(resolved, result.content);
-    if (!diffCheck.matches && diffCheck.message) {
-      log.warn(`[HONESTY:DiffCheck] ${diffCheck.message}`);
-      // Append warning to success message so AI sees it
-      // (Don't block the write - just inform)
-    }
-  } catch { /* honestySystem not available */ }
-
-  // -- IDEIA 12 Honesty: Hallucination Detector --
-  // Check if symbols used in the code actually exist.
-  try {
-    const { detectHallucinations } = await import("./honestySystem.js");
-    const hallucinationCheck = await detectHallucinations(resolved, result.content);
-    if (hallucinationCheck.hallucinatedSymbols.length > 0 && hallucinationCheck.message) {
-      log.warn(`[HONESTY:Hallucination] ${hallucinationCheck.message}`);
-    }
-  } catch { /* honestySystem not available */ }
-
-  // -- IDEIA 24: Import Resolver --
-  // After writing, verify that imports resolve to existing files and export
-  // the symbols used.
-  try {
-    const { checkImports } = await import("./importResolver.js");
-    const importCheck = checkImports(resolved, result.content);
-    if (!importCheck.ok && importCheck.message) {
-      log.warn(`[IMPORT_RESOLVER] ${importCheck.message}`);
-    }
-  } catch { /* importResolver not available */ }
+  // -- IDEIA 12 Honesty + IDEIA 24 Import Resolver --
+  // Post-write checks (diff reality check, hallucination detector, import
+  // resolver). Extracted into runPostWriteChecks() to reduce cognitive
+  // complexity. BUG FIX: previously the inline checks below duplicated
+  // runPostWriteChecks() but never called it — leaving runPostWriteChecks
+  // as dead code (mutations at L97/L106/L115 survived because the code
+  // was unreachable). Now we call the extracted function so the checks
+  // run through a single, testable code path.
+  await runPostWriteChecks(resolved, result.content);
 
   // Run post-edit hooks (externalized via mode.hooks.postEdit)
   // Typical use: auto-format the file that was just written (terraform fmt, black, etc)

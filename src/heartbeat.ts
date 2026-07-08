@@ -204,6 +204,13 @@ async function sendHeartbeat(client: OpenAI): Promise<void> {
     if (consecutiveFailures >= 5) {
       log.error(`[HEARTBEAT] ${consecutiveFailures} consecutive failures — stopping heartbeat to avoid wasting requests`);
       stopHeartbeat();
+      // BUG FIX: reset consecutiveFailures so the heartbeat can be cleanly
+      // restarted by a future startHeartbeat() call. Previously, the counter
+      // stayed at >= 5 after auto-stop, so the FIRST failure of a restarted
+      // heartbeat would immediately re-trigger auto-stop (>= 5+1 >= 5),
+      // making the heartbeat effectively un-restartable without an explicit
+      // resetHeartbeat() call.
+      consecutiveFailures = 0;
     }
   } finally {
     heartbeatRunning = false;

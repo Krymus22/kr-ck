@@ -31,6 +31,16 @@ export interface WorkflowResult {
   error?: string;
   durationMs: number;
   stepsExecuted: number;
+  /**
+   * Per-step execution trace. Exposed so callers (and tests) can introspect
+   * which sub-agent calls succeeded vs. returned null vs. threw.
+   *
+   * WITHOUT this field, the `success` flag computed per step at L70/L85 is
+   * dead code — mutation testing flags `result !== null` → `result === null`
+   * as a survived mutation because no observable behavior changes. Exposing
+   * `steps` makes that flag observable and kills the mutation.
+   */
+  steps: WorkflowStep[];
 }
 
 export interface WorkflowStep {
@@ -138,6 +148,7 @@ export async function executeWorkflow(script: string): Promise<WorkflowResult> {
       output,
       durationMs,
       stepsExecuted: steps.length,
+      steps,
     };
   } catch (err) {
     const durationMs = Date.now() - start;
@@ -150,6 +161,7 @@ export async function executeWorkflow(script: string): Promise<WorkflowResult> {
       error: errorMsg,
       durationMs,
       stepsExecuted: steps.length,
+      steps,
     };
   }
 }

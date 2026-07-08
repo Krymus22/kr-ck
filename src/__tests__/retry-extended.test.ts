@@ -258,10 +258,10 @@ describe("isRetryableError", () => {
     expect(isRetryableError({ status: 429 })).toBe(true);
   });
 
-  it("returns false for HTTP 500 (BUSINESS_RULES §17.4 rule 20 — 500 NÃO é retriable)", () => {
-    // 500 = bug real no servidor. Previously this returned true (bug);
-    // now correctly returns false to align with apiClient.ts's
-    // RETRIABLE_5XX_STATUSES = new Set([502, 503]).
+  it("returns false for HTTP 500 (real server bug — NOT retryable)", () => {
+    // BUG FIX: 500 is a real server bug — retrying just hits the same bug.
+    // Only 502/503 are retried (transient gateway issues). This must agree
+    // with apiClient.ts's RETRIABLE_5XX_STATUSES = new Set([502, 503]).
     expect(isRetryableError({ status: 500 })).toBe(false);
   });
 
@@ -273,9 +273,14 @@ describe("isRetryableError", () => {
     expect(isRetryableError({ status: 503 })).toBe(true);
   });
 
-  it("returns false for HTTP 504 (BUSINESS_RULES §17.4 rule 20 — 504 NÃO é retriable)", () => {
-    // 504 = gateway timeout, retry provável de falhar igual.
+  it("returns false for HTTP 504 (gateway timeout — http client already has timeout)", () => {
     expect(isRetryableError({ status: 504 })).toBe(false);
+  });
+
+  it("returns false for HTTP 500 even with cause.code present (status takes precedence for 5xx decision)", () => {
+    // 500 is never retried regardless of other fields
+    expect(isRetryableError({ status: 500, code: "ECONNRESET" })).toBe(true); // code wins
+    expect(isRetryableError({ status: 500 })).toBe(false); // pure 500 not retried
   });
 
   it("returns false for HTTP 400 (client error)", () => {

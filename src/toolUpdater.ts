@@ -151,7 +151,7 @@ async function getInstalledVersion(tool: string): Promise<string | null> {
 }
 
 /** Get latest version from GitHub releases API. */
-async function getLatestGitHubVersion(repo: string): Promise<string | null> {
+export async function getLatestGitHubVersion(repo: string): Promise<string | null> {
   try {
     const result = await runCommand("curl", [
       "-sL", "-H", "Accept: application/vnd.github+json",

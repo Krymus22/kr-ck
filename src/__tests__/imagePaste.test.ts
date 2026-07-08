@@ -244,5 +244,46 @@ describe("imagePaste.ts (real module)", () => {
       const r = saveImageToFile(img, "Z:\\nonexistent\\super\\deep\\path\\img.png");
       expect(typeof r).toBe("boolean");
     });
+
+    // ─── Kills L101 catch-block return-inversion mutation ─────────────────
+    //
+    // Mutation: inverting `return false;` → `return true;` in the catch block
+    // of saveImageToFile. The existing "returns false on deeply invalid path"
+    // test only asserts `typeof r === "boolean"`, which is satisfied by either
+    // true or false — so the mutation survived. This test forces the catch
+    // block to execute (by making writeFileSync throw) and pins the contract
+    // that the function MUST return `false` on failure.
+
+    it("returns false (not true) when writeFileSync throws", () => {
+      const img: PastedImage = { data: Buffer.from("data"), format: "png" };
+      const filePath = path.join(tmpDir, "fail.png");
+      // Source uses `import * as fs from "node:fs"` (namespace). Spying on the
+      // default-import `fs` object does NOT propagate to the source's namespace
+      // binding under vitest 4.x — must spy on the namespace import instead.
+      const spy = vi.spyOn(realFs, "writeFileSync").mockImplementation(() => {
+        throw new Error("disk full");
+      });
+      try {
+        const result = saveImageToFile(img, filePath);
+        expect(result).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("returns false (not true) when mkdirSync throws", () => {
+      const img: PastedImage = { data: Buffer.from("data"), format: "png" };
+      const filePath = path.join(tmpDir, "mkdir-fail.png");
+      // See note above: must spy on namespace import (`realFs`) to affect source.
+      const spy = vi.spyOn(realFs, "mkdirSync").mockImplementation(() => {
+        throw new Error("permission denied");
+      });
+      try {
+        const result = saveImageToFile(img, filePath);
+        expect(result).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });

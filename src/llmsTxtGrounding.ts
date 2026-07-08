@@ -77,7 +77,16 @@ function getCachePath(library: string): string {
   return path.join(getCacheDir(), `${library.toLowerCase().replace(/[^a-z0-9]/g, "-")}.txt`);
 }
 
-function isCacheFresh(cachePath: string): boolean {
+/**
+ * Check if a cached llms.txt file is fresh (within CACHE_TTL_DAYS).
+ *
+ * Exported so tests can verify the catch-block contract directly:
+ * when the cache file does not exist (or statSync throws), this MUST
+ * return `false` so the caller falls back to a fresh fetch. A mutation
+ * that inverts the catch-block return to `true` would be masked by the
+ * defensive readFileSync catch in fetchLlmsTxt, so we test it directly.
+ */
+export function isCacheFresh(cachePath: string): boolean {
   try {
     const stat = fs.statSync(cachePath);
     const ageDays = (Date.now() - stat.mtimeMs) / (1000 * 60 * 60 * 24);

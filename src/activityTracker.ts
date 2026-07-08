@@ -129,14 +129,17 @@ export function notifyActivity(): void {
 
 function notify(): void {
   const snap = getActivitySnapshot();
-  // BUG FIX (Bug Hunter #8c): previously iterated the `listeners` Set
-  // directly. If a listener called `subscribeToActivity()` or its own
-  // unsubscribe() during iteration, the Set was mutated mid-iteration —
-  // leading to non-deterministic behavior (a newly-subscribed listener
-  // might be called or skipped depending on V8's Set iteration order, and
-  // an unsubscribed listener might still be called once). Snapshot the
-  // listeners into an array so notification is stable regardless of any
-  // subscribe/unsubscribe that happens inside a listener.
+  // Concurrency Audit Part 2 — Race #4:
+  // Iterate over a SNAPSHOT of the listeners set, not the live set. A
+  // listener callback can synchronously call subscribeToActivity() (adding
+  // to the set) or call the unsubscribe function returned by a previous
+  // subscribeToActivity() call (deleting from the set). Per the ES6 Set
+  // iterator spec, deleting an as-yet-unvisited entry mid-iteration causes
+  // it to be SILENTLY SKIPPED, and adding an entry may or may not visit it
+  // in the same tick (engine-dependent). Both behaviors are surprising and
+  // cause subscribers to be silently dropped or double-notified. Snapshot
+  // with Array.from so additions/removals during notify() only take effect
+  // on the NEXT notify() call, which is the intuitive behavior.
   const snapshot = Array.from(listeners);
   for (const l of snapshot) {
     try { l(snap); } catch { /* listener error must not break the agent */ }

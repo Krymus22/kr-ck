@@ -109,6 +109,41 @@ describe("Hook System", () => {
       expect(unregisterHook("nonexistent")).toBe(false);
     });
 
+    // ─── Kills L89 return-inversion mutation ───────────────────────────────
+    //
+    // Mutation: inverting `return true;` → `return false;` on L89 of hooks.ts
+    // (the successful-unregister return path). The existing "removes a hook by
+    // id" test only checks that the hook no longer fires — it never asserts the
+    // RETURN VALUE of unregisterHook. So a mutation that still removes the hook
+    // but returns `false` survived. This test pins the contract: a successful
+    // unregister MUST return `true`.
+
+    it("returns true when a preToolCall hook is successfully unregistered", async () => {
+      const id = onPreToolCall(async () => { return {}; });
+      expect(unregisterHook(id)).toBe(true);
+    });
+
+    it("returns true when a postToolCall hook is successfully unregistered", async () => {
+      const id = onPostToolCall(async () => { return {}; });
+      expect(unregisterHook(id)).toBe(true);
+    });
+
+    it("returns true when a preFileWrite hook is successfully unregistered", async () => {
+      const id = onPreFileWrite(async () => { return {}; });
+      expect(unregisterHook(id)).toBe(true);
+    });
+
+    it("returns true when a postFileWrite hook is successfully unregistered", async () => {
+      const id = onPostFileWrite(async () => { return; });
+      expect(unregisterHook(id)).toBe(true);
+    });
+
+    it("returns false when unregistering the same id twice (second call finds nothing)", async () => {
+      const id = onPreToolCall(async () => { return {}; });
+      expect(unregisterHook(id)).toBe(true);
+      expect(unregisterHook(id)).toBe(false);
+    });
+
     it("can unregister file write hook", async () => {
       let called = false;
       const id = onPreFileWrite(async () => { called = true; return {}; });

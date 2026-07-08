@@ -70,6 +70,32 @@ describe("selfHealing", () => {
       expect(parseErrors("")).toEqual([]);
       expect(parseErrors("  ")).toEqual([]);
     });
+
+    // ─── Kills L150 || → && crash-on-undefined mutation ─────────────────────
+    //
+    // Mutation: changing `||` to `&&` on L150 of selfHealing.ts:
+    //   `if (!output || output.trim().length === 0) return [];`
+    //   → `if (!output && output.trim().length === 0) return [];`
+    //
+    // When `output` is undefined/null, the original `||` short-circuits on
+    // `!output === true` and returns `[]` without evaluating `.trim()`. The
+    // mutated `&&` evaluates the right side `output.trim()` on undefined →
+    // TypeError: Cannot read properties of undefined.
+    //
+    // The existing "should return empty for empty output" test only passes
+    // empty/whitespace strings, where both `||` and `&&` behave identically
+    // (both reach the `return []`). These tests pass `undefined`/`null` (cast
+    // to any to bypass the string type) to force the short-circuit path.
+
+    it("should return [] for undefined output (short-circuit, no crash)", async () => {
+      const { parseErrors } = await import("./../selfHealing.js");
+      expect(parseErrors(undefined as unknown as string)).toEqual([]);
+    });
+
+    it("should return [] for null output (short-circuit, no crash)", async () => {
+      const { parseErrors } = await import("./../selfHealing.js");
+      expect(parseErrors(null as unknown as string)).toEqual([]);
+    });
   });
 
   describe("parseErrors - generic", () => {

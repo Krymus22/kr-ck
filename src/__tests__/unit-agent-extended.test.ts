@@ -361,6 +361,9 @@ vi.mock("../readBeforeWrite.js", () => ({
   hasBeenRead: vi.fn(() => true),
   hasReadPath: vi.fn(() => true),
   checkReadBeforeWrite: vi.fn(() => ({ allowed: true })),
+  // Concurrency Audit Part 2: agent.ts registers a checker via this setter
+  // at module load. The mock must expose it or agent.ts fails to import.
+  setAgentLoopRunningChecker: vi.fn(),
 }));
 
 vi.mock("../pokaYoke.js", () => ({

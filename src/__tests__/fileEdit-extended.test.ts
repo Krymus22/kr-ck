@@ -131,7 +131,7 @@ describe("editFile — operações de criação e sobrescrita", () => {
     expect(fs.readFileSync(file, "utf8")).toBe("const valor = 20;\nconst extra = 15;\n");
   });
 
-  it("falha quando writeFileSync lança erro de permissão (EACCES)", async () => {
+  it("falha quando writeFileSync lança erro de permissão (EACCES) — retorna [ERROR] e restaura conteúdo", async () => {
     const file = path.join(TEST_DIR, "perm_fail.ts");
     fs.writeFileSync(file, "conteúdo original\n", "utf8");
 
@@ -140,33 +140,29 @@ describe("editFile — operações de criação e sobrescrita", () => {
     fsState.writeErrorCode = "EACCES";
     fsState.writeErrorMessage = "EACCES: permission denied, open 'arquivo'";
 
-    // BUG FIX (Error Path Hunter Round 4): editFile now CATCHES write errors
-    // and returns an [ERROR] string instead of throwing. This is better
-    // because: (1) the agent loop continues without the error propagating
-    // to dispatchToolCall's catch block, (2) the rollback restore is
-    // attempted automatically, (3) consistent with other error paths
-    // (file-not-found, search-not-found) which also return strings.
+    // BUG FIX: editFile now returns an error string (consistent with aplicar_diff)
+    // instead of throwing. The original content is restored via rollbackStore
+    // or in-memory fallback, so the file is NOT left truncated.
     const result = await editFile(file, [{ search: "original", replace: "modificado" }]);
     expect(result).toContain("[ERROR]");
     expect(result).toContain("EACCES");
-    expect(result).toMatch(/ROLLBACK/);
 
-    // Conteúdo original permanece intacto (EACCES = can't open file, so
-    // no bytes were written; the restore attempt also fails but the file
-    // was never modified).
+    // Conteúdo original permanece intacto (restored by rollback logic)
     expect(fs.readFileSync(file, "utf8")).toBe("conteúdo original\n");
+
+    // Disable the throw so the restore-write can succeed
+    fsState.writeShouldThrow = false;
   });
 
-  it("falha quando path aponta para diretório (EISDIR)", async () => {
+  it("falha quando path aponta para diretório (EISDIR) — retorna [ERROR]", async () => {
     const dirPath = path.join(TEST_DIR, "meu_dir");
     fs.mkdirSync(dirPath);
 
+    // BUG FIX: editFile now returns an error string instead of throwing.
     // writeFileSync em diretório lança EISDIR — o mock passa para o fs real.
-    // BUG FIX (Error Path Hunter Round 4): editFile now returns an [ERROR]
-    // string instead of throwing (consistent with other error paths).
     const result = await editFile(dirPath, [{ search: "", replace: "conteúdo" }], { createIfMissing: true });
     expect(result).toContain("[ERROR]");
-    expect(result).toMatch(/EISDIR|Failed to write/);
+    expect(result).toContain("EISDIR");
   });
 
   it("preserva permissões do arquivo original", async () => {

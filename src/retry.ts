@@ -65,6 +65,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Only 502 and 503 are retryable among 5xx errors.
+// 500 is NOT retried (usually a real server bug — retrying would just hit the
+// same bug again, wasting the user's token quota and time). 504 is also NOT
+// retried (gateway timeout — the HTTP client already has its own timeout, so
+// retrying would likely fail the same way).
+// This mirrors apiClient.ts's RETRIABLE_5XX_STATUSES = new Set([502, 503])
+// so the outer withRetry wrapper in agent.ts and the inner retry logic in
+// apiClient.ts agree on what's retryable.
+const RETRIABLE_5XX_STATUSES = new Set([502, 503]);
+
 export function isRetryableError(error: any): boolean {
   const code = error?.code ?? error?.cause?.code;
   const retryableCodes = [
@@ -74,14 +84,11 @@ export function isRetryableError(error: any): boolean {
 
   if (typeof code === "string" && retryableCodes.includes(code)) return true;
   if (error?.status === 429) return true;
-
-  // 5xx: only 502 (Bad Gateway) and 503 (Service Unavailable) are retriable.
-  // Per BUSINESS_RULES.md §17.4 rule 20 and §3.3:
-  //   - 500 = bug real no servidor, NÃO retriable
-  //   - 504 = gateway timeout, retry provável de falhar igual, NÃO retriable
-  //   - 502/503 = frequentemente transientes (gateway restart, deploy, overload)
-  // This MUST match apiClient.ts RETRIABLE_5XX_STATUSES = new Set([502, 503]).
-  const RETRIABLE_5XX_STATUSES = new Set([502, 503]);
+  // BUG FIX: previously, ALL 5xx were retried. This contradicted apiClient.ts
+  // which only retries 502/503 (transient) and treats 500 as a real server
+  // bug. The outer withRetry in agent.ts was retrying 500 errors that the
+  // inner apiClient had already decided not to retry, wasting tokens and
+  // time on a bug that wouldn't fix itself.
   if (typeof error?.status === "number" && RETRIABLE_5XX_STATUSES.has(error.status)) return true;
 
   return false;

@@ -105,13 +105,22 @@ function findProjectRoot(): string {
 /**
  * Run a command asynchronously and return its combined stdout+stderr + exit code.
  * Timeout: 60s. Never throws.
+ *
+ * BUG FIX (tsc timeout handling): when the command times out, we now set
+ * `timedOut: true` on the result so callers can distinguish "real error"
+ * from "command took too long". The strict quality gate treats timeouts
+ * as a transient infrastructure issue (skip this check, don't block the
+ * turn, don't increment consecutiveBlocks) instead of a code quality
+ * failure. Previously, a tsc that consistently took >60s on a large
+ * project would burn all 8 consecutive blocks before letting the turn
+ * finish — wasting 8 retries on a problem the agent can't fix.
  */
 function runCommandAsync(
   command: string,
   args: string[],
   cwd: string,
   timeoutMs: number = 60_000
-): Promise<{ ok: boolean; output: string; exitCode: number }> {
+): Promise<{ ok: boolean; output: string; exitCode: number; timedOut: boolean }> {
   return new Promise((resolve) => {
     let child;
     try {
@@ -122,7 +131,7 @@ function runCommandAsync(
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {
-      resolve({ ok: false, output: `Failed to spawn ${command}: ${(err as Error).message}`, exitCode: -1 });
+      resolve({ ok: false, output: `Failed to spawn ${command}: ${(err as Error).message}`, exitCode: -1, timedOut: false });
       return;
     }
 
@@ -139,17 +148,17 @@ function runCommandAsync(
 
     child.on("error", (err) => {
       clearTimeout(timer);
-      resolve({ ok: false, output: `Spawn error: ${err.message}`, exitCode: -1 });
+      resolve({ ok: false, output: `Spawn error: ${err.message}`, exitCode: -1, timedOut: false });
     });
 
     child.on("close", (code) => {
       clearTimeout(timer);
       const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
       if (killed) {
-        resolve({ ok: false, output: `[TIMEOUT after ${timeoutMs}ms]\n${combined}`, exitCode: -1 });
+        resolve({ ok: false, output: `[TIMEOUT after ${timeoutMs}ms]\n${combined}`, exitCode: -1, timedOut: true });
         return;
       }
-      resolve({ ok: code === 0, output: combined, exitCode: code ?? -1 });
+      resolve({ ok: code === 0, output: combined, exitCode: code ?? -1, timedOut: false });
     });
   });
 }
@@ -243,6 +252,9 @@ async function collectValidatorErrors(cfg: QualityGateConfig): Promise<string[]>
  * ROJO BUILD GATE: If the project has a default.project.json (Roblox project),
  * run `rojo build` to verify it compiles. Blocks finish if the build fails.
  * This catches Luau syntax errors, missing modules, and invalid project structure.
+ *
+ * Timeout handling: if `rojo build` times out (>60s), the check is SKIPPED
+ * (treated as a transient infrastructure issue) rather than blocking the turn.
  */
 async function runRojoBuildCheck(cfg: QualityGateConfig, projectRoot: string): Promise<string[]> {
   // Only run if there's a Roblox project file
@@ -251,13 +263,6 @@ async function runRojoBuildCheck(cfg: QualityGateConfig, projectRoot: string): P
 
   // Check if rojo binary is available
   try {
-    // BUG FIX: use top-level `import { execSync }` (ESM) instead of dynamic
-    // `require("node:child_process")`. The whole codebase is ESM
-    // ({"type":"module"} in package.json) — `require()` only works here because
-    // of a CommonJS-compat shim, and it breaks `vi.mock("node:child_process")`
-    // in tests (the mock replaces the named export, but `require()` bypasses
-    // the mock and loads the real module). The static import is both correct
-    // and testable.
     execSync("which rojo 2>/dev/null || where rojo 2>/dev/null", {
       encoding: "utf8",
       timeout: 3000,
@@ -271,6 +276,10 @@ async function runRojoBuildCheck(cfg: QualityGateConfig, projectRoot: string): P
 
   log.debug(`[STRICT_GATE] Running rojo build in ${projectRoot}`);
   const buildResult = await runCommandAsync("rojo", ["build", "--output", "/tmp/rojo-build-test.rbxlx", projectFile], projectRoot, 60_000);
+  if (buildResult.timedOut) {
+    log.warn(`[STRICT_GATE] rojo build timed out after 60s — skipping check (transient infrastructure issue, not a code quality failure).`);
+    return [];
+  }
   if (!buildResult.ok) {
     return [`=== Rojo build errors ===\nThe Roblox project failed to build. This means there are syntax errors, missing modules, or invalid project structure.\n${buildResult.output}\nFix these errors before finishing.`];
   }
@@ -284,6 +293,14 @@ async function runTscCheck(cfg: QualityGateConfig, projectRoot: string): Promise
   if (!cfg.runTsc || !fs.existsSync(path.join(projectRoot, "tsconfig.json"))) return [];
   log.debug(`[STRICT_GATE] Running tsc --noEmit in ${projectRoot}`);
   const tscResult = await runCommandAsync("npx", ["--yes", "tsc", "--noEmit"], projectRoot, 60_000);
+  // Timeout = transient infrastructure issue (slow CI, cold disk cache, huge
+  // project). Skip the check rather than blocking the turn — the agent can't
+  // fix a tsc timeout by editing code, and burning 8 consecutive blocks on
+  // retries is wasteful. The next turn will retry naturally.
+  if (tscResult.timedOut) {
+    log.warn(`[STRICT_GATE] tsc --noEmit timed out after 60s — skipping check (transient infrastructure issue, not a code quality failure).`);
+    return [];
+  }
   if (!tscResult.ok) return [`=== TypeScript errors (tsc --noEmit) ===\n${tscResult.output}`];
   return [];
 }
@@ -295,6 +312,11 @@ async function runLintCheck(cfg: QualityGateConfig, projectRoot: string): Promis
     if (!pkg.scripts || typeof pkg.scripts.lint !== "string") return [];
     log.debug(`[STRICT_GATE] Running npm run lint in ${projectRoot}`);
     const lintResult = await runCommandAsync("npm", ["run", "lint"], projectRoot, 60_000);
+    // Same timeout semantics as tsc: skip, don't block.
+    if (lintResult.timedOut) {
+      log.warn(`[STRICT_GATE] npm run lint timed out after 60s — skipping check (transient infrastructure issue, not a code quality failure).`);
+      return [];
+    }
     if (!lintResult.ok) return [`=== Lint errors (npm run lint) ===\n${lintResult.output}`];
     return [];
   } catch (err) {

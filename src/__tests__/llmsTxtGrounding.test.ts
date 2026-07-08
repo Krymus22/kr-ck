@@ -14,6 +14,51 @@ describe("llmsTxtGrounding", () => {
   });
   afterEach(() => { fs.rmSync(tmpHome, { recursive: true, force: true }); });
 
+  // ─── Kills L73 catch-block return-inversion mutation ─────────────────────
+  //
+  // Mutation: inverting `return false;` → `return true;` in the catch block of
+  // isCacheFresh. This mutation is otherwise masked by defense-in-depth: when
+  // isCacheFresh returns `true` (mutated) for a missing file, fetchLlmsTxt
+  // enters the cache branch, readFileSync throws ENOENT, and the inner catch
+  // at L107 silently falls through to a fresh fetch — producing the same
+  // observable result. To kill the mutation we now export isCacheFresh and
+  // test its contract directly: a missing/unstatable file MUST return `false`.
+
+  describe("isCacheFresh (direct contract test)", () => {
+    it("returns false when the cache file does not exist", async () => {
+      const { isCacheFresh } = await import("./../llmsTxtGrounding.js");
+      const result = isCacheFresh(path.join(tmpHome, "definitely-missing.txt"));
+      expect(result).toBe(false);
+    });
+
+    it("returns false when the path is a directory (statSync succeeds but it's not a file)", async () => {
+      const { isCacheFresh } = await import("./../llmsTxtGrounding.js");
+      // statSync on a directory succeeds, but this is still a cache-miss
+      // scenario in spirit — we mainly want to ensure no throw + boolean result
+      const result = isCacheFresh(tmpHome);
+      expect(typeof result).toBe("boolean");
+    });
+
+    it("returns true when the cache file exists and is fresh", async () => {
+      const { isCacheFresh } = await import("./../llmsTxtGrounding.js");
+      const cacheFile = path.join(tmpHome, "fresh.txt");
+      fs.writeFileSync(cacheFile, "content", "utf8");
+      const result = isCacheFresh(cacheFile);
+      expect(result).toBe(true);
+    });
+
+    it("returns false when the cache file is older than CACHE_TTL_DAYS (30 days)", async () => {
+      const { isCacheFresh } = await import("./../llmsTxtGrounding.js");
+      const cacheFile = path.join(tmpHome, "stale.txt");
+      fs.writeFileSync(cacheFile, "content", "utf8");
+      // Set mtime to 60 days ago
+      const oldTime = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(cacheFile, oldTime, oldTime);
+      const result = isCacheFresh(cacheFile);
+      expect(result).toBe(false);
+    });
+  });
+
   it("formatLlmsTxt should format found result", async () => {
     const { formatLlmsTxt } = await import("./../llmsTxtGrounding.js");
     const result = formatLlmsTxt({ library: "react", url: "https://react.dev/llms.txt", content: "React docs", fromCache: false, found: true });

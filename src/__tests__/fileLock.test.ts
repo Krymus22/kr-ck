@@ -46,18 +46,26 @@ describe("fileLock", () => {
       expect(release2).toBeNull();
     });
 
-    it("should allow same holder to re-acquire (re-entrant)", async () => {
+    it("should BLOCK same holder from re-acquiring (Concurrency Audit Part 2 — Race #5)", async () => {
       const { tryAcquireLock, getLockHolder } = await import("./../fileLock.js");
       const release1 = tryAcquireLock("/test/file.luau", "main");
       expect(release1).not.toBeNull();
 
-      // Same holder can re-acquire (extends TTL)
+      // FIX: same holder can NO LONGER re-acquire while still holding the
+      // lock. Previously this returned a no-op release function (treating
+      // the second call as "re-entrant"), but that was unsafe — parallel
+      // sub-agents share process.env.CLAUDE_KILLER_AGENT_ID and would both
+      // "re-acquire" the lock, both edit the file, and corrupt each other.
+      // Now the second call returns null (blocked) regardless of holderId,
+      // so the caller must release before re-acquiring.
       const release2 = tryAcquireLock("/test/file.luau", "main");
-      expect(release2).not.toBeNull();
+      expect(release2).toBeNull();
 
       // Lock is still held by main
       const holder = getLockHolder("/test/file.luau");
       expect(holder!.holderId).toBe("main");
+
+      release1!();
     });
 
     it("should release the lock when release function is called", async () => {
@@ -160,6 +168,33 @@ describe("fileLock", () => {
       const { forceReleaseLock } = await import("./../fileLock.js");
       const released = forceReleaseLock("/nonexistent/file.luau");
       expect(released).toBe(false);
+    });
+
+    // ─── Kills L88 && → || crash-on-undefined mutation ─────────────────────
+    //
+    // Mutation: changing `&&` to `||` on L88 of fileLock.ts:
+    //   `if (current && current.holderId === holderId)` → `if (current || current.holderId === holderId)`
+    //
+    // When `current` is undefined (lock already removed from the map by
+    // forceReleaseLock), the original `&&` short-circuits to false (no crash).
+    // The mutated `||` evaluates the right side `current.holderId` on
+    // undefined → TypeError: Cannot read properties of undefined.
+    //
+    // This test acquires a lock, force-releases it (clearing the map entry),
+    // then calls the original releaseFn — which must NOT throw.
+
+    it("original releaseFn must not crash when lock was force-released (current === undefined)", async () => {
+      const { tryAcquireLock, forceReleaseLock } = await import("./../fileLock.js");
+      const release = tryAcquireLock("/test/force-release-then-release.luau", "main");
+      expect(release).not.toBeNull();
+
+      // Force-remove the lock entry from the map (bypasses the `released` flag)
+      expect(forceReleaseLock("/test/force-release-then-release.luau")).toBe(true);
+
+      // Now releaseFn will see `current === undefined` from locks.get(key).
+      // With `&&` (original): short-circuit, no crash.
+      // With `||` (mutated): TypeError crash.
+      expect(() => release!()).not.toThrow();
     });
   });
 

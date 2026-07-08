@@ -127,7 +127,7 @@ vi.mock("../externalTools.js", () => ({
 }));
 vi.mock("../extensionCenter.js", () => ({ executeTrigger: vi.fn(() => Promise.resolve()) }));
 vi.mock("../thinkTool.js", () => ({ think: vi.fn(() => "ok"), THINK_TOOL_DEFINITION: { type: "function", function: { name: "pensar", parameters: { type: "object", properties: {} } } } }));
-vi.mock("../readBeforeWrite.js", () => ({ checkReadBeforeWrite: vi.fn(() => ({ ok: true })), recordRead: vi.fn() }));
+vi.mock("../readBeforeWrite.js", () => ({ checkReadBeforeWrite: vi.fn(() => ({ ok: true })), recordRead: vi.fn(), setAgentLoopRunningChecker: vi.fn() }));
 vi.mock("../toolSchemaValidation.js", () => ({ validateToolCall: vi.fn(() => ({ valid: true, errors: [] })), formatValidationErrors: vi.fn(() => "") }));
 vi.mock("../pokaYoke.js", () => ({ pokaYokeCheck: vi.fn(() => ({ ok: true })), EXPANDED_TOOL_DESCRIPTIONS: {} }));
 vi.mock("../strictQualityGate.js", () => ({ runQualityGate: vi.fn(async () => ({ allowed: true, reason: "skip" })), resetGateState: vi.fn(), isStrictModeEnabled: vi.fn(() => false) }));
