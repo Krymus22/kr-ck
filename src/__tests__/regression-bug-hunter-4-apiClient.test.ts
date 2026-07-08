@@ -136,8 +136,13 @@ describe("Bug Hunter #4 — apiClient buildQuotaExhaustedMessage uses dynamic im
     apiClientHoisted.createMock.mockReset();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    // Restore default language (pt-BR) so subsequent test files that rely
+    // on the i18n default aren't affected by setLanguage() calls in the
+    // pt-BR / EN verification tests below.
+    const i18n = await import("../i18n.js");
+    i18n.setLanguage("pt-BR");
   });
 
   it("429 with long Retry-After still produces a quota-exhausted error (not 'require is not defined')", async () => {
@@ -214,5 +219,79 @@ describe("Bug Hunter #4 — apiClient buildQuotaExhaustedMessage uses dynamic im
     expect(caught).toBeInstanceOf(Error);
     const msg = (caught as Error).message.toLowerCase();
     expect(msg).toMatch(/429|quota/);
+  });
+
+  // ─── Round 4 deep audit: pt-BR translation is actually used ───────────────
+  //
+  // The default language (per i18n.ts detectLanguage()) is "pt-BR". The
+  // dynamic-import fix in buildQuotaExhaustedMessage calls
+  // `t("error.429_quota", ...)` which should return the pt-BR translation.
+  // The tests above only assert `/429|quota/i` which matches BOTH the EN
+  // and pt-BR translations (because both contain "429"). This test
+  // specifically verifies the pt-BR translation is returned — if the
+  // dynamic import silently fell back to the EN branch (e.g., due to a
+  // future regression where the import failed), the message would NOT
+  // contain the pt-BR-specific marker "Detalhes do erro" or "Possíveis
+  // causas".
+
+  it("pt-BR translation is used (default language) — message contains PT-BR markers", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.setSystemTime(new Date(0));
+
+    // Force pt-BR (the project default) so the test is deterministic
+    // regardless of any test-ordering effects on the i18n module cache.
+    const i18n = await import("../i18n.js");
+    i18n.setLanguage("pt-BR");
+
+    const err429 = new apiClientHoisted.MockAPIError("rate limited", 429, {});
+    apiClientHoisted.createMock.mockRejectedValue(err429);
+
+    let caught: unknown = null;
+    const p = chat([{ role: "user", content: "hi" }]);
+    p.catch((e: unknown) => { caught = e; });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(caught).toBeInstanceOf(Error);
+    const msg = (caught as Error).message;
+    // PT-BR markers (present in the pt-BR translation of error.429_quota):
+    expect(msg).toContain("Erro 429");
+    expect(msg).toContain("Possíveis causas");
+    expect(msg).toContain("Detalhes do erro");
+    // Should NOT contain EN-only markers:
+    expect(msg).not.toContain("Possible causes");
+    expect(msg).not.toContain("Error details");
+  });
+
+  it("en translation is used when language is forced to 'en' — message contains EN markers", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.setSystemTime(new Date(0));
+
+    const i18n = await import("../i18n.js");
+    i18n.setLanguage("en");
+
+    const err429 = new apiClientHoisted.MockAPIError("rate limited", 429, {});
+    apiClientHoisted.createMock.mockRejectedValue(err429);
+
+    let caught: unknown = null;
+    const p = chat([{ role: "user", content: "hi" }]);
+    p.catch((e: unknown) => { caught = e; });
+
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(caught).toBeInstanceOf(Error);
+    const msg = (caught as Error).message;
+    // EN markers:
+    expect(msg).toContain("NVIDIA NIM API 429 error");
+    expect(msg).toContain("Possible causes");
+    expect(msg).toContain("Error details");
+    // Should NOT contain PT-BR markers:
+    expect(msg).not.toContain("Possíveis causas");
+
+    // (Language is restored to pt-BR by afterEach.)
   });
 });

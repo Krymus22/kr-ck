@@ -264,6 +264,13 @@ function pickNextKey(): PoolEntry | null {
 /**
  * Pick a key, waiting if necessary until one becomes available.
  * Throws if pool is empty or all keys are in long cooldown.
+ *
+ * BUG FIX (Error Path Hunter Round 4): when all keys are in 429 cooldown
+ * (COOLDOWN_AFTER_429_MS = 60_000ms) and `maxWaitMs` is also 60s, the loop
+ * could exit RIGHT as the cooldown expired — losing the race by milliseconds
+ * and throwing "All keys busy or rate-limited" instead of acquiring the
+ * now-available key. We now do one final `pickNextKey` check after the loop
+ * exits, before throwing, to catch the cooldown-just-expired case.
  */
 async function acquireKey(maxWaitMs: number = 60_000): Promise<PoolEntry> {
   if (pool.length === 0) {
@@ -280,6 +287,16 @@ async function acquireKey(maxWaitMs: number = 60_000): Promise<PoolEntry> {
     }
     // No key available - wait 100ms and retry
     await new Promise((r) => setTimeout(r, 100));
+  }
+  // BUG FIX: one final check after the loop exits. The cooldown might have
+  // expired in the gap between the last pickNextKey() call and the deadline
+  // check. Without this, we'd throw even though a key just became available.
+  const finalEntry = pickNextKey();
+  if (finalEntry) {
+    await acquireMutex(finalEntry);
+    finalEntry.callCount++;
+    finalEntry.stats.inFlight++;
+    return finalEntry;
   }
   throw new Error(`[API_POOL] All keys busy or rate-limited after ${maxWaitMs}ms - pool size: ${pool.length}`);
 }

@@ -130,7 +130,19 @@ export function getHubVersion(): number {
  */
 function emitChange(): void {
   hubVersion++;
-  for (const listener of subscribers) {
+  // BUG FIX (concurrency race — mirrors Bug Hunter #8c fix in activityTracker
+  // and the Round 4 Concurrency Hunter fix in fileWatcher): previously
+  // iterated `subscribers` Set directly. A listener that called its own
+  // unsubscribe() (common one-shot pattern) or subscribeToHubChanges()
+  // (e.g. a React effect re-subscribing after a state change) mutated the
+  // Set mid-iteration — leading to non-deterministic behavior (a newly-
+  // subscribed listener might be called or skipped depending on V8's Set
+  // iteration order, and a just-removed listener might still be called
+  // once). Snapshot the subscribers into an array so notification is
+  // stable regardless of any subscribe/unsubscribe that happens inside a
+  // listener.
+  const snapshot = Array.from(subscribers);
+  for (const listener of snapshot) {
     try {
       listener();
     } catch (err) {

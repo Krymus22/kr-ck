@@ -176,12 +176,41 @@ describe("formatGrepResults", () => {
       },
     ];
     const formatted = formatGrepResults(results);
-    // formatGrepResults uses: m.line - m.before.indexOf(b) - 1
-    // "line8" index=0 => 10-0-1=9; "line9" index=1 => 10-1-1=8
-    expect(formatted).toContain("file.ts:9: line8");
-    expect(formatted).toContain("file.ts:8: line9");
+    // Regression: previously the before-context formula used
+    // `m.line - m.before.indexOf(b) - 1`, which (a) reversed the line
+    // numbers of before-context (the first context line got the highest
+    // number, the last got the lowest) and (b) collapsed duplicate context
+    // lines to the same line number. The correct formula assigns each
+    // context line its true source line: before[j] is at line
+    // `m.line - before.length + j`, after[j] is at line `m.line + j + 1`.
+    expect(formatted).toContain("file.ts:8: line8");
+    expect(formatted).toContain("file.ts:9: line9");
     expect(formatted).toContain("file.ts:10: match");
     expect(formatted).toContain("file.ts:11: line11");
+  });
+
+  it("should assign distinct, increasing line numbers to duplicate before-context lines", () => {
+    // Regression for the indexOf() bug: when two context lines have the
+    // same content, indexOf() returns the FIRST match for both, collapsing
+    // them to the same displayed line number. The fixed implementation
+    // uses an explicit index, so duplicates keep their own line numbers.
+    const results = [
+      {
+        file: "dup.ts",
+        line: 5,
+        content: "MATCH",
+        before: ["dup", "dup", "uniq"],
+      },
+    ];
+    const formatted = formatGrepResults(results);
+    // before.length = 3 → before[0]=line2, before[1]=line3, before[2]=line4
+    expect(formatted).toContain("dup.ts:2: dup");
+    expect(formatted).toContain("dup.ts:3: dup");
+    expect(formatted).toContain("dup.ts:4: uniq");
+    expect(formatted).toContain("dup.ts:5: MATCH");
+    // Ensure no line uses the stale indexOf() collapse (line 4 only once)
+    const occurrences = (formatted.match(/dup\.ts:4:/g) ?? []).length;
+    expect(occurrences).toBe(1);
   });
 
   it("should return empty for invalid regex pattern", () => {

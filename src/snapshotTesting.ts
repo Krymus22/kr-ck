@@ -168,6 +168,13 @@ async function tryRunFunction(
     const inputArgs = Array.isArray(inputs) ? inputs : [inputs];
 
     // Use a child process to isolate execution
+    // BUG FIX: previously `process.stdout.write(typeof r === 'string' ? r : JSON.stringify(r))`.
+    // `JSON.stringify(undefined)` returns the VALUE `undefined` (not the string
+    // "undefined"), and `JSON.stringify(function(){})` does the same. Passing
+    // `undefined` to `process.stdout.write` throws a synchronous TypeError,
+    // which the inner .catch swallowed — the snapshot then failed with a
+    // confusing "chunk argument" error instead of just recording the
+    // undefined return value. Coerce to a string before writing.
     const script = `
       import('${filePath}').then(mod => {
         const fn = mod.${functionName} || mod.default?.${functionName};
@@ -178,7 +185,8 @@ async function tryRunFunction(
         try {
           const result = fn(...${JSON.stringify(inputArgs)});
           Promise.resolve(result).then(r => {
-            process.stdout.write(typeof r === 'string' ? r : JSON.stringify(r));
+            const s = typeof r === 'string' ? r : JSON.stringify(r);
+            process.stdout.write(s === undefined ? 'undefined' : s);
           }).catch(e => {
             process.stdout.write('__SNAPSHOT_ERROR__: ' + e.message);
           });

@@ -128,7 +128,7 @@ interface ServerEntry {
   language: string;
   initialized: boolean;
   nextRequestId: number;
-  pendingRequests: Map<number, (response: unknown) => void>;
+  pendingRequests: Map<number, { resolve: (response: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>;
   buffer: string;
 }
 
@@ -190,10 +190,16 @@ function createServerEntry(proc: ChildProcess, language: string): ServerEntry {
 function attachLspProcessHandlers(entry: ServerEntry, language: string): void {
   entry.proc.on("error", (err: Error) => {
     log.warn(`[LSP] ${language} server error: ${err.message}`);
+    // Reject any in-flight requests so callers don't hang awaiting a
+    // response from a dead server. Then drop the entry.
+    rejectPendingRequests(entry, `server error: ${err.message}`);
     servers.delete(language);
   });
   entry.proc.on("close", (code: number | null) => {
     log.debug(`[LSP] ${language} server exited with code ${code}`);
+    // Same as above: a closed server will never respond to pending
+    // requests. Reject them so callers fall back gracefully.
+    rejectPendingRequests(entry, `server exited with code ${code}`);
     servers.delete(language);
   });
 }
@@ -231,16 +237,23 @@ function sendLspMessage(entry: ServerEntry, message: unknown): void {
 function sendLspRequest(entry: ServerEntry, method: string, params: unknown): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const id = entry.nextRequestId++;
-    entry.pendingRequests.set(id, resolve);
-    sendLspMessage(entry, { jsonrpc: "2.0", id, method, params });
-
-    // Timeout
-    setTimeout(() => {
-      if (entry.pendingRequests.has(id)) {
+    const timeoutMs = getLspConfig().requestTimeoutMs;
+    // MEMORY FIX (Round 4 — memory + perf): previously the setTimeout handle
+    // was never captured, so it kept firing (as a no-op) for the full
+    // `timeoutMs` after every SUCCESSFUL request too. In a session that
+    // makes many LSP requests (one per file analyzed), this accumulated
+    // hundreds of dead pending timers. We now capture the handle and clear
+    // it as soon as the request resolves (see resolvePendingRequest /
+    // rejectPendingRequests below).
+    const timer = setTimeout(() => {
+      const pending = entry.pendingRequests.get(id);
+      if (pending) {
         entry.pendingRequests.delete(id);
-        reject(new Error(`LSP request "${method}" timed out after ${getLspConfig().requestTimeoutMs}ms`));
+        pending.reject(new Error(`LSP request "${method}" timed out after ${timeoutMs}ms`));
       }
-    }, getLspConfig().requestTimeoutMs);
+    }, timeoutMs);
+    entry.pendingRequests.set(id, { resolve, reject, timer });
+    sendLspMessage(entry, { jsonrpc: "2.0", id, method, params });
   });
 }
 
@@ -291,10 +304,32 @@ function handleLspMessage(entry: ServerEntry, body: string): void {
 }
 
 function resolvePendingRequest(entry: ServerEntry, id: number, result: unknown): void {
-  const resolver = entry.pendingRequests.get(id);
-  if (!resolver) return;
+  const pending = entry.pendingRequests.get(id);
+  if (!pending) return;
   entry.pendingRequests.delete(id);
-  resolver(result);
+  // Clear the per-request timeout timer so it doesn't fire as a no-op
+  // after the request has already resolved.
+  clearTimeout(pending.timer);
+  pending.resolve(result);
+}
+
+/**
+ * Reject all pending requests for a server entry.
+ *
+ * MEMORY / HANG FIX (Round 4 — memory + perf): previously, when the LSP
+ * server process exited (close handler) or errored (error handler), we
+ * only called `servers.delete(language)`. Any in-flight requests'
+ * promises NEVER settled — callers awaiting `analyzeFileWithLsp()` would
+ * hang forever. We now reject all pending requests with a clear error so
+ * callers can fall back to tree-sitter instead of hanging. The timers
+ * are also cleared so no orphan timer fires later.
+ */
+function rejectPendingRequests(entry: ServerEntry, reason: string): void {
+  for (const [id, pending] of entry.pendingRequests) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(`LSP request #${id} aborted: ${reason}`));
+  }
+  entry.pendingRequests.clear();
 }
 
 function storeDiagnostics(entry: ServerEntry, msg: any): void {

@@ -62,8 +62,21 @@ interface UpdaterState {
 }
 
 function getStatePath(): string {
+  // BUG FIX: previously used `process.env.HOME ?? process.env.USERPROFILE ?? os.homedir()`.
+  // `??` only falls through on null/undefined, NOT on empty string. If HOME
+  // was set to `""` (some CI sandboxes), the result was a RELATIVE path
+  // (`.claude-killer/.tool-updater.json`) which broke state persistence
+  // whenever the agent changed cwd. Use `||` so any falsy env value falls
+  // through. Also note that on POSIX, `os.homedir()` itself reads $HOME —
+  // so when HOME="", os.homedir() ALSO returns "". Fall back to
+  // `os.userInfo().homedir` (reads /etc/passwd on POSIX, ignoring $HOME)
+  // before tmpdir as a last resort.
   return path.join(
-    process.env.HOME ?? process.env.USERPROFILE ?? os.homedir(),
+    process.env.HOME ||
+      process.env.USERPROFILE ||
+      os.homedir() ||
+      os.userInfo().homedir ||
+      os.tmpdir(),
     ".claude-killer",
     ".tool-updater.json"
   );

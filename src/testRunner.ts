@@ -294,10 +294,19 @@ function runTestEZ(dir: string, fileFilter?: string): TestResult {
   };
 }
 
-/** Find a binary in PATH (simple version for testRunner) */
+/**
+ * Find a binary in PATH (simple version for testRunner).
+ *
+ * BUG FIX (ESM): previously used `require("node:child_process")` here. This
+ * project is `{"type":"module"}` (ESM), so `require` is NOT defined — the
+ * call always threw `ReferenceError: require is not defined` and was
+ * silently swallowed by the surrounding try/catch. As a result, this
+ * function ALWAYS returned `null`, breaking Luau (lune) test detection
+ * (see `runTestEZ()` caller at line ~244). `execSync` is already imported
+ * at the top of this module — use it directly.
+ */
 function findBinary(name: string): string | null {
   try {
-    const { execSync } = require("node:child_process");
     const result = execSync(`which ${name} 2>/dev/null || where ${name} 2>/dev/null`, {
       encoding: "utf8",
       timeout: 3000,

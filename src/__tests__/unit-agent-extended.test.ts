@@ -125,6 +125,7 @@ vi.mock("../gitTool.js", () => ({
 
 vi.mock("../multiFileEdit.js", () => ({
   multiFileEdit: vi.fn(() => ({ success: true, filesEdited: [], errors: [] })),
+  multiFileEditWithLocks: vi.fn(async () => ({ success: true, filesEdited: [], errors: [] })),
 }));
 
 vi.mock("../session.js", () => ({

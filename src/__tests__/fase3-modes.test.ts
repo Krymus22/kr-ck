@@ -82,7 +82,7 @@ vi.mock("../gitTool.js", () => ({
   gitStatus: vi.fn(), gitDiff: vi.fn(), gitLog: vi.fn(), gitCommit: vi.fn(),
   gitBlame: vi.fn(), gitShow: vi.fn(), gitBranch: vi.fn(), gitCheckout: vi.fn(),
 }));
-vi.mock("../multiFileEdit.js", () => ({ multiFileEdit: vi.fn(() => ({ success: true, filesEdited: [], errors: [] })) }));
+vi.mock("../multiFileEdit.js", () => ({ multiFileEdit: vi.fn(() => ({ success: true, filesEdited: [], errors: [] })), multiFileEditWithLocks: vi.fn(async () => ({ success: true, filesEdited: [], errors: [] })) }));
 vi.mock("../session.js", () => ({ startSession: vi.fn(() => "test-session"), appendMessage: vi.fn(), getLastSession: vi.fn(() => null), loadSessionMessages: vi.fn(() => []), setActiveSession: vi.fn(), getActiveSessionId: vi.fn(() => null), listSessions: vi.fn(() => []), deleteSession: vi.fn(() => true), renameSession: vi.fn(() => true) }));
 vi.mock("../lspAst.js", () => ({ parseFile: vi.fn(() => ({ language: "typescript", lineCount: 100, symbols: [], imports: [] })) }));
 vi.mock("../retry.js", () => ({ withRetry: vi.fn((fn) => fn()), isRetryableError: vi.fn(() => false) }));

@@ -88,12 +88,45 @@ const EXTENSIONS_BY_LANG: Record<string, string[]> = {
 
 // --- Cache ------------------------------------------------------------------
 
+/**
+ * Maximum number of entries kept in the impact-analysis cache.
+ *
+ * MEMORY FIX (Round 4 — memory + perf): previously the cache grew without
+ * bound — every distinct `targetFile` added an entry holding an
+ * ImpactReport (symbols + usages arrays, potentially hundreds of items).
+ * Expired entries were SKIPPED on read but never DELETED, so over a long
+ * session touching many files the cache held dead entries forever. We now
+ * cap at MAX_CACHE_ENTRIES and evict the oldest (insertion-order = LRU-ish)
+ * when the cap is exceeded. We also delete TTL-expired entries on read so
+ * they don't linger.
+ */
+const MAX_CACHE_ENTRIES = 100;
+
 interface CacheEntry {
   report: ImpactReport;
   fileMtime: number;
   cachedAt: number;
 }
 const cache = new Map<string, CacheEntry>();
+
+/**
+ * Drop TTL-expired entries and enforce MAX_CACHE_ENTRIES.
+ * Called on every cache read and write so the Map never accumulates dead
+ * entries or grows past the cap.
+ */
+function maintainCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of cache) {
+    if (now - entry.cachedAt >= CACHE_TTL_MS) {
+      cache.delete(key);
+    }
+  }
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+}
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -533,6 +566,9 @@ export async function analyzeImpact(
   try {
     const stat = await fs.promises.stat(targetFile);
     const cacheKey = targetFile;
+    // Opportunistic cleanup: drop TTL-expired entries and enforce cap so
+    // the cache doesn't accumulate dead entries between calls.
+    maintainCache();
     const cached = cache.get(cacheKey);
     if (cached && cached.fileMtime === stat.mtimeMs && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
       return { ...cached.report, durationMs: Date.now() - start };
@@ -592,6 +628,8 @@ export async function analyzeImpact(
       fileMtime: stat.mtimeMs,
       cachedAt: Date.now(),
     });
+    // Enforce cap after insert so we never grow past MAX_CACHE_ENTRIES.
+    maintainCache();
   } catch {
     // ignore cache failures
   }

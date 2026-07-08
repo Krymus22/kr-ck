@@ -24,8 +24,21 @@ interface ToolStatus {
  * Check if a binary is available in PATH.
  */
 function checkBinary(name: string): { path: string | null; version: string | null } {
+  // BUG FIX: previously used a single `which ${name} 2>/dev/null || where ${name} 2>/dev/null`
+  // command for both POSIX and Windows. That has two problems on Windows:
+  //   1. `which` is not a cmd.exe builtin, so the first half always errors.
+  //   2. `2>/dev/null` is BASH syntax. cmd.exe interprets it as "redirect
+  //      stderr to a file named `dev\null` in the cwd", creating a stray
+  //      `dev\` directory and `null` file as a side effect on every check.
+  // Use a platform-specific command: `where` (with `2>nul`) on Windows,
+  // `which` (with `2>/dev/null`) on POSIX. `execSync` defaults to cmd.exe
+  // on Windows and /bin/sh on POSIX, so the syntax matches each shell.
+  const isWin = process.platform === "win32";
+  const checkCmd = isWin
+    ? `where ${name} 2>nul`
+    : `which ${name} 2>/dev/null`;
   try {
-    const path = execSync(`which ${name} 2>/dev/null || where ${name} 2>/dev/null`, {
+    const path = execSync(checkCmd, {
       encoding: "utf8",
       timeout: 3000,
       stdio: ["ignore", "pipe", "ignore"],
@@ -35,7 +48,7 @@ function checkBinary(name: string): { path: string | null; version: string | nul
     // Try to get version
     let version: string | null = null;
     try {
-      version = execSync(`${name} --version 2>/dev/null`, {
+      version = execSync(`${name} --version 2>${isWin ? "nul" : "/dev/null"}`, {
         encoding: "utf8",
         timeout: 3000,
         stdio: ["ignore", "pipe", "ignore"],

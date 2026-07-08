@@ -147,7 +147,17 @@ export class FileWatcher {
   }
 
   private emit(event: FileChangeEvent): void {
-    for (const cb of this.callbacks) {
+    // BUG FIX (concurrency race — mirrors Bug Hunter #8c fix in activityTracker):
+    // previously iterated `this.callbacks` Set directly. If a callback called
+    // `addCallback()` or `removeCallback()` (common pattern for one-shot
+    // listeners that remove themselves after firing), the Set was mutated
+    // mid-iteration — leading to non-deterministic behavior (a newly-added
+    // callback might be called or skipped depending on V8's Set iteration
+    // order, and a just-removed callback might still be called once).
+    // Snapshot the callbacks into an array so notification is stable
+    // regardless of any add/remove that happens inside a callback.
+    const snapshot = Array.from(this.callbacks);
+    for (const cb of snapshot) {
       try {
         cb(event);
       } catch (err) {
@@ -164,6 +174,16 @@ export class FileWatcher {
     this.watchers.clear();
     this.watchedPaths.clear();
     this.fileSnapshots.clear();
+    // MEMORY FIX (Round 4 — memory + perf): previously `callbacks` was NOT
+    // cleared here. If a caller registered a callback that captured a large
+    // object (closure over project state, file contents, etc.) and then
+    // called `close()` to tear down the watcher, the callback stayed in the
+    // Set forever — the captured closure could not be GC'd. The singleton
+    // `globalWatcher` (from `getFileWatcher()`) lives for the whole process,
+    // so this leak accumulated across `close()`/re-`watch()` cycles. Clear
+    // callbacks so callers don't have to remember to `removeCallback()`
+    // every single listener before tearing down.
+    this.callbacks.clear();
   }
 }
 

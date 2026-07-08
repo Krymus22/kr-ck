@@ -42,6 +42,28 @@ import { clearAllHonestyState } from "./honestySystem.js";
 import { clearFailures } from "./failureMemory.js";
 import { clearPatternCache } from "./patternExtractor.js";
 import { clearActivity } from "./activityTracker.js";
+// Round 4 integration fix: these light modules keep per-session state at the
+// module level too, but were missing from the cleanup helper. Without these
+// clears, /reset, /session new, /session load, auto-load, and the mode "new"
+// context action would all leak the previous session's:
+//   - planExecutor.currentPlan → hasIncompletePlan() blocks finish in the
+//     NEW session on the first turn that touches files (BUSINESS_RULES.md
+//     §10.5 step 4: "Plan completion check — se hasIncompletePlan() E
+//     touchedFiles > 0"). The stale plan from session A blocks session B.
+//   - specFirst.currentSpec → hasSpec() stays true; the spec from session A
+//     is treated as the contract for session B's implementation.
+//   - tddMode.currentTDD → hasTDD() stays true; tests from session A are
+//     re-run against session B's code.
+//   - todo.currentTodos → the TodoBar still shows the previous session's
+//     task list (visible leak the user can see), and syncTodos() in App.tsx
+//     copies them back into the React state.
+// All four are light modules (only `logger.js` / `node:fs` / `node:path`
+// imports — no apiClient, no OpenAI SDK), so they belong in the synchronous
+// clear set alongside readBeforeWrite, fileRehydration, etc.
+import { clearPlan } from "./planExecutor.js";
+import { clearSpec } from "./specFirst.js";
+import { clearTDD } from "./tddMode.js";
+import { resetTodo } from "./todo.js";
 
 /**
  * Clear ALL module-level state that could leak between sessions/turns.
@@ -63,6 +85,15 @@ import { clearActivity } from "./activityTracker.js";
  *   - bugHunter.previousFindings / fileSnapshots → next round reports
  *     "previously identified bugs" that don't exist in the new session.
  *   - dataGuard.previousFindings → same pattern as bugHunter.
+ *   - planExecutor.currentPlan → hasIncompletePlan() returns true in the
+ *     new session, blocking finish on the first turn that touches files
+ *     (BUSINESS_RULES.md §10.5 step 4 + §6.4 `[PLAN` preserve prefix).
+ *   - specFirst.currentSpec → hasSpec() returns true in the new session,
+ *     so the IA thinks a spec is already written.
+ *   - tddMode.currentTDD → hasTDD() returns true in the new session, so
+ *     tests from the previous session are re-run against new code.
+ *   - todo.currentTodos → the TodoBar still shows the previous session's
+ *     tasks (visible leak the user can see in the TUI).
  *
  * The helper is async because of the dynamic imports for the heavy modules.
  * Callers fire it best-effort via `void clearAllModuleState()`. The
@@ -81,6 +112,11 @@ export async function clearAllModuleState(): Promise<void> {
   try { clearFailures(); } catch { /* failureMemory optional */ }
   try { clearPatternCache(); } catch { /* patternExtractor optional */ }
   try { clearActivity(); } catch { /* activityTracker optional */ }
+  // Round 4 integration fix: plan/spec/tdd/todo module-level singletons.
+  try { clearPlan(); } catch { /* planExecutor optional */ }
+  try { clearSpec(); } catch { /* specFirst optional */ }
+  try { clearTDD(); } catch { /* tddMode optional */ }
+  try { resetTodo(); } catch { /* todo optional */ }
 
   // Asynchronous clears (heavy modules — dynamic import to avoid eager-loading
   // apiClient / OpenAI SDK at module init time).
@@ -117,4 +153,9 @@ export function clearAllModuleStateSync(): void {
   try { clearFailures(); } catch { /* failureMemory optional */ }
   try { clearPatternCache(); } catch { /* patternExtractor optional */ }
   try { clearActivity(); } catch { /* activityTracker optional */ }
+  // Round 4 integration fix: plan/spec/tdd/todo module-level singletons.
+  try { clearPlan(); } catch { /* planExecutor optional */ }
+  try { clearSpec(); } catch { /* specFirst optional */ }
+  try { clearTDD(); } catch { /* tddMode optional */ }
+  try { resetTodo(); } catch { /* todo optional */ }
 }

@@ -38,7 +38,7 @@ import { editFile, type EditOperation } from "./fileEdit.js";
 import { globSearch } from "./fileSearch.js";
 import { grepSearch, formatGrepResults } from "./contentSearch.js";
 import { gitStatus, gitDiff, gitLog, gitCommit, gitBlame, gitShow, gitBranch, gitCheckout } from "./gitTool.js";
-import { multiFileEdit, type FileEditRequest } from "./multiFileEdit.js";
+import { multiFileEditWithLocks, type FileEditRequest } from "./multiFileEdit.js";
 import { listSessions } from "./session.js";
 import { parseFile } from "./lspAst.js";
 import { withRetry, isRetryableError } from "./retry.js";
@@ -488,7 +488,12 @@ const toolHandlers: Record<string, ToolHandler> = {
     if (!requests || !Array.isArray(requests)) {
       return { resultStr: "[ERROR] 'requests' array is required", usedHeal: false };
     }
-    const result = multiFileEdit(requests);
+    // BUG FIX (concurrency race): acquire per-file locks BEFORE editing to
+    // prevent two concurrent agents (main + sub-agent, or two parallel tool
+    // calls) from racing on the same file. The single-file `editar_arquivo`
+    // already locks via fileLock.ts; this extends the same protection to
+    // multi-file edits. See multiFileEditWithLocks docstring for rationale.
+    const result = await multiFileEditWithLocks(requests);
     const errorList = result.errors.map((e) => `${e.file}: ${e.error}`).join("; ");
     const output = result.success
       ? t("tool.edited_files", result.filesEdited.join(", "))

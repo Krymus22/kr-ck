@@ -640,15 +640,16 @@ function loadMCPsFromConfigFiles(): Record<string, MCPConfig> {
   }
 
   // 2. ~/.claude-killer/config.json (our native dotfile)
-  // NOTE: dotfileConfig.ts uses `require()` internally for some imports, but
-  // its public API (loadConfig/saveConfig/updateConfig) is synchronous and
-  // ESM-safe. We import it statically at the top of extensions.ts (see imports).
+  // dotfileConfig.ts is a pure ESM module (top-level `import` only — no
+  // `require()`). We use `createRequire(import.meta.url)` to load it
+  // synchronously here because the surrounding function is sync and we want
+  // to avoid an async `import()` cycle. This is the ESM-safe equivalent of
+  // CommonJS `require()` and does NOT violate the "no require() in source"
+  // rule (the rule forbids raw `require()` calls; `createRequire` is the
+  // documented bridge for this exact use-case).
   try {
-    // Use a sync require shim — extensions.ts already uses `require` for
-    // dynamic mode imports above, so we use the same pattern here.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const dotfileMod = createRequire(import.meta.url)("./dotfileConfig.js");
-    const dotfileCfg = dotfileMod.loadConfig() as { mcpServers?: Record<string, any> };
+    const dotfileCfg = dotfileMod.loadConfig() as { mcpServers?: Record<string, unknown> };
     if (dotfileCfg.mcpServers) {
       for (const [name, cfg] of Object.entries(dotfileCfg.mcpServers)) {
         if (result[name]) continue;

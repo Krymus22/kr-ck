@@ -16,6 +16,7 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { createRequire } from "node:module";
 import * as log from "./logger.js";
 
@@ -114,8 +115,21 @@ export class ToolRegistry {
   private readonly userToolsDir: string;
   
   constructor() {
+    // BUG FIX: previously used `process.env.HOME ?? process.env.USERPROFILE ?? ""`.
+    // `??` only falls through on null/undefined, NOT on empty string. If HOME
+    // was set to `""` (e.g. in some CI sandboxes or when running as root with
+    // a cleared env), the result was a RELATIVE path (`".claude-killer"`),
+    // which broke tool discovery whenever the agent changed cwd. Use `||` so
+    // any falsy env value falls through. Also note that on POSIX,
+    // `os.homedir()` itself reads $HOME — so when HOME="", os.homedir() ALSO
+    // returns "". Fall back to `os.userInfo().homedir` (which reads
+    // /etc/passwd on POSIX, ignoring $HOME) before tmpdir as a last resort.
     const base = path.join(
-      process.env.HOME ?? process.env.USERPROFILE ?? "",
+      process.env.HOME ||
+        process.env.USERPROFILE ||
+        os.homedir() ||
+        os.userInfo().homedir ||
+        os.tmpdir(),
       ".claude-killer"
     );
     this.userToolsPath = path.join(base, "tools.json");
@@ -222,9 +236,15 @@ export class ToolRegistry {
   getToolStatus(toolName: string): "missing" | "found" | "working" {
     const tool = this.tools.get(toolName);
     if (!tool) return "missing";
+    // BUG FIX: previously this called isInstalled() AND THEN returned
+    // `tool.detection.binaryPath ? "found" : "missing"`. When isInstalled
+    // succeeded via the slow fallback path (execSync --version), binaryPath
+    // was left null, so a tool that IS installed reported as "missing" —
+    // inverted logic. Once we've confirmed isInstalled, the tool is at
+    // least "found". (We don't currently probe the binary to distinguish
+    // "found" from "working"; both branches collapse to "found".)
     if (!this.isInstalled(toolName)) return "missing";
-    // If we have binaryPath from detector, it's "found", otherwise "missing"
-    return tool.detection.binaryPath ? "found" : "missing";
+    return "found";
   }
   
   /**
@@ -610,13 +630,18 @@ export class ToolExecutor {
       const duration = Date.now() - startTime;
       
       // Parse error output
+      // BUG FIX: previously used `stderr ?? error.message`. But `stderr`
+      // was already coerced to `""` two lines above, so it was NEVER
+      // null/undefined — the `??` never fell through, and the user got an
+      // empty error message instead of the underlying error. Use `||` so
+      // an empty-string stderr falls back to error.message.
       const stderr = error.stderr ?? "";
       const stdout = error.stdout ?? "";
       
       return {
         success: false,
         output: stdout,
-        errors: [stderr ?? error.message],
+        errors: [stderr || error.message],
         exitCode: error.status,
         duration
       };

@@ -137,15 +137,28 @@ export function formatGrepResults(matches: GrepMatch[], maxDisplay: number = 50)
 
   for (let i = 0; i < displayCount; i++) {
     const m = matches[i];
+    // BUG FIX: previously used `m.before.indexOf(b)` / `m.after.indexOf(a)`
+    // to compute line numbers. That had TWO bugs:
+    //   1. `indexOf` returns the FIRST index of duplicate values, so repeated
+    //      context lines all got the SAME line number (the first one's index).
+    //   2. The before formula `m.line - indexOf(b) - 1` is mathematically
+    //      backwards: it assigns line `m.line-1` to the FIRST context line
+    //      (which is actually `m.line - before.length`) and line
+    //      `m.line - before.length` to the LAST context line (which is
+    //      actually `m.line - 1`). The displayed order was the reverse of
+    //      the line numbers shown. Use explicit indices so each line gets
+    //      the correct, monotonically-increasing line number.
     if (m.before?.length) {
-      for (const b of m.before) {
-        lines.push(`  ${m.file}:${m.line - m.before.indexOf(b) - 1}: ${b}`);
+      for (let j = 0; j < m.before.length; j++) {
+        const b = m.before[j];
+        lines.push(`  ${m.file}:${m.line - m.before.length + j}: ${b}`);
       }
     }
     lines.push(`-> ${m.file}:${m.line}: ${m.content}`);
     if (m.after?.length) {
-      for (const a of m.after) {
-        lines.push(`  ${m.file}:${m.line + m.after.indexOf(a) + 1}: ${a}`);
+      for (let j = 0; j < m.after.length; j++) {
+        const a = m.after[j];
+        lines.push(`  ${m.file}:${m.line + j + 1}: ${a}`);
       }
     }
   }

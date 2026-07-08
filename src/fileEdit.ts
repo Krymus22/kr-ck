@@ -352,9 +352,44 @@ export async function editFile(
   }
 
   // Write
+  // BUG FIX (Error Path Hunter Round 4): wrap the write in try/catch and
+  // restore the original content on failure. Previously, if
+  // fs.promises.writeFile threw (disk full, EACCES, EISDIR), the error
+  // propagated up to dispatchToolCall which returned "[ERROR] ..." to the
+  // IA — but the file on disk could be partially written / truncated,
+  // leaving it corrupted. The rollback backup saved by agent.ts
+  // (editar_arquivo handler) was sitting in the rollback store but the
+  // file was never auto-restored. Now we restore `original` content here
+  // so the file is left in its pre-edit state. The error is returned as
+  // a tool result string (not thrown) so the agent loop continues.
   const dir = path.dirname(resolved);
-  fs.mkdirSync(dir, { recursive: true });
-  await fs.promises.writeFile(resolved, result.content, "utf8");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    await fs.promises.writeFile(resolved, result.content, "utf8");
+  } catch (writeErr) {
+    // Attempt to restore the original content so the file is not left
+    // in a partially-written / corrupted state. Best-effort — if restore
+    // also fails (e.g., disk still full), we log but still report the
+    // primary write error to the IA.
+    let restored = false;
+    if (original.length > 0) {
+      try {
+        await fs.promises.writeFile(resolved, original, "utf8");
+        restored = true;
+        log.warn(`fileEdit: write failed — restored original content for ${resolved}`);
+      } catch (restoreErr) {
+        log.error(`fileEdit: write failed AND restore failed for ${resolved}: ${(restoreErr as Error).message}`);
+      }
+    }
+    const rollbackNote = original.length > 0
+      ? (restored
+        ? `\n[ROLLBACK] Original content was restored to disk. Use desfazer_edicao to recover if needed.`
+        : `\n[ROLLBACK] Restore failed — use desfazer_edicao to recover from the rollback store.`)
+      : "";
+    const errMsg = `[ERROR] Failed to write ${resolved}: ${(writeErr as Error).message}${rollbackNote}`;
+    log.toolResult("editar_arquivo", false, (writeErr as Error).message);
+    return errMsg;
+  }
 
   log.toolResult("editar_arquivo", true, `${result.replacements} replacements`);
 

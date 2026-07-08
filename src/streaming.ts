@@ -112,14 +112,28 @@ export function truncateToTokenLimit(text: string, maxTokens: number): string {
 export class StreamingMetrics {
   private startTime = 0;
   private firstTokenTime = 0;
-  private readonly tokenTimes: number[] = [];
+  /**
+   * Bounded sample of token arrival timestamps.
+   *
+   * MEMORY FIX (Round 4 — memory + perf): previously this was an unbounded
+   * `number[]` that grew by one entry per token. A long streaming response
+   * (thousands of tokens) held thousands of numbers in memory for the
+   * lifetime of the metrics object — pure waste, since `getTokensPerSecond`
+   * only needs the FIRST and LAST timestamps to compute throughput. We now
+   * keep the first timestamp (for TTFT-relative TPS) and overwrite the last
+   * on every token. O(1) memory instead of O(tokens).
+   */
+  private firstTokenTs = 0;
+  private lastTokenTs = 0;
   private totalTokens = 0;
 
   start(): void { this.startTime = Date.now(); }
   onFirstToken(): void { this.firstTokenTime = Date.now(); }
   
   onToken(): void {
-    this.tokenTimes.push(Date.now());
+    const now = Date.now();
+    if (this.firstTokenTs === 0) this.firstTokenTs = now;
+    this.lastTokenTs = now;
     this.totalTokens++;
   }
 
@@ -128,11 +142,9 @@ export class StreamingMetrics {
   }
 
   getTokensPerSecond(): number {
-    if (this.tokenTimes.length < 2) return 0;
-    const last = this.tokenTimes.at(-1);
-    const first = this.tokenTimes[0];
-    if (last == null || first == null) return 0;
-    const elapsed = (last - first) / 1000;
+    if (this.totalTokens < 2) return 0;
+    if (this.lastTokenTs === 0 || this.firstTokenTs === 0) return 0;
+    const elapsed = (this.lastTokenTs - this.firstTokenTs) / 1000;
     return elapsed > 0 ? this.totalTokens / elapsed : 0;
   }
 

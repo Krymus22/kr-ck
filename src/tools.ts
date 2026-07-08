@@ -315,7 +315,33 @@ export async function aplicarDiff(
     fs.writeFileSync(resolved, contentToWrite, "utf8");
     log.success(`File written: ${resolved} (${contentToWrite.length} bytes)`);
   } catch (err) {
-    const msg = `[ERROR] Failed to write ${resolved}: ${(err as Error).message}`;
+    // BUG FIX (Error Path Hunter Round 4): On write failure (disk full,
+    // EACCES, EISDIR, etc.) the file on disk may be partially written or
+    // truncated, leaving it in a corrupted state. The rollback backup was
+    // already saved above (saveBackup) — but the original content was NOT
+    // restored to disk, so the file stayed corrupted until the user (or IA)
+    // manually invoked desfazer_edicao.
+    //
+    // Now: if we had a non-empty `originalContent` (file existed before),
+    // attempt to restore it to disk so the file is left in its pre-edit
+    // state. Best-effort — if restore also fails (e.g., disk still full),
+    // we log the secondary failure but still report the primary write error.
+    let restored = false;
+    if (originalContent.length > 0) {
+      try {
+        fs.writeFileSync(resolved, originalContent, "utf8");
+        restored = true;
+        log.warn(`[APLICAR_DIFF] Write failed — restored original content for ${resolved}`);
+      } catch (restoreErr) {
+        log.error(`[APLICAR_DIFF] Write failed AND restore failed for ${resolved}: ${(restoreErr as Error).message}. Backup still available via desfazer_edicao (id=${backupId ?? "n/a"}).`);
+      }
+    }
+    const rollbackNote = originalContent.length > 0
+      ? (restored
+        ? `\n[ROLLBACK] Original content was restored to disk. Backup id: ${backupId ?? "n/a"}.`
+        : `\n[ROLLBACK] Restore failed — backup id ${backupId ?? "n/a"} still available via desfazer_edicao.`)
+      : "";
+    const msg = `[ERROR] Failed to write ${resolved}: ${(err as Error).message}${rollbackNote}`;
     log.toolResult("aplicar_diff", false, (err as Error).message);
     return { written: false, toolMessage: msg };
   }
@@ -393,9 +419,26 @@ export interface ListarBackupsArgs {
 
 /**
  * List available rollback backups for a file (or all backups if no path given).
+ *
+ * Edge case handling (Bug Hunter #4 round 4):
+ *   - null/undefined args → list ALL backups (the caminho is optional, so a
+ *     missing args object is equivalent to "no filter"). Previously this
+ *     threw TypeError on `args.caminho`.
+ *   - non-string `args.caminho` (number/object/array) → ignored, treats as
+ *     "no filter". Previously `path.resolve(123)` threw TypeError
+ *     synchronously because path.resolve only accepts strings/URLs.
+ *   - empty string `args.caminho` → same as no filter (lists all).
  */
 export function listarBackups(args: ListarBackupsArgs): string {
-  const filter = args.caminho ? path.resolve(args.caminho) : undefined;
+  // Validate args BEFORE touching args.caminho — both null/undefined and
+  // a non-string caminho would crash path.resolve() synchronously, which
+  // would crash the caller instead of returning a graceful message.
+  // caminho is OPTIONAL per the ListarBackupsArgs interface, so a missing
+  // or invalid value simply means "list all backups".
+  const caminho = args != null && typeof args.caminho === "string" && args.caminho !== ""
+    ? args.caminho
+    : undefined;
+  const filter = caminho ? path.resolve(caminho) : undefined;
   log.toolCall("listar_backups", { caminho: filter ?? "(todos)" });
 
   const backups = listBackups(filter);

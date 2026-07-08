@@ -173,6 +173,15 @@ function resolveImportPath(source: string, fromFile: string): string | null {
 /**
  * Check if all imports in a file resolve to existing files.
  * Returns list of missing imports.
+ *
+ * PERF FIX (Round 4 — memory + perf): previously, when multiple imports
+ * targeted the SAME file (extremely common in TS/JS — e.g. `import { a }
+ * from './utils'` and `import { b } from './utils'`), each import
+ * triggered its own `fs.readFileSync(resolved, "utf8")` to check symbol
+ * exports. For a file with 20 imports from 3 unique sources, that was 20
+ * disk reads instead of 3. We now cache file contents within a single
+ * `checkImports` call in a local Map, so each unique resolved path is
+ * read at most once.
  */
 export function checkImports(filePath: string, content: string): ImportCheckResult {
   const imports = extractImports(filePath, content);
@@ -181,6 +190,18 @@ export function checkImports(filePath: string, content: string): ImportCheckResu
   }
 
   const missing: Array<{ symbol: string; source: string; reason: string }> = [];
+  // Per-call cache: resolved path -> file content. Avoids re-reading the
+  // same file when multiple imports reference it. Local to this call so it
+  // doesn't need invalidation — GC'd when checkImports returns.
+  const fileContentCache = new Map<string, string>();
+  const readCached = (p: string): string => {
+    let cached = fileContentCache.get(p);
+    if (cached === undefined) {
+      cached = fs.readFileSync(p, "utf8");
+      fileContentCache.set(p, cached);
+    }
+    return cached;
+  };
 
   for (const imp of imports) {
     const resolved = resolveImportPath(imp.source, filePath);
@@ -211,7 +232,7 @@ export function checkImports(filePath: string, content: string): ImportCheckResu
     } else {
       // File exists - check if symbols are exported
       if (imp.symbols.length > 0) {
-        const targetContent = fs.readFileSync(resolved, "utf8");
+        const targetContent = readCached(resolved);
         for (const sym of imp.symbols) {
           // Check if symbol is exported (simplified check)
           const exportPatterns = [

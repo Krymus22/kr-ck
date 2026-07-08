@@ -140,11 +140,20 @@ describe("editFile — operações de criação e sobrescrita", () => {
     fsState.writeErrorCode = "EACCES";
     fsState.writeErrorMessage = "EACCES: permission denied, open 'arquivo'";
 
-    await expect(
-      editFile(file, [{ search: "original", replace: "modificado" }])
-    ).rejects.toThrow(/EACCES/);
+    // BUG FIX (Error Path Hunter Round 4): editFile now CATCHES write errors
+    // and returns an [ERROR] string instead of throwing. This is better
+    // because: (1) the agent loop continues without the error propagating
+    // to dispatchToolCall's catch block, (2) the rollback restore is
+    // attempted automatically, (3) consistent with other error paths
+    // (file-not-found, search-not-found) which also return strings.
+    const result = await editFile(file, [{ search: "original", replace: "modificado" }]);
+    expect(result).toContain("[ERROR]");
+    expect(result).toContain("EACCES");
+    expect(result).toMatch(/ROLLBACK/);
 
-    // Conteúdo original permanece intacto
+    // Conteúdo original permanece intacto (EACCES = can't open file, so
+    // no bytes were written; the restore attempt also fails but the file
+    // was never modified).
     expect(fs.readFileSync(file, "utf8")).toBe("conteúdo original\n");
   });
 
@@ -152,10 +161,12 @@ describe("editFile — operações de criação e sobrescrita", () => {
     const dirPath = path.join(TEST_DIR, "meu_dir");
     fs.mkdirSync(dirPath);
 
-    // writeFileSync em diretório lança EISDIR — o mock passa para o fs real
-    await expect(
-      editFile(dirPath, [{ search: "", replace: "conteúdo" }], { createIfMissing: true })
-    ).rejects.toThrow();
+    // writeFileSync em diretório lança EISDIR — o mock passa para o fs real.
+    // BUG FIX (Error Path Hunter Round 4): editFile now returns an [ERROR]
+    // string instead of throwing (consistent with other error paths).
+    const result = await editFile(dirPath, [{ search: "", replace: "conteúdo" }], { createIfMissing: true });
+    expect(result).toContain("[ERROR]");
+    expect(result).toMatch(/EISDIR|Failed to write/);
   });
 
   it("preserva permissões do arquivo original", async () => {

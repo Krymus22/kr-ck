@@ -111,6 +111,16 @@ export function snapshotFileBeforeEdit(filePath: string): void {
 /**
  * IDEIA E: Generate a diff of what changed in a file after editing.
  * Returns a human-readable diff string.
+ *
+ * MEMORY FIX (Round 4 — memory + perf): after generating the diff we DELETE
+ * the snapshot from `fileSnapshots`. The snapshot holds the FULL pre-edit
+ * file content (potentially megabytes for large files). Before this fix the
+ * entry stayed in the Map until `resetBugHunterState()` ran at the start of
+ * the NEXT turn — so within a single turn that touched N files, ALL N
+ * pre-edit contents were held in memory simultaneously. For a refactor
+ * touching 50 files of ~100 KB each that's ~5 MB held just for diff
+ * snapshots that have already served their purpose. The diff is the only
+ * thing we need going forward; the raw snapshot is no longer referenced.
  */
 export function generateDiffAfterEdit(filePath: string): string {
   try {
@@ -121,6 +131,10 @@ export function generateDiffAfterEdit(filePath: string): string {
     const after = nodeFs.existsSync(resolved)
       ? nodeFs.readFileSync(resolved, "utf8")
       : "";
+
+    // We have what we need (before + after). Release the snapshot NOW so the
+    // pre-edit content doesn't linger in memory for the rest of the turn.
+    fileSnapshots.delete(resolved);
 
     if (before === after) return ""; // no changes
 
