@@ -47,7 +47,7 @@ jobs:
       - name: Run tests
         run: npx vitest run --coverage --coverage.reporter=lcov --coverage.reporter=text-summary --exclude src/__tests__/memory-full.test.ts
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
           path: coverage/lcov.info
