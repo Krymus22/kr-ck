@@ -221,7 +221,7 @@ Se nenhuma: pool desabilitada → single-key mode.
 
 ## 6. Compactação de Contexto
 
-> Arquivos: `src/history.ts`, `src/contextCompaction.ts`, `src/llmCompactor.ts`
+> Arquivos: `src/history.ts`, `src/contextCompaction.ts`, `src/llmCompactor.ts`, `src/fileRehydration.ts`, `src/skillTracker.ts`
 
 ### 6.1 Quando dispara
 
@@ -233,7 +233,18 @@ Se nenhuma: pool desabilitada → single-key mode.
 
 1. **LLM-based compaction** (se `effortLevel ≠ "low"` E tokens > 1.2× threshold):
    - Resume os 70% mais antigos via IA.
-   - Preserva: decisões arquiteturais, bugs não resolvidos, próximos passos.
+   - **9 seções preservadas** (Gap 8):
+     1. User's Original Intent (quote verbatim)
+     2. Architectural Decisions Made
+     3. Arquivos Modificados
+     4. Unresolved Bugs
+     5. Problem-Solving Logic Chain (WHY, não só WHAT)
+     6. All User Messages Summary (quote verbatim)
+     7. Planned Next Steps
+     8. Currently Working On
+     9. User Preferences/Constraints (quote verbatim)
+     10. Critical Technical Context
+   - **Anti-drift** (Gap 5): prompt exige "DIRECTLY QUOTE key phrases rather than paraphrasing". Se user disse "never", escreve "never", não "prefers not to".
    - Substitui por 1 system message `"[AI CONTEXT COMPACTED - N old messages summarized...]"`.
 
 2. **Heuristic compaction** (fallback):
@@ -244,15 +255,76 @@ Se nenhuma: pool desabilitada → single-key mode.
 
 3. **Mechanical compaction** (legacy):
    - `COMPACT_KEEP_RECENT = 6` — mantém últimas 6 mensagens.
-   - `PRESERVE_PREFIXES`: `## TASK_STATE`, `## Persistent Memory`, `[CONVERSATION MEMORY`.
+   - `PRESERVE_PREFIXES` (ver 6.4).
    - **Estes prefixes NUNCA são removidos** por compaction.
 
-### 6.3 Regras imutáveis
+### 6.3 Pós-compactação — re-hidratação (Gaps 1, 2, 9)
+
+Após compactar, 3 system messages são injetadas antes das mensagens recentes:
+
+1. **Mensagem de continuação** (Gap 2):
+   - `"[SESSION CONTINUATION] This session was continued from a previous conversation..."`
+   - Diz pra IA continuar trabalhando sem perguntar ao usuário.
+   - Preservada em `PRESERVE_PREFIXES`.
+
+2. **Re-hidratação de arquivos** (Gap 1) — `fileRehydration.ts`:
+   - Relê os **5 arquivos mais recentemente editados** do disco.
+   - Budget: **5,000 tokens por arquivo**, **50,000 tokens total**.
+   - Arquivos truncados se excederem o limite (com aviso `[TRUNCATED]`).
+   - Pula arquivos deletados, diretórios, e arquivos binários.
+   - Preservada em `PRESERVE_PREFIXES` como `"## Recently Modified Files"`.
+   - `recordSessionFileEdit(path)` chamado em `trackFileAccess()` quando WRITE tools são usadas.
+   - `clearSessionFiles()` chamado em `/reset`, `/session new`, `/session load`, auto-load.
+
+3. **Re-injeção de skills** (Gap 9) — `skillTracker.ts`:
+   - Re-injeta conteúdo das **skills invocadas nesta sessão**.
+   - Budget: **5,000 tokens por skill**, **25,000 tokens total**.
+   - Preservada em `PRESERVE_PREFIXES` como `"## Invoked Skills"`.
+   - `recordSkillInvocation(path)` chamado quando IA lê arquivo que matchea uma skill ativa.
+   - `clearInvokedSkills()` chamado em `/reset`, `/session new`, `/session load`, auto-load.
+
+### 6.4 PRESERVE_PREFIXES (atualizado)
+
+```
+"## TASK_STATE"
+"## Persistent Memory"
+"[CONVERSATION MEMORY"
+"[PLAN"                          # Gap 3: preserve plan state
+"[SESSION CONTINUATION"          # Gap 2: preserve continuation message
+"## Recently Modified Files"     # Gap 1: preserve re-hydrated files
+"## Invoked Skills"              # Gap 9: preserve re-injected skills
+```
+
+### 6.5 REPLACABLE_PREFIXES (atualizado)
+
+Bug fix (Gap 3): `"[PLAN]"` (com closing bracket) → `"[PLAN"` (sem bracket) para matchear `formatPlan()` que retorna `"[PLAN - N steps]"`.
+
+```
+"## TASK_STATE"
+"## Persistent Memory"
+"## SELF-VALIDATION"
+"[SELF-VALIDATION"
+"[PLAN"                          # BUG FIX: era "[PLAN]" que não matcheava
+"[SESSION CONTINUATION"          # Gap 2
+"[GOAL"
+"[HONESTY"
+"[STRICT_GATE"
+"[QUALITY"
+"[FALSE_PROMISE"
+"[CHECKPOINT"
+```
+
+### 6.6 Regras imutáveis
 
 - **`COMPACT_KEEP_RECENT = 6`** — NÃO reduzir (IA perde contexto recente).
-- **`PRESERVE_PREFIXES`** — TASK_STATE, Persistent Memory, CONVERSATION MEMORY devem sobreviver compaction.
-- **Dangling tool messages** são removidas pós-compaction (tool sem tool_call correspondente = 400 na API).
-- **Compaction snapshot** é salvo no session file após compactar (para reload restaurar estado exato).
+- **`PRESERVE_PREFIXES`** — TODOS os prefixes acima devem sobreviver compaction.
+- **9 seções no resumo LLM** — NÃO reduzir (cada seção preserva info crítica).
+- **Anti-drift**: prompt deve dizer "DIRECTLY QUOTE" — NÃO remover.
+- **Re-hidratação de arquivos**: 5 arquivos, 5k tokens/arquivo, 50k total — NÃO remover.
+- **Re-injeção de skills**: 5k tokens/skill, 25k total — NÃO remover.
+- **Mensagem de continuação**: sempre injetada após compactação.
+- **Dangling tool messages** são removidas pós-compaction.
+- **Compaction snapshot** é salvo no session file após compactar.
 - **`effortLevel = "low"` desabilita LLM compaction** — usa só mechanical.
 
 ---
@@ -371,6 +443,55 @@ Se nenhuma: pool desabilitada → single-key mode.
 - **`low` desabilita LLM compaction** — usa só mechanical (mais rápido).
 - **Sub-agents powerful (maxToolCalls=15) só no `max`** — read-only (maxToolCalls=8) no `high`.
 - **`/effort` atualiza system prompt imediatamente** (`history[0].content = getSystemPrompt()`).
+
+---
+
+## 9.5 Contexto Injetado na IA
+
+> O que a IA recebe no contexto, além das mensagens do usuário.
+
+### 9.5.1 System Prompt (history[0]) — injetado no início de cada turno
+
+| Componente | Quando | Fonte |
+|-----------|--------|-------|
+| **Data atual** | Sempre | `## Current Date` — "Today is YYYY-MM-DD" |
+| **Base system prompt** | Sempre | `BASE_SYSTEM_PROMPT` (regras, tools, estilo, honesty rules) |
+| **Environment info** (Gap 12) | Sempre | `## Environment` — cwd, platform, shell, Node version, model |
+| **Tool-routing rules** (Gap 14) | Sempre | `## Tool Routing` — "NEVER use executar_comando for file ops" |
+| **Writing style** (Gap 15) | Sempre | `## Response Style` — markdown, ≤25 words entre tools, ≤100 words final |
+| **Effort snippet** | Sempre | Depth do pensar por nível (low/medium/high/max) |
+| **Caveman mode** | Se ativo | Override de estilo |
+| **Project Memory** | Sempre | `## Project Memory` — CLAUDE.md + AGENTS.md + .claude-killer/AGENTS.md |
+| **Available Skills** | Se há skills | `## Available Skills` — nome + descrição (NÃO conteúdo completo) |
+| **Patterns** | Sempre | `injectPatterns()` — anti-padrões conhecidos do projeto |
+
+### 9.5.2 System Messages — injetadas DURANTE o turno
+
+| Componente | Quando | Prefixo |
+|-----------|--------|---------|
+| **TASK_STATE** | A cada parada | `## TASK_STATE` |
+| **Persistent Memory** | Quando setado | `## Persistent Memory` |
+| **CONVERSATION MEMORY** | Após compactação | `[CONVERSATION MEMORY` |
+| **SESSION CONTINUATION** (Gap 2) | Após compactação | `[SESSION CONTINUATION` |
+| **Recently Modified Files** (Gap 1) | Após compactação | `## Recently Modified Files` |
+| **Invoked Skills** (Gap 9) | Após compactação | `## Invoked Skills` |
+| **Plan state** | Se plan ativo | `[PLAN` |
+| **Goal verification** | Após goal verifier | `[GOAL` |
+| **Bug Hunter findings** | Após bug hunter | `[BUG_HUNTER` |
+| **Strict gate errors** | Se tsc/lint falha | `[STRICT_GATE` |
+| **Checkpoint** | Em 20%/45%/70% | `[CHECKPOINT` |
+| **Failure memory** | Antes de write tools | (sem prefixo específico) |
+| **Context injection** | Após write tools | (sem prefixo específico) |
+
+### 9.5.3 Regras imutáveis de contexto
+
+- **System prompt é dinâmico** — reconstruído a cada chamada de `getSystemPrompt()`.
+- **Environment info** sempre inclui: cwd, platform, shell, Node version, model.
+- **Tool-routing rules** proíbem `executar_comando` para operações de arquivo.
+- **Writing style** limita 25 palavras entre tools, 100 palavras na resposta final.
+- **Skills** só mostram nome + descrição no system prompt — conteúdo completo só se IA ler.
+- **PRESERVE_PREFIXES** garantem que system messages críticas sobrevivam compactação.
+- **REPLACABLE_PREFIXES** garantem que system messages não acumulem (replace, não append).
 
 ---
 

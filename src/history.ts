@@ -20,6 +20,7 @@ import type OpenAI from "openai";
 
 import { getActiveSkills } from "./extensions.js";
 import { getEffortPromptSnippet } from "./effortLevels.js";
+import { config } from "./config.js";
 
 // --- Project Memory (CLAUDE.md / AGENTS.md) --
 
@@ -300,6 +301,72 @@ export function getCavemanLevel(): string | null {
   return currentCavemanLevel;
 }
 
+// ─── Gap 12: Environment info ─────────────────────────────────────────────
+// IA needs to know its runtime environment to make correct decisions.
+// Without this, IA may use Linux commands on Windows, assume wrong cwd,
+// or not know the shell available.
+function buildEnvironmentInfo(): string {
+  try {
+    const cwd = process.cwd();
+    const platform = process.platform;
+    const shell = process.env.SHELL ?? process.env.COMSPEC ?? "unknown";
+    const nodeVersion = process.version;
+    const platformLabel =
+      platform === "win32" ? "Windows" :
+      platform === "darwin" ? "macOS" :
+      platform === "linux" ? "Linux" :
+      platform;
+    return [
+      "## Environment",
+      `- Working directory: ${cwd}`,
+      `- Platform: ${platformLabel} (${platform})`,
+      `- Shell: ${shell}`,
+      `- Node.js: ${nodeVersion}`,
+      `- Model: ${config.model}`,
+      "",
+      "Use platform-appropriate commands. On Windows, prefer PowerShell syntax. " +
+      "On macOS/Linux, use bash syntax. The working directory above is your cwd " +
+      "— use absolute paths in tools to avoid ambiguity.",
+    ].join("\n");
+  } catch {
+    return "";
+  }
+}
+
+// ─── Gap 14: Tool-routing rules ───────────────────────────────────────────
+// Prevent IA from using executar_comando for file operations when dedicated
+// tools exist. This saves tokens (no command output) and is safer (goes
+// through poka-yoke, read-before-write, etc).
+const TOOL_ROUTING_RULES = `## Tool Routing — CRITICAL
+
+NEVER use \`executar_comando\` for file operations when a dedicated tool exists:
+
+- To READ a file → use \`ler_arquivo({ caminho })\`. NEVER \`executar_comando("cat file")\`.
+- To SEARCH file content → use \`buscar_texto({ pattern })\`. NEVER \`executar_comando("grep ...")\`.
+- To FIND files → use \`buscar_arquivos({ pattern })\`. NEVER \`executar_comando("find ...")\` or \`executar_comando("ls ...")\`.
+- To EDIT a file → use \`editar_arquivo\` or \`editar_multi_arquivos\`. NEVER \`executar_comando("sed ...")\` or \`executar_comando("echo > file")\`.
+
+\`executar_comando\` is ONLY for:
+- Running builds (\`npm run build\`, \`rojo build\`)
+- Running tests (\`npm test\`, \`npx vitest\`)
+- Running git (\`git status\`, \`git commit\`)
+- Running package managers (\`npm install\`, \`wally install\`)
+- One-off system commands that have no dedicated tool
+
+If you find yourself typing \`executar_comando("cat ...")\` or \`executar_comando("grep ...")\`, STOP and use the dedicated tool instead.`;
+
+// ─── Gap 15: Writing style constraints ────────────────────────────────────
+// Keep IA concise. Without limits, IA can be verbose between tool calls
+// (explaining what it will do) and in final responses (over-explaining).
+const WRITING_STYLE_RULES = `## Response Style — CRITICAL
+
+- Use **markdown** for formatting (headers, bullets, code blocks).
+- Between tool calls, keep text **minimal** (≤25 words explaining what you're doing). Don't narrate every step — just act.
+- Final responses should be **concise** (≤100 words unless a complex explanation is truly needed).
+- Don't repeat what the user said. Don't say "Let me..." or "I'll now..." — just do it.
+- When showing code, include only the relevant parts (not the entire file unless asked).
+- Respond in the user's language (PT-BR or EN).`;
+
 /**
  * Dynamically builds the system prompt combining base instructions and loaded skills.
  */
@@ -308,6 +375,24 @@ export function getSystemPrompt(): string {
   // Inject current date dynamically (so long-running sessions stay accurate)
   const today = new Date().toISOString().split("T")[0];
   let basePrompt = `## Current Date\n\nToday is ${today}. Always use this date when referencing current events, API versions, or searching the web. Your training data may be outdated — verify with buscar_web() before assuming API details.\n\n${BASE_SYSTEM_PROMPT}`;
+
+  // ── Gap 12: Environment info ────────────────────────────────────────────
+  // IA needs to know where it's running to make correct decisions (commands,
+  // paths, shell). Without this, IA may use Linux commands on Windows or
+  // assume wrong working directory.
+  const envInfo = buildEnvironmentInfo();
+  if (envInfo) {
+    basePrompt = `${basePrompt}\n\n${envInfo}`;
+  }
+
+  // ── Gap 14: Tool-routing rules ──────────────────────────────────────────
+  // Prevent IA from using executar_comando for file operations when dedicated
+  // tools exist (ler_arquivo, buscar_texto, buscar_arquivos).
+  basePrompt = `${basePrompt}\n\n${TOOL_ROUTING_RULES}`;
+
+  // ── Gap 15: Writing style constraints ───────────────────────────────────
+  // Keep IA concise: ≤25 words between tool calls, ≤100 words final response.
+  basePrompt = `${basePrompt}\n\n${WRITING_STYLE_RULES}`;
 
   // IDEIA 4: Append effort-level instructions (Low/Medium/High/Max)
   const effortSnippet = getEffortPromptSnippet();
@@ -542,7 +627,8 @@ export function addSystemMessage(content: string): void {
     "## Persistent Memory",
     "## SELF-VALIDATION",
     "[SELF-VALIDATION",
-    "[PLAN]",
+    "[PLAN",  // BUG FIX (Gap 3): was "[PLAN]" (with closing bracket) but formatPlan() returns "[PLAN - N steps]" (space+dash). Changed to "[PLAN" so it matches.
+    "[SESSION CONTINUATION",  // Gap 2: continuation message
     "[GOAL",
     "[HONESTY",
     "[STRICT_GATE",
@@ -695,6 +781,10 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
     "## TASK_STATE",
     "## Persistent Memory",
     "[CONVERSATION MEMORY",  // accumulated summaries from previous compactions
+    "[PLAN",  // Gap 3: preserve plan state across compaction
+    "[SESSION CONTINUATION",  // Gap 2: preserve continuation message
+    "## Recently Modified Files",  // Gap 1: preserve re-hydrated files
+    "## Invoked Skills",  // Gap 9: preserve re-injected skills
   ];
 
   const preservedSystem: Message[] = [];
@@ -754,8 +844,51 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
     content: compactedSummary,
   };
 
-  // Reconstruct: [system_prompt, preserved_critical_context, compaction_summary, ...recent]
-  history = [system, ...preservedSystem, summary, ...recent];
+  // ── Gap 2: Continuation message ─────────────────────────────────────────
+  // After compaction, inject an explicit continuation instruction so the IA
+  // knows to continue working on the task without asking the user what to do.
+  // Without this, IA may ask "what would you like me to do next?" after
+  // compaction, losing the thread of work it was doing.
+  // (Inspired by Claude Code's continuation message.)
+  const continuationMsg: Message = {
+    role: "system",
+    content: "[SESSION CONTINUATION] This session was continued from a previous conversation that ran out of context. The summary above covers the earlier portion. Continue working on the last task you were doing — do NOT ask the user what to do next. Pick up where you left off and keep working until the task is complete or you need user input.",
+  };
+
+  // Reconstruct: [system_prompt, preserved_critical_context, compaction_summary, continuation, ...recent]
+  history = [system, ...preservedSystem, summary, continuationMsg, ...recent];
+
+  // ── Gap 1: Re-hydrate recently edited files ─────────────────────────────
+  // After compaction, the IA loses access to file contents it had read.
+  // Re-read the 5 most-recently-edited files from disk and inject as a
+  // system message so the IA can continue working without re-reading.
+  // (Inspired by Claude Code's re-hydration: 5 files, 50K token budget.)
+  try {
+    const { buildRehydrationMessage } = await import("./fileRehydration.js");
+    const rehydrationMsg = buildRehydrationMessage();
+    if (rehydrationMsg) {
+      // Insert after continuation message, before recent messages
+      const insertIdx = history.length - recent.length;
+      history.splice(insertIdx, 0, { role: "system", content: rehydrationMsg });
+    }
+  } catch (err) {
+    console.debug(`[COMPACT] Failed to re-hydrate files: ${(err as Error).message}`);
+  }
+
+  // ── Gap 9: Re-inject invoked skills ─────────────────────────────────────
+  // After compaction, skills that were invoked earlier are lost. Re-inject
+  // their content so the IA can continue using them without re-reading.
+  // (Inspired by Claude Code: 5K tokens/skill, 25K total.)
+  try {
+    const { buildSkillReInjectionMessage } = await import("./skillTracker.js");
+    const skillMsg = buildSkillReInjectionMessage();
+    if (skillMsg) {
+      const insertIdx = history.length - recent.length;
+      history.splice(insertIdx, 0, { role: "system", content: skillMsg });
+    }
+  } catch (err) {
+    console.debug(`[COMPACT] Failed to re-inject skills: ${(err as Error).message}`);
+  }
 
   // Remove dangling tool messages that no longer match a tool_call in history
   const validToolIds = new Set<string>();
@@ -804,6 +937,8 @@ export function compactHistory(): CompactResult | null {
     "## TASK_STATE",
     "## Persistent Memory",
     "[CONVERSATION MEMORY",
+    "[PLAN",  // Gap 3: preserve plan state across compaction
+    "[SESSION CONTINUATION",  // Gap 2: preserve continuation message
   ];
 
   const preservedSystem: Message[] = [];

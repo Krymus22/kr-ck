@@ -1035,10 +1035,28 @@ function trackFileAccess(name: string, args: Record<string, unknown>): void {
   if (!filePath) return;
   if (READ_ONLY_TOOLS.has(name)) {
     recordRead(name, filePath);
+    // Gap 9: Track skill invocations for post-compaction re-injection.
+    // If the IA reads a file that's a skill, record it so we can re-inject
+    // the skill content after compaction.
+    try {
+      const { getActiveSkills } = require("./extensions.js");
+      const skills = getActiveSkills() as Array<{ path: string }>;
+      const resolved = require("path").resolve(filePath);
+      if (skills.some((s) => require("path").resolve(s.path) === resolved)) {
+        const { recordSkillInvocation } = require("./skillTracker.js");
+        recordSkillInvocation(resolved);
+      }
+    } catch { /* skillTracker not available — skip */ }
   }
   if (WRITE_FILE_TOOLS.has(name)) {
     const resolved = pokaYokeCheck(name, args).resolvedPath ?? filePath;
     turnTouchedFiles.add(resolved);
+    // Gap 1: Track session-edited files for post-compaction re-hydration.
+    // This lets the IA "remember" file contents even after context is compacted.
+    try {
+      const { recordSessionFileEdit } = require("./fileRehydration.js");
+      recordSessionFileEdit(resolved);
+    } catch { /* fileRehydration not available — skip */ }
   }
 }
 

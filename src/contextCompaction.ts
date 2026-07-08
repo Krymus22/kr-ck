@@ -278,6 +278,8 @@ function buildSummaryPrompt(messages: any[]): string {
     return `[${role}]: ${content.slice(0, 800)}`;
   }).join("\n\n");
 
+  // ── Gap 5: Anti-drift — quote verbatim, don't paraphrase ───────────────
+  // ── Gap 8: Expand to 9 sections (was 6) ────────────────────────────────
   return `You are compacting the history of a conversation between a user and a code agent (Claude-Killer).
 
 Your task: produce a STRUCTURED summary that preserves ALL critical information for task continuity.
@@ -286,6 +288,9 @@ History to compact:
 ${transcript}
 
 Respond ONLY with the following format (no preamble):
+
+## User's Original Intent
+- (what the user originally asked for — QUOTE their exact words when possible)
 
 ## Architectural Decisions Made
 - (list each decision and why)
@@ -296,16 +301,32 @@ Respond ONLY with the following format (no preamble):
 ## Unresolved Bugs
 - (description + context)
 
+## Problem-Solving Logic Chain
+- (the reasoning that led to decisions — WHY, not just WHAT)
+
+## All User Messages Summary
+- (each user message preserved in order — QUOTE key phrases verbatim, don't paraphrase)
+
 ## Planned Next Steps
 - (o que o agente ia fazer a seguir)
 
+## Currently Working On
+- (what was being done EXACTLY before this compaction — the immediate task in progress)
+
 ## User Preferences/Constraints
-- (descobertas durante a conversa)
+- (descobertas durante a conversa — QUOTE exact words like "never", "always", "must")
 
 ## Critical Technical Context
 - (qualquer detalhe que seria perdido sem este resumo)
 
-If a section has no content, write "N/A". Be concise but complete - another agent will continue based only on this summary.`;
+CRITICAL RULES (Gap 5 — anti-drift):
+- DIRECTLY QUOTE key phrases from the user rather than paraphrasing.
+- If user said "never use X", write "never use X" — do NOT soften to "prefers not to use X".
+- If user said "always do Y", write "always do Y" — do NOT strengthen or weaken.
+- Preserve exact technical terms: function names, file paths, API names, error messages.
+- Do not summarize user constraints — quote them verbatim.
+
+If a section has no content, write "N/A". Be concise but complete — another agent will continue based ONLY on this summary.`;
 }
 
 function renderMessageContent(m: any): string {

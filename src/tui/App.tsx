@@ -19,6 +19,8 @@ import { runAgentLoop } from "../agent.js";
 import * as history from "../history.js";
 import * as todo from "../todo.js";
 import { clearReadPaths } from "../readBeforeWrite.js";
+import { clearSessionFiles } from "../fileRehydration.js";
+import { clearInvokedSkills } from "../skillTracker.js";
 
 import { config } from "../config.js";
 import { shutdownMCPServers, getActiveSkills, getActiveMCPServers } from "../extensions.js";
@@ -97,6 +99,8 @@ function handleResetCommand(): CommandResult {
   // gate is bypassed by stale paths from the previous session, allowing the
   // IA to edit files it hasn't read in the NEW session.
   clearReadPaths();
+  clearSessionFiles();
+  clearInvokedSkills();
   return { handled: true, message: "History reset." };
 }
 
@@ -167,6 +171,8 @@ function handleSessionCommand(arg: string | null): CommandResult {
     // BUG FIX (BS-18): clear readBeforeWrite state — new session means
     // the IA hasn't read any files yet in this context.
     clearReadPaths();
+  clearSessionFiles();
+  clearInvokedSkills();
     startSession();
     return { handled: true, resetChat: true, message: "[OK] New session started. Previous session is saved on disk." };
   }
@@ -188,6 +194,8 @@ function handleSessionCommand(arg: string | null): CommandResult {
     // files may differ from the current read-paths set. The IA must re-read
     // files before editing in the loaded context.
     clearReadPaths();
+  clearSessionFiles();
+  clearInvokedSkills();
     if (loaded.lastSnapshot && loaded.lastSnapshot.messages.length > 0) {
       // BUG FIX (BS-3): merge snapshot + postSnapshotMessages.
       // Previously: only loaded the snapshot, losing messages that arrived
@@ -1008,6 +1016,8 @@ function handleModeCommand(arg: string | null): CommandResult {
     history.resetHistory();
     // BUG FIX (BS-18): clear readBeforeWrite state on context reset too.
     clearReadPaths();
+  clearSessionFiles();
+  clearInvokedSkills();
     return {
       handled: true,
       resetChat: true,
@@ -1271,6 +1281,42 @@ export function convertSessionToVisualMessages(sessionMsgs: unknown[]): ChatMess
   return visual;
 }
 
+// --- Plan step extraction (Gap 3) -----------------------------------------
+
+/**
+ * Extract numbered steps from a plan response.
+ *
+ * When plan mode is active, the IA outputs a markdown plan like:
+ *   1. Read the file
+ *   2. Edit the function
+ *   3. Run tests
+ *   ===END PLAN===
+ *
+ * This function extracts the step descriptions (without the number prefix)
+ * so they can be passed to planExecutor.createPlan(steps).
+ *
+ * Supports: `1.`, `1)`, `1:`, `-`, `*` prefixes. Takes text before
+ * ===END PLAN=== and extracts all list items.
+ */
+export function extractPlanSteps(response: string): string[] {
+  // Get text before ===END PLAN===
+  const endIdx = response.indexOf("===END PLAN===");
+  const planText = endIdx >= 0 ? response.slice(0, endIdx) : response;
+
+  const steps: string[] = [];
+  const lines = planText.split("\n");
+  // Match: "1. step", "1) step", "1: step", "- step", "* step"
+  const stepRegex = /^\s*(?:\d+[.):]\s+|[-*]\s+)(.+)$/;
+
+  for (const line of lines) {
+    const match = line.match(stepRegex);
+    if (match && match[1] && match[1].trim().length > 0) {
+      steps.push(match[1].trim());
+    }
+  }
+  return steps;
+}
+
 // --- App Component ----------------------------------------------------------
 
 export function App() {
@@ -1315,6 +1361,8 @@ export function App() {
           setActiveSession(last.id);
           // BUG FIX (BS-18): clear readBeforeWrite state on auto-load too.
           clearReadPaths();
+  clearSessionFiles();
+  clearInvokedSkills();
 
           // ── IA context: use snapshot if available, else full messages ──
           if (loaded.lastSnapshot && loaded.lastSnapshot.messages.length > 0) {
@@ -1873,6 +1921,30 @@ export function App() {
         const { response, streamStarted } = await runStreaming(fullInput);
         finalizeMessage(response, streamStarted);
         syncTodos();
+
+        // ── Gap 3: Parse ===END PLAN=== to populate planExecutor ──────────
+        // When plan mode is active and IA outputs a plan ending with
+        // ===END PLAN===, extract the numbered steps and call createPlan().
+        // This connects the /plan mode (which appends a suffix) with the
+        // planExecutor (which tracks step completion and blocks finish).
+        // Previously: ===END PLAN=== was never parsed — planExecutor state
+        // stayed null, hasIncompletePlan() always returned false, so
+        // checkPlanCompletion() never blocked. The two systems were
+        // completely decoupled.
+        if (history.isPlanMode() && response.includes("===END PLAN===")) {
+          try {
+            const { createPlan } = await import("../planExecutor.js");
+            const steps = extractPlanSteps(response);
+            if (steps.length > 0) {
+              createPlan(steps);
+              setSystemMessages((prev) => [...prev,
+                `[PLAN] Plano criado com ${steps.length} passo(s). Modo Plan desativado — execute os passos agora.`,
+              ]);
+              // Auto-disable plan mode after plan is created
+              history.setPlanMode(false);
+            }
+          } catch { /* planExecutor not available */ }
+        }
       } catch (err) {
         // CRITICAL FIX: show error as a VISIBLE chat message, not just
         // systemMessages (which may be hidden/scrolled away). Without this,

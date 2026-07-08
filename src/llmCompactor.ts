@@ -147,19 +147,27 @@ function buildSummarizationPrompt(conversationText: string, customInstruction?: 
     ? `\n\n## User's Custom Instruction\nThe user specifically asked to preserve: ${customInstruction}\nMake sure to prioritize this aspect in your summary.`
     : "";
 
+  // ── Gap 5: Anti-drift — quote verbatim, don't paraphrase ───────────────
+  // ── Gap 8: Expand to 9 sections (was 6) ────────────────────────────────
   const systemPrompt = `You are a conversation summarizer for an AI coding assistant (Claude-Killer).
 Your job is to create a CONCISE but COMPLETE summary of the conversation that will
 allow the AI to continue working after context compaction.
 
 The summary must preserve:
-1. **Context**: What project/task is being worked on
-2. **Decisions**: What was decided and why (architecture, approach, tools)
+1. **User's original intent**: What the user originally asked for — QUOTE their exact words
+2. **Architectural decisions**: What was decided and why (architecture, approach, tools)
 3. **Code changes**: What files were modified and what was done to them
 4. **Bugs**: Any bugs found and how they were fixed (or are being fixed)
-5. **Current state**: Where things stand right now
-6. **Next steps**: What was planned to do next
+5. **Problem-solving logic chain**: The reasoning that led to decisions — WHY, not just WHAT
+6. **All user messages**: Each user message preserved in order — QUOTE key phrases verbatim
+7. **Current state**: What was being done EXACTLY before this compaction — the immediate task in progress
+8. **Next steps**: What was planned to do next
+9. **User preferences/constraints**: QUOTE exact words like "never", "always", "must" — don't paraphrase
 
-Rules:
+CRITICAL RULES (anti-drift):
+- DIRECTLY QUOTE key phrases from the user rather than paraphrasing.
+- If user said "never use X", write "never use X" — do NOT soften to "prefers not to use X".
+- If user said "always do Y", write "always do Y" — do NOT strengthen or weaken.
 - Be SPECIFIC, not generic. "Edited GachaService.lua to add rarity system" not "made code changes"
 - Preserve technical details: function names, API names, file paths, error messages
 - Use markdown headers and bullet points for readability
