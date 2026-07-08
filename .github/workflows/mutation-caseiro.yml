@@ -145,27 +145,44 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: mutation-report-group-*
+          path: all-reports
           merge-multiple: false
-          path: all-reports/
+
+      - name: Debug — list downloaded artifacts
+        run: |
+          echo "=== all-reports/ structure ==="
+          find all-reports/ -type f 2>/dev/null || echo "(empty or not found)"
+          echo ""
+          echo "=== ls all-reports/ ==="
+          ls -la all-reports/ 2>/dev/null || echo "(dir not found)"
 
       - name: Aggregate all reports into final summary
         run: |
-          python3 -c "
+          mkdir -p final-report
+          python3 << 'PYEOF'
           import json, os, glob
 
           reports = []
           base = 'all-reports/'
+          if not os.path.isdir(base):
+              print('⚠️ all-reports/ not found — no artifacts downloaded')
+              # Write empty report
+              with open('final-report/mutation-final.json', 'w') as f:
+                  json.dump({'error': 'no artifacts downloaded', 'groups_processed': 0}, f)
+              exit(0)
+
           for d in sorted(os.listdir(base)):
-              if d.startswith('mutation-report-group-'):
-                  group_dir = os.path.join(base, d, 'reports/mutation')
-                  if os.path.isdir(group_dir):
-                      latest = os.path.join(group_dir, 'mutation-report-latest.json')
-                      if os.path.exists(latest):
-                          with open(latest) as f:
-                              reports.append(json.load(f))
+              group_dir = os.path.join(base, d, 'reports/mutation')
+              if os.path.isdir(group_dir):
+                  latest = os.path.join(group_dir, 'mutation-report-latest.json')
+                  if os.path.exists(latest):
+                      with open(latest) as f:
+                          reports.append(json.load(f))
 
           if not reports:
-              print('⚠️ No reports found — all groups may have failed')
+              print('⚠️ No reports found in artifacts')
+              with open('final-report/mutation-final.json', 'w') as f:
+                  json.dump({'error': 'no reports found', 'groups_processed': 0}, f)
               exit(0)
 
           total_mutations = sum(r['total_mutations'] for r in reports)
@@ -190,7 +207,6 @@ jobs:
               'survived_details': all_survived,
           }
 
-          os.makedirs('final-report', exist_ok=True)
           with open('final-report/mutation-final.json', 'w') as f:
               json.dump(final, f, indent=2, ensure_ascii=False)
 
@@ -209,10 +225,10 @@ jobs:
           if all_survived:
               print(f'\n  ❌ TOP 20 MUTAÇÕES SOBREVIVENTES (gaps de teste):')
               for s in all_survived[:20]:
-                  print(f\"    {s['file']}:{s['line']} — {s['desc']} | {s['context']}\")
+                  print(f"    {s['file']}:{s['line']} — {s['desc']} | {s['context']}")
               if len(all_survived) > 20:
                   print(f'    ... e mais {len(all_survived) - 20}')
-          "
+          PYEOF
 
       - name: Upload final aggregated report
         uses: actions/upload-artifact@v4
