@@ -1,19 +1,10 @@
 name: Mutation Testing (Caseiro)
 
-# Stryker caseiro — mutation testing simplificado que roda com vitest normal
-# (sem worker threads, sem sandboxes). Funciona com process.chdir() e
-# binários externos (selene/stylua) que o Stryker não suporta.
+# Stryker caseiro — mutation testing simplificado que roda com vitest normal.
+# Usa MATRIX STRATEGY para rodar em paralelo: 20 jobs, cada um processando
+# ~5-6 arquivos. Tempo total: ~25min (em vez de 5-7h sequencial).
 #
 # Roda toda noite às 22:00 BRT (01:00 UTC) e pode ser disparado manualmente.
-#
-# BUG FIX: o workflow anterior falhava porque:
-# 1. `[ -f reports/mutation/*.json ]` não funciona com glob em bash `[ -f`
-#    (espera arquivo único). Trocado por `compgen -G`.
-# 2. O script exita 1 quando há mutações sobreviventes (esperado), mas o
-#    `|| true` já trata isso. Adicionado set +e pra garantir.
-# 3. Adicionado step de "smoke test" antes do full — roda em quick mode
-#    (5 mutações/arquivo) pra validar que o script funciona. Se o quick
-#    passar, roda o full.
 
 on:
   schedule:
@@ -21,12 +12,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  mutation-test:
-    name: Mutation Testing (Caseiro)
+  # Job 1: divide os arquivos em 20 grupos e exporta como output
+  prepare:
+    name: Prepare mutation groups
     runs-on: ubuntu-latest
-    # 10 horas = 600 min. Modo completo leva ~5h (3150 mutações × 6s cada).
-    # Janela: 22:00 BRT até 08:00 BRT (10h).
-    timeout-minutes: 600
+    outputs:
+      groups: ${{ steps.divide.outputs.groups }}
+      group-count: ${{ steps.divide.outputs.group-count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Divide files into 20 groups
+        id: divide
+        run: |
+          GROUPS=$(python3 scripts/list-mutation-groups.py 20)
+          echo "groups=$GROUPS" >> $GITHUB_OUTPUT
+          COUNT=$(echo "$GROUPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          echo "group-count=$COUNT" >> $GITHUB_OUTPUT
+          echo "Divided into $COUNT groups"
+          echo "$GROUPS" | python3 -c "
+          import sys, json
+          groups = json.load(sys.stdin)
+          for i, g in enumerate(groups):
+              print(f'  Group {i+1}: {len(g)} files')
+          "
+
+  # Job 2: roda mutation testing em paralelo (1 job por grupo)
+  mutation-test:
+    name: Mutation (group ${{ matrix.group-index }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        group-index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+      fail-fast: false  # não cancela outros jobs se um falhar
+      max-parallel: 20  # limite do free tier do GitHub Actions
     env:
       NVIDIA_API_KEY: dummy
       NODE_ENV: test
@@ -36,94 +59,153 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-      # BUG FIX: usar `npm install --legacy-peer-deps` em vez de `npm ci`.
-      # O `npm ci` exige que package.json e package-lock.json estejam 100%
-      # sincronizados, mas temos um conflito de zod (3.x vs 4.x) por causa
-      # das dependabot PRs que não foram mergeadas. O CI principal já usa
-      # `npm install --legacy-peer-deps` pelo mesmo motivo.
       - run: npm install --legacy-peer-deps
 
-      - name: Smoke test (quick mode — 5 mutations/file)
-        # Validate the script works before committing to a 5h run.
-        # If this fails, the full run would also fail — fail fast.
+      - name: Get files for this group
+        id: files
         run: |
-          set +e
-          python3 scripts/mutation-test.py --quick 2>&1 | tee smoke-test.log
-          # Smoke test should complete and produce a report.
-          # Exit code 1 = mutations survived (expected, not a failure).
-          # Exit code 0 = all killed (also fine).
-          # Any other exit code = script error (real failure).
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 1 ]; then
-            echo "Smoke test OK (exit $EXIT_CODE)"
-            exit 0
-          else
-            echo "Smoke test FAILED (exit $EXIT_CODE)"
-            exit $EXIT_CODE
-          fi
+          # Extrai o grupo específico da matriz
+          GROUP_INDEX=${{ matrix.group-index }}
+          GROUPS='${{ needs.prepare.outputs.groups }}'
+          FILES=$(echo "$GROUPS" | python3 -c "
+          import sys, json
+          groups = json.loads('''$GROUPS''')
+          idx = $GROUP_INDEX
+          if idx < len(groups):
+              print(' '.join(groups[idx]))
+          ")
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Files in group $GROUP_INDEX: $FILES"
 
-      - name: Run mutation tests (full mode)
-        # Full mode: all mutations per file (not just 5).
-        # Exit code 1 = some mutations survived (expected — that's the point).
-        # We capture output and always succeed so artifact uploads.
+      - name: Run mutation tests (this group only)
+        if: steps.files.outputs.files != ''
         run: |
           set +e
-          python3 scripts/mutation-test.py 2>&1 | tee full-run.log
+          python3 scripts/mutation-test.py ${{ steps.files.outputs.files }} 2>&1 | tee mutation-group-${{ matrix.group-index }}.log
           echo "Mutation test exit code: $?"
           exit 0
 
       - name: Show report summary
-        if: always()
+        if: always() && steps.files.outputs.files != ''
         run: |
-          # Use compgen -G to check for glob matches (works with multiple files)
-          # BUG FIX: `[ -f reports/mutation/*.json ]` doesn't work with globs.
           if compgen -G "reports/mutation/*.json" > /dev/null; then
-            echo "=== Report found ==="
-            # Use the latest report (or mutation-report-latest.json)
+            echo "=== Report found for group ${{ matrix.group-index }} ==="
             LATEST="reports/mutation/mutation-report-latest.json"
             if [ -f "$LATEST" ]; then
-              echo "Reading: $LATEST"
               python3 -c "
           import json
           with open('$LATEST') as f:
               d = json.load(f)
-          print(f\"Mutation Score: {d['mutation_score']}%\")
-          print(f\"Total: {d['total_mutations']}\")
-          print(f\"Killed: {d['killed']}\")
-          print(f\"Survived: {d['survived']}\")
-          print(f\"Timed out: {d['timed_out']}\")
-          print(f\"Elapsed: {d['elapsed_seconds']}s ({d['elapsed_seconds']/60:.1f}min)\")
+          print(f\"Group ${{ matrix.group-index }}: Score {d['mutation_score']}% | Total {d['total_mutations']} | Killed {d['killed']} | Survived {d['survived']} | Time {d['elapsed_seconds']/60:.1f}min\")
           if d['survived_details']:
-              print(f\"\nSurvived mutations (top 10):\")
-              for s in d['survived_details'][:10]:
+              print(f\"Survived (top 5):\")
+              for s in d['survived_details'][:5]:
                   print(f\"  {s['file']}:{s['line']} — {s['desc']}\")
-              if len(d['survived_details']) > 10:
-                  print(f\"  ... and {len(d['survived_details']) - 10} more\")
-          "
-            else
-              echo "Latest report not found, listing available:"
-              ls -la reports/mutation/
+              "
             fi
           else
-            echo "⚠️ No report found — script may have crashed before generating one"
-            echo "=== Last 50 lines of full run log ==="
-            tail -50 full-run.log 2>/dev/null || echo "(no log found)"
+            echo "⚠️ No report for group ${{ matrix.group-index }}"
+            tail -20 mutation-group-${{ matrix.group-index }}.log 2>/dev/null || true
           fi
 
-      - name: Upload mutation report
-        if: always()
+      - name: Upload group report
+        if: always() && steps.files.outputs.files != ''
         uses: actions/upload-artifact@v4
         with:
-          name: mutation-report
-          path: reports/mutation/
-          retention-days: 30
-
-      - name: Upload run logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mutation-logs
+          name: mutation-report-group-${{ matrix.group-index }}
           path: |
-            smoke-test.log
-            full-run.log
-          retention-days: 7
+            reports/mutation/
+            mutation-group-${{ matrix.group-index }}.log
+          retention-days: 14
+
+  # Job 3: agrega todos os reports em um resumo final
+  aggregate:
+    name: Aggregate results
+    needs: mutation-test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download all group reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-report-group-*
+          merge-multiple: false
+          path: all-reports/
+
+      - name: Aggregate all reports into final summary
+        run: |
+          python3 -c "
+          import json, os, glob
+
+          reports = []
+          base = 'all-reports/'
+          for d in sorted(os.listdir(base)):
+              if d.startswith('mutation-report-group-'):
+                  group_dir = os.path.join(base, d, 'reports/mutation')
+                  if os.path.isdir(group_dir):
+                      latest = os.path.join(group_dir, 'mutation-report-latest.json')
+                      if os.path.exists(latest):
+                          with open(latest) as f:
+                              reports.append(json.load(f))
+
+          if not reports:
+              print('⚠️ No reports found — all groups may have failed')
+              exit(0)
+
+          total_mutations = sum(r['total_mutations'] for r in reports)
+          killed = sum(r['killed'] for r in reports)
+          survived = sum(r['survived'] for r in reports)
+          timed_out = sum(r['timed_out'] for r in reports)
+          elapsed = sum(r['elapsed_seconds'] for r in reports)
+          score = round(killed / total_mutations * 100, 1) if total_mutations else 0
+
+          all_survived = []
+          for r in reports:
+              all_survived.extend(r.get('survived_details', []))
+
+          final = {
+              'groups_processed': len(reports),
+              'total_mutations': total_mutations,
+              'killed': killed,
+              'survived': survived,
+              'timed_out': timed_out,
+              'mutation_score': score,
+              'total_elapsed_seconds': round(elapsed, 1),
+              'survived_details': all_survived,
+          }
+
+          os.makedirs('final-report', exist_ok=True)
+          with open('final-report/mutation-final.json', 'w') as f:
+              json.dump(final, f, indent=2, ensure_ascii=False)
+
+          print('═' * 60)
+          print('  RELATÓRIO FINAL — Stryker Caseiro (20 grupos paralelos)')
+          print('═' * 60)
+          print(f'  Grupos processados: {len(reports)}/20')
+          print(f'  Total mutações:     {total_mutations}')
+          print(f'  Mortas:             {killed} ✅')
+          print(f'  Sobreviveram:       {survived} ❌')
+          print(f'  Timeout:            {timed_out} ⏰')
+          print(f'  Mutation Score:     {score}%')
+          print(f'  Tempo total (soma): {elapsed:.0f}s ({elapsed/3600:.1f}h)')
+          print(f'  Wall-clock:         ~{elapsed/20/60:.0f}min (20x paralelo)')
+          print('═' * 60)
+          if all_survived:
+              print(f'\n  ❌ TOP 20 MUTAÇÕES SOBREVIVENTES (gaps de teste):')
+              for s in all_survived[:20]:
+                  print(f\"    {s['file']}:{s['line']} — {s['desc']} | {s['context']}\")
+              if len(all_survived) > 20:
+                  print(f'    ... e mais {len(all_survived) - 20}')
+          "
+
+      - name: Upload final aggregated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-final-report
+          path: final-report/
+          retention-days: 30
