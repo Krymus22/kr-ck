@@ -27,16 +27,25 @@ jobs:
       - name: Divide files into 20 groups
         id: divide
         run: |
+          set +e
           GROUPS=$(python3 scripts/list-mutation-groups.py 20)
-          echo "groups=$GROUPS" >> $GITHUB_OUTPUT
-          COUNT=$(echo "$GROUPS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          if [ -z "$GROUPS" ]; then
+            echo "ERROR: list-mutation-groups.py returned empty"
+            exit 1
+          fi
+          # Write to file to avoid shell escaping issues with JSON in env
+          echo "$GROUPS" > groups.json
+          echo "groups<<EOF" >> $GITHUB_OUTPUT
+          echo "$GROUPS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          COUNT=$(python3 -c "import json; print(len(json.load(open('groups.json'))))")
           echo "group-count=$COUNT" >> $GITHUB_OUTPUT
           echo "Divided into $COUNT groups"
-          echo "$GROUPS" | python3 -c "
-          import sys, json
-          groups = json.load(sys.stdin)
+          python3 -c "
+          import json
+          groups = json.load(open('groups.json'))
           for i, g in enumerate(groups):
-              print(f'  Group {i+1}: {len(g)} files')
+              print(f'  Group {i+1}: {len(g)} files — {g[0] if g else \"empty\"}...')
           "
 
   # Job 2: roda mutation testing em paralelo (1 job por grupo)
@@ -64,18 +73,27 @@ jobs:
       - name: Get files for this group
         id: files
         run: |
-          # Extrai o grupo específico da matriz
+          set +e
           GROUP_INDEX=${{ matrix.group-index }}
-          GROUPS='${{ needs.prepare.outputs.groups }}'
-          FILES=$(echo "$GROUPS" | python3 -c "
-          import sys, json
-          groups = json.loads('''$GROUPS''')
+          # Read groups from the prepare job output
+          python3 -c "
+          import json, os
+          groups_str = '''${{ needs.prepare.outputs.groups }}'''
+          try:
+              groups = json.loads(groups_str)
+          except Exception as e:
+              print(f'ERROR parsing groups: {e}')
+              groups = []
           idx = $GROUP_INDEX
           if idx < len(groups):
-              print(' '.join(groups[idx]))
-          ")
+              files = ' '.join(groups[idx])
+              print(f'FILES={files}')
+          else:
+              print('FILES=')
+          " > /tmp/files_output.txt
+          source /tmp/files_output.txt
           echo "files=$FILES" >> $GITHUB_OUTPUT
-          echo "Files in group $GROUP_INDEX: $FILES"
+          echo "Group $GROUP_INDEX files: $FILES"
 
       - name: Run mutation tests (this group only)
         if: steps.files.outputs.files != ''
