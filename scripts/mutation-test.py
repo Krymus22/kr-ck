@@ -81,9 +81,14 @@ MUTATIONS = [
     (r'&&', '||', '&& → ||'),
     (r'\|\|', '&&', '|| → &&'),
 
-    # Arithmetic on identifiers (safe — lookbehind/lookahead for word chars)
-    (r'(?<=[\w\)])\s*\+\s*(?![+=])', ' - ', '+ → -'),
-    (r'(?<=[\w\)])\s*-\s*(?![-=])', ' + ', '- → +'),
+    # Arithmetic on identifiers — ONLY when surrounded by word chars or )
+    # on both sides (real arithmetic, not hyphens in text/strings).
+    # Lookbehind: word char or ) + optional whitespace
+    # Lookahead: optional whitespace + word char or digit (NOT a quote or letter
+    # that would indicate a hyphenated word like "1-sentence" or "pre-edit")
+    # This filters out most false positives in string content that slipped through.
+    (r'(?<=[\w\)])\s*\+\s*(?=[\w\d])', ' - ', '+ → -'),
+    (r'(?<=[\w\)])\s*-\s*(?=[\w\d])', ' + ', '- → +'),
 
     # Off-by-one in specific contexts (length checks, counters)
     # Only mutate '.length > 0' → '.length > 1' (common off-by-one check)
@@ -125,16 +130,10 @@ TEST_TIMEOUT = 60
 def is_in_string(line: str, col: int) -> bool:
     """Check if position `col` is inside a string literal (single/double/backtick).
 
-    BUG FIX: previous version had a flaw — it tracked string state char-by-char
-    but didn't handle template literals with ${...} expressions correctly, and
-    didn't account for the quote char being AT the position being checked.
-    This caused false positives where mutations like `-` → `+` inside strings
-    (e.g., "2-3 frases" in effortLevels.ts) were applied, generating fake
-    "survived" mutations that inflated the gap count.
-
-    Now: walks the line tracking string state. A position is "in string" if
-    we're inside a quote context when we reach it. Also handles escaped quotes
-    inside strings (\\\", \\', \\\\).
+    Handles:
+    - Escaped quotes inside strings (\\\", \\', \\\\)
+    - Template literals with ${...} expressions (exits string at ${, re-enters at })
+    - Quote char AT the position being checked (position itself is the opening quote)
     """
     in_string = None  # None, '"', "'", or '`'
     i = 0
@@ -143,6 +142,11 @@ def is_in_string(line: str, col: int) -> bool:
         if in_string:
             if ch == '\\':
                 i += 2  # skip escaped char
+                continue
+            # Template literal: ${ exits the string context (code inside)
+            if in_string == '`' and ch == '$' and i + 1 < len(line) and line[i + 1] == '{':
+                in_string = None  # now inside code, not string
+                i += 2
                 continue
             if ch == in_string:
                 in_string = None
@@ -154,11 +158,26 @@ def is_in_string(line: str, col: int) -> bool:
 
 
 def is_in_comment(line: str, col: int) -> bool:
-    """Check if position `col` is inside a // or /* */ comment."""
+    """Check if position `col` is inside a // or block comment on this line.
+    
+    Note: multi-line /* */ block comments are handled by is_skip_line which
+    skips entire lines starting with *. For inline /* */ on same line, we
+    check if col is after a /* marker.
+    """
     # Check for // comment (everything after // is comment)
     for i in range(col):
         if i + 1 < len(line) and line[i] == '/' and line[i + 1] == '/':
             return True
+    # Check for inline /* ... */ block comment
+    in_block = False
+    for i in range(col):
+        if i + 1 < len(line):
+            if line[i] == '/' and line[i + 1] == '*':
+                in_block = True
+            elif line[i] == '*' and line[i + 1] == '/':
+                in_block = False
+    if in_block:
+        return True
     return False
 
 
