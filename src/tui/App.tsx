@@ -1939,16 +1939,29 @@ export function App() {
   // -- Render -------------------------------------------------------------
   const termWidth = useTerminalWidth();
   const bannerWidth = Math.max(40, Math.min(termWidth - 2, 80));
+
+  // In production, the banner is printed ONCE via process.stdout.write
+  // BEFORE Ink renders (see index.ts). This keeps it out of the live view
+  // so it doesn't cause cursor jumps during streaming (Bug 2 + Bug 3 fix).
+  // In tests (ink-testing-library), the banner wasn't pre-printed, so we
+  // show it as a fallback in the live view.
+  const bannerPrinted = process.env.CLAUDE_KILLER_BANNER_PRINTED === "1";
+
   return (
     <Box flexDirection="column" padding={1}>
-      {/* Banner */}
-      <Box flexDirection="column" marginBottom={1}>
-        <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
-        <Text color={colors.primary} bold> Claude-Killer . Ink TUI</Text>
-        <Text color={colors.muted}> Model: {config.model}</Text>
-        <Text color={colors.muted}> Type /help for commands . Ctrl+E for Hub . setas p/ navegar</Text>
-        <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
-      </Box>
+      {/* Banner — printed ONCE via process.stdout.write BEFORE Ink renders
+          (see index.ts). Not in the live view to prevent cursor jumps during
+          streaming (Bug 2 + Bug 3 fix). If banner wasn't printed yet (e.g.,
+          in tests), show it here as fallback. */}
+      {bannerPrinted ? null : (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
+          <Text color={colors.primary} bold> Claude-Killer . Ink TUI</Text>
+          <Text color={colors.muted}> Model: {config.model}</Text>
+          <Text color={colors.muted}> Type /help for commands . Ctrl+E for Hub . setas p/ navegar</Text>
+          <Text color={colors.primary} bold>{"=".repeat(bannerWidth)}</Text>
+        </Box>
+      )}
 
       {/* Extension Hub overlay */}
       {showHub && (
@@ -2025,11 +2038,11 @@ export function App() {
         />
       )}
 
-      {/* System messages */}
-      {/* BUG FIX (audit issue #6): use index + first 10 chars of message as key
-          instead of just the message content. The old key={`sys-${msg}`}
-          collided when the same system message was shown twice (e.g., user
-          ran /reset twice), causing React key warnings and stale re-renders. */}
+      {/* System messages — slash command output, mode changes, etc.
+          These are transient and stay in the live view. They're below the
+          chat history in render order but appear above it visually because
+          they're rendered first. During streaming they DON'T cause cursor
+          jumps because they're below the banner (which is now static). */}
       {systemMessages.map((msg, i) => (
         <Box key={`sys-${i}-${msg.slice(0, 10)}`} flexDirection="column" marginBottom={1}>
           <Text color={colors.success}>{msg}</Text>

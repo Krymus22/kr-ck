@@ -164,6 +164,26 @@ async function main(): Promise<void> {
   // can check if TUI mode is active and suppress console.log.
   process.env.CLAUDE_KILLER_TUI_MODE = "1";
 
+  // ── Print banner ONCE before Ink renders (Bug 2 + Bug 3 fix) ───────────
+  // The banner is written directly to stdout BEFORE Ink takes over. This
+  // puts it in the terminal's scrollback buffer permanently — Ink never
+  // re-renders it, so it doesn't cause cursor jumps during streaming.
+  // Previously the banner was in the live view, and every re-render
+  // (12x/sec during streaming) moved the cursor to the top of the live
+  // view (where the banner was), stealing the user's scroll position.
+  const { config: cfg } = await import("./config.js");
+  const cols = process.stdout.columns ?? 80;
+  const bw = Math.max(40, Math.min(cols - 2, 80));
+  process.stdout.write(
+    `\n${"=".repeat(bw)}\n` +
+    ` Claude-Killer . Ink TUI\n` +
+    ` Model: ${cfg.model}\n` +
+    ` Type /help for commands . Ctrl+E for Hub . setas p/ navegar\n` +
+    `${"=".repeat(bw)}\n\n`
+  );
+  // Tell App.tsx that the banner was already printed (skip fallback render)
+  process.env.CLAUDE_KILLER_BANNER_PRINTED = "1";
+
   // Render the Ink app
   const { unmount, waitUntilExit } = render(React.createElement(App));
 
