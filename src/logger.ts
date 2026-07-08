@@ -71,26 +71,48 @@ export function _resetTuiModeForTests(): void {
 
 /** Print a banner line (Claude-Killer brand) */
 export function banner(text: string): void {
+  // TUI mode: suppress. Any console.log writes BETWEEN Ink renders, causing
+  // the terminal to scroll and stealing the user's scroll position during
+  // streaming (Bug 2 root cause). The Ink TUI uses process.stdout.write for
+  // its own banner (see index.ts) — logger.banner is for non-TUI mode only.
+  if (tuiMode) return;
   console.log(c.primary.bold(text));
 }
 
 /** Print a normal informational message (no prefix). */
 export function info(text: string): void {
+  // TUI mode: suppress. log.info is called from agent.ts (CHECKPOINT,
+  // COMPACTION, BUG_HUNTER) DURING the agent loop, which runs concurrently
+  // with Ink streaming. Each console.log writes BETWEEN Ink renders and
+  // causes the terminal to scroll, stealing the user's scroll position.
+  // (Bug 2 — root cause of scroll stealing during streaming.)
+  if (tuiMode) return;
   console.log(chalk.white(text));
 }
 
 /** Print a success message with a check prefix. */
 export function success(text: string): void {
+  // TUI mode: suppress (same reason as info() — see above).
+  if (tuiMode) return;
   console.log(c.success(`[SUCCESS] ${text}`));
 }
 
 /** Print a warning with a warning prefix. */
 export function warn(text: string): void {
+  // TUI mode: suppress. console.warn writes to stderr, which most terminals
+  // display inline with stdout — same scroll-stealing effect as console.log.
+  // In TUI mode, warnings surface via the activityTracker (ThinkingIndicator
+  // shows "Salvando checkpoint…" / "Compactando contexto…") or via the chat
+  // (setMessages with isError=true).
+  if (tuiMode) return;
   console.warn(c.warning(`[WARN] ${text}`));
 }
 
 /** Print an error with a cross prefix. */
 export function error(text: string): void {
+  // TUI mode: suppress (same reason as warn() — see above). In TUI mode,
+  // errors are surfaced via the chat (setMessages with isError=true).
+  if (tuiMode) return;
   console.error(c.error(`[ERROR] ${text}`));
 }
 
@@ -366,11 +388,16 @@ export function toolResult(toolName: string, ok: boolean, detail?: string): void
 
 /** Print a rate-limiter / concurrency throttle notice. */
 export function throttle(reason: string): void {
+  // TUI mode: suppress (same reason as info() — see above).
+  if (tuiMode) return;
   console.log(c.muted(`  ... ${reason}`));
 }
 
 /** Debug output - only shown when DEBUG=true. */
 export function debug(text: string): void {
+  // TUI mode: suppress (same reason as info() — see above). Even debug
+  // output writes BETWEEN Ink renders and causes scroll stealing.
+  if (tuiMode) return;
   if (config.debug) {
     console.debug(c.muted(`[DBG] ${text}`));
   }
@@ -378,6 +405,8 @@ export function debug(text: string): void {
 
 /** A styled horizontal divider. */
 export function divider(): void {
+  // TUI mode: suppress (same reason as info() — see above).
+  if (tuiMode) return;
   console.log(c.muted("-".repeat(60)));
 }
 
@@ -407,6 +436,11 @@ export interface StatusBarInput {
  * amber when between warn and compact, red when >= compact.
  */
 export function statusBar(input: StatusBarInput): void {
+  // TUI mode: suppress. In TUI mode the Ink StatusBar component renders the
+  // context usage bar (see src/tui/StatusBar.tsx). This logger.statusBar
+  // writes multiple lines to stdout BETWEEN Ink renders, causing scroll
+  // stealing during streaming (Bug 2 root cause).
+  if (tuiMode) return;
   const {
     promptTokens, completionTokens, totalTokens,
     contextWindow, warnThreshold, compactThreshold,

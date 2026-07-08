@@ -78,11 +78,11 @@ export function runTestsForFindings(findings: BugFinding[], projectRoot: string)
     finding.testFile = testFile;
     tested++;
     const result = runBugTest(testFile, projectRoot);
-    if (result.passed) { finding.testStatus = "passed"; passed++; console.log(`[BUG_HUNTER_TEST] ✓ PASSED: ${finding.file}`); }
-    else if (result.ran) { finding.testStatus = "failed"; failed++; console.log(`[BUG_HUNTER_TEST] ✗ FAILED: ${finding.file}`); }
+    if (result.passed) { finding.testStatus = "passed"; passed++; log.info(`[BUG_HUNTER_TEST] ✓ PASSED: ${finding.file}`); }
+    else if (result.ran) { finding.testStatus = "failed"; failed++; log.info(`[BUG_HUNTER_TEST] ✗ FAILED: ${finding.file}`); }
     else { finding.testStatus = "skipped"; skipped++; }
   }
-  if (tested > 0) console.log(`[BUG_HUNTER_TEST] Summary: ${passed} passed, ${failed} failed, ${skipped} skipped (${tested} tested)`);
+  if (tested > 0) log.info(`[BUG_HUNTER_TEST] Summary: ${passed} passed, ${failed} failed, ${skipped} skipped (${tested} tested)`);
   return findings;
 }
 

@@ -22,6 +22,13 @@ import { getActiveSkills } from "./extensions.js";
 import { getEffortPromptSnippet, shouldUseIntelligentCompaction } from "./effortLevels.js";
 import { config } from "./config.js";
 import { getPatternsCached } from "./patternExtractor.js";
+// BUG FIX (Bug Hunter: scroll stealing during streaming): route all diagnostic
+// output through logger so it's suppressed in TUI mode. Direct console.log /
+// console.warn / console.error calls write BETWEEN Ink renders, causing the
+// terminal to scroll and stealing the user's scroll position during streaming.
+// log.info / log.warn / log.error check the tuiMode flag and no-op when the
+// Ink TUI is active (see logger.ts).
+import * as log from "./logger.js";
 
 // --- Project Memory (CLAUDE.md / AGENTS.md) --
 
@@ -665,7 +672,7 @@ export function loadHistoryDirect(messages: Message[]): void {
         } as Message);
       }
     }
-    console.warn(`[SESSION] Repaired ${orphans.length} orphan tool_call(s) with synthetic error results (BS-4 fix)`);
+    log.warn(`[SESSION] Repaired ${orphans.length} orphan tool_call(s) with synthetic error results (BS-4 fix)`);
   }
 
   // ── Remove dangling tool messages (Bug Hunter #2a — part 2) ─────────────
@@ -700,7 +707,7 @@ export function loadHistoryDirect(messages: Message[]): void {
     });
     const removedCount = beforeLen - history.length;
     if (removedCount > 0) {
-      console.warn(`[SESSION] Removed ${removedCount} dangling tool message(s) without matching assistant tool_call (Bug Hunter #2a part 2)`);
+      log.warn(`[SESSION] Removed ${removedCount} dangling tool message(s) without matching assistant tool_call (Bug Hunter #2a part 2)`);
     }
   }
 
@@ -906,7 +913,7 @@ export function replaceHistory(messages: Message[]): void {
         } as Message);
       }
     }
-    console.warn(`[HISTORY] Repaired ${orphans.length} orphan tool_call(s) after replaceHistory (compaction side-effect)`);
+    log.warn(`[HISTORY] Repaired ${orphans.length} orphan tool_call(s) after replaceHistory (compaction side-effect)`);
   }
 
   // ── Remove dangling tool messages (Bug Hunter #2a — part 2) ─────────────
@@ -928,7 +935,7 @@ export function replaceHistory(messages: Message[]): void {
     });
     const removedCount = beforeLen - history.length;
     if (removedCount > 0) {
-      console.warn(`[HISTORY] Removed ${removedCount} dangling tool message(s) after replaceHistory (Bug Hunter #2a part 2)`);
+      log.warn(`[HISTORY] Removed ${removedCount} dangling tool message(s) after replaceHistory (Bug Hunter #2a part 2)`);
     }
   }
 }
@@ -1056,26 +1063,26 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
     const lowEffort = !shouldUseIntelligentCompaction();
     const llmAvailable = !lowEffort && await isLlmCompactionAvailable();
     if (llmAvailable) {
-      console.log("[COMPACT] Generating LLM-based summary...");
+      log.info("[COMPACT] Generating LLM-based summary...");
       const llmSummary = await llmCompact(compactedMessages, customInstruction);
       if (llmSummary && llmSummary.length > 100) {
         compactedSummary = llmSummary;
         method = "llm";
-        console.log("[COMPACT] LLM summary generated successfully.");
+        log.info("[COMPACT] LLM summary generated successfully.");
       } else {
-        console.log("[COMPACT] LLM summary too short, falling back to mechanical.");
+        log.info("[COMPACT] LLM summary too short, falling back to mechanical.");
         compactedSummary = buildCompactionSummary(compactedMessages);
         method = "mechanical";
       }
     } else {
-      console.log(lowEffort
+      log.info(lowEffort
         ? "[COMPACT] effortLevel=low — LLM compaction disabled (§6.6), using mechanical."
         : "[COMPACT] LLM not available, using mechanical compaction.");
       compactedSummary = buildCompactionSummary(compactedMessages);
       method = "mechanical";
     }
   } catch (err) {
-    console.log(`[COMPACT] LLM compaction failed (${(err as Error).message}), using mechanical.`);
+    log.info(`[COMPACT] LLM compaction failed (${(err as Error).message}), using mechanical.`);
     compactedSummary = buildCompactionSummary(compactedMessages);
     method = "mechanical";
   }
@@ -1113,7 +1120,7 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
       history.splice(insertIdx, 0, { role: "system", content: rehydrationMsg });
     }
   } catch (err) {
-    console.debug(`[COMPACT] Failed to re-hydrate files: ${(err as Error).message}`);
+    log.debug(`[COMPACT] Failed to re-hydrate files: ${(err as Error).message}`);
   }
 
   // ── Gap 9: Re-inject invoked skills ─────────────────────────────────────
@@ -1128,7 +1135,7 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
       history.splice(insertIdx, 0, { role: "system", content: skillMsg });
     }
   } catch (err) {
-    console.debug(`[COMPACT] Failed to re-inject skills: ${(err as Error).message}`);
+    log.debug(`[COMPACT] Failed to re-inject skills: ${(err as Error).message}`);
   }
 
   // Remove dangling tool messages that no longer match a tool_call in history
@@ -1165,7 +1172,7 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
     const { appendCompactionSnapshot } = await import("./session.js");
     appendCompactionSnapshot(history, method);
   } catch (err) {
-    console.debug(`[COMPACT] Failed to save compaction snapshot: ${(err as Error).message}`);
+    log.debug(`[COMPACT] Failed to save compaction snapshot: ${(err as Error).message}`);
   }
 
   return { removed: dropped, beforeTokens, afterTokens, method };
@@ -1581,6 +1588,6 @@ function tryAppendToSession(msg: Record<string, unknown>): void {
     sessionAppendMessage(msg as { role: string; content?: string; [key: string]: unknown });
   } catch (err) {
     // Log warning instead of silently swallowing — helps debug session loss
-    console.error(`[SESSION] Failed to persist message: ${(err as Error).message}`);
+    log.error(`[SESSION] Failed to persist message: ${(err as Error).message}`);
   }
 }

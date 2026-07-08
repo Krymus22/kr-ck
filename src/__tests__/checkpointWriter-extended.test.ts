@@ -170,9 +170,13 @@ describe("checkpointWriter — cobertura estendida", () => {
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJson() } }],
     });
-    await writeCheckpoint(1);
-    await writeCheckpoint(2);
-    expect(shouldCheckpoint(90000)).toBe(3); // ~70% of 128000
+    // Pass 128000 explicitly to pin the historical context window used by
+    // these regression tests (production uses config.contextWindowTokens =
+    // 256_000 for Kimi K2.6 — see the "checkpoint-firing-too-early"
+    // regression tests at the bottom of this file).
+    await writeCheckpoint(1, 128000);
+    await writeCheckpoint(2, 128000);
+    expect(shouldCheckpoint(90000, 128000)).toBe(3); // ~70% of 128000
   });
 
   it("shouldCheckpoint retorna 0 quando contexto é muito pequeno", async () => {
@@ -191,10 +195,10 @@ describe("checkpointWriter — cobertura estendida", () => {
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJson() } }],
     });
-    await writeCheckpoint(1);
-    await writeCheckpoint(2);
-    expect(shouldCheckpoint(26000)).toBe(0); // já passou checkpoint 1
-    expect(shouldCheckpoint(58000)).toBe(0); // já passou checkpoint 2
+    await writeCheckpoint(1, 128000);
+    await writeCheckpoint(2, 128000);
+    expect(shouldCheckpoint(26000, 128000)).toBe(0); // já passou checkpoint 1
+    expect(shouldCheckpoint(58000, 128000)).toBe(0); // já passou checkpoint 2
   });
 
   // --- getLatestCheckpoint ---
@@ -209,11 +213,11 @@ describe("checkpointWriter — cobertura estendida", () => {
       choices: [{ message: { content: makeStateJson() } }],
     });
     expect(getLastCheckpointNumber()).toBe(0);
-    await writeCheckpoint(1);
+    await writeCheckpoint(1, 128000);
     expect(getLastCheckpointNumber()).toBe(1);
-    await writeCheckpoint(2);
+    await writeCheckpoint(2, 128000);
     expect(getLastCheckpointNumber()).toBe(2);
-    await writeCheckpoint(3);
+    await writeCheckpoint(3, 128000);
     expect(getLastCheckpointNumber()).toBe(3);
   });
 
@@ -252,9 +256,9 @@ describe("checkpointWriter — cobertura estendida", () => {
       .mockResolvedValueOnce({
         choices: [{ message: { content: makeStateJson({ intention: "v2" }) } }],
       });
-    await writeCheckpoint(1);
+    await writeCheckpoint(1, 128000);
     expect(getLastCheckpointState()!.intention).toBe("v1");
-    await writeCheckpoint(2);
+    await writeCheckpoint(2, 128000);
     expect(getLastCheckpointState()!.intention).toBe("v2");
   });
 
@@ -266,7 +270,7 @@ describe("checkpointWriter — cobertura estendida", () => {
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJson() } }],
     });
-    const result = await writeCheckpoint(2);
+    const result = await writeCheckpoint(2, 128000);
     expect(result).toHaveProperty("checkpointNumber");
     expect(result).toHaveProperty("contextPercent");
     expect(result).toHaveProperty("durationMs");
@@ -364,8 +368,8 @@ describe("checkpointWriter — cobertura estendida", () => {
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJson() } }],
     });
-    await writeCheckpoint(1);
-    await writeCheckpoint(2);
+    await writeCheckpoint(1, 128000);
+    await writeCheckpoint(2, 128000);
     expect(getLastCheckpointNumber()).toBe(2);
     expect(getLastCheckpointState()).not.toBeNull();
     resetCheckpoints();
@@ -381,12 +385,12 @@ describe("checkpointWriter — cobertura estendida", () => {
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJson() } }],
     });
-    await writeCheckpoint(1);
+    await writeCheckpoint(1, 128000);
     expect(getLastCheckpointNumber()).toBe(1);
     resetCheckpoints();
     expect(getLastCheckpointNumber()).toBe(0);
     // Após reset, deve permitir fazer checkpoint 1 novamente
-    await writeCheckpoint(1);
+    await writeCheckpoint(1, 128000);
     expect(getLastCheckpointNumber()).toBe(1);
   });
 });
@@ -436,10 +440,12 @@ describe("Bug Hunter #2 — Bug F: writeCheckpoint contextPercent uses tokens", 
     (chat as any).mockResolvedValue({
       choices: [{ message: { content: makeStateJsonLocal() } }],
     });
-    // 25600 tokens = 20% of 128000.
+    // 25600 tokens = 20% of 128000. Pass 128000 explicitly so this test
+    // doesn't depend on the production default (config.contextWindowTokens
+    // = 256_000 for Kimi K2.6, which would make 25600 tokens = 10%).
     vi.mocked(historyMock.estimateTokens).mockReturnValue(25600);
 
-    const result = await writeCheckpoint(1);
+    const result = await writeCheckpoint(1, 128000);
     // OLD BUG: would have been 0 (0 messages / 128000 = 0%).
     expect(result.contextPercent).toBe(20);
     // Verify estimateTokens was called (proving we use tokens, not message count).
@@ -456,7 +462,7 @@ describe("Bug Hunter #2 — Bug F: writeCheckpoint contextPercent uses tokens", 
     });
     vi.mocked(historyMock.estimateTokens).mockReturnValue(0);
 
-    const result = await writeCheckpoint(1);
+    const result = await writeCheckpoint(1, 128000);
     expect(result.contextPercent).toBe(0);
   });
 
@@ -477,7 +483,7 @@ describe("Bug Hunter #2 — Bug F: writeCheckpoint contextPercent uses tokens", 
       { role: "user", content: "x".repeat(358400) } as any,
     ]);
 
-    const result = await writeCheckpoint(3);
+    const result = await writeCheckpoint(3, 128000);
     // Should be 70%, NOT ~0%.
     expect(result.contextPercent).toBe(70);
   });
@@ -492,7 +498,130 @@ describe("Bug Hunter #2 — Bug F: writeCheckpoint contextPercent uses tokens", 
     });
     vi.mocked(historyMock.estimateTokens).mockReturnValue(57600);
 
-    const result = await writeCheckpoint(2);
+    const result = await writeCheckpoint(2, 128000);
     expect(result.contextPercent).toBe(45);
+  });
+});
+
+// ─── Bug Hunter: checkpoint firing too early (13% context after 2 messages) ──
+//
+// Root cause: checkpointWriter.ts had `MAX_CONTEXT_TOKENS = 128_000` hardcoded.
+// But the default model (Kimi K2.6) has a 256_000-token context window
+// (modelRegistry.ts), and `config.contextWindowTokens` already defaults to
+// that value (config.ts §1.1). Using 128_000 made the 20% threshold fire at
+// 25_600 tokens — which is only 10% of the actual 256_000 window. The user
+// saw "Salvando checkpoint…" at ~13% context after just 2 messages.
+//
+// Fix: shouldCheckpoint / writeCheckpoint now read `config.contextWindowTokens`
+// by default. Tests that pin to 128_000 (above) pass it explicitly. These
+// regression tests verify the fix by NOT passing an override.
+
+describe("Bug Hunter: checkpoint firing too early — uses config.contextWindowTokens", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { resetCheckpoints } = await import("./../checkpointWriter.js");
+    resetCheckpoints();
+    const { chat } = await import("./../apiClient.js");
+    (chat as any).mockReset();
+  });
+
+  it("shouldCheckpoint uses config.contextWindowTokens (NOT hardcoded 128000) — proven by 25600 tokens", async () => {
+    // This test proves the fix: 25600 tokens is EXACTLY 20% of 128000 (the
+    // old hardcoded value). With the fix, shouldCheckpoint uses
+    // config.contextWindowTokens — so:
+    //   - If config.contextWindowTokens == 128000 (e.g., MODEL=mistral-medium-3.5-128b):
+    //     25600 / 128000 = 20% → checkpoint 1 fires (returns 1).
+    //   - If config.contextWindowTokens == 256000 (e.g., MODEL=kimi-k2.6):
+    //     25600 / 256000 = 10% → NO checkpoint (returns 0).
+    //
+    // The KEY assertion: the result matches `25600 / config.contextWindowTokens
+    // >= 0.20`, NOT `25600 / 128000 >= 0.20`. We verify this by computing the
+    // expected result from config.contextWindowTokens directly.
+    const { shouldCheckpoint } = await import("./../checkpointWriter.js");
+    const { config } = await import("./../config.js");
+    const expectedResult = (25600 / config.contextWindowTokens) >= 0.20 ? 1 : 0;
+    expect(shouldCheckpoint(25600)).toBe(expectedResult);
+    // Sanity: if config.contextWindowTokens were the OLD hardcoded 128000,
+    // the result would ALWAYS be 1 (20% threshold met). The fact that
+    // expectedResult can be 0 (when contextWindow > 128000) proves we're
+    // using the dynamic value, not the hardcoded one.
+  });
+
+  it("regression: user scenario — checkpoint does NOT fire below 20% of ACTUAL context window", async () => {
+    // The user reported "fires at 13% context after 2 messages". This happens
+    // when the checkpoint uses a SMALLER context window than the actual model.
+    // With the fix, the checkpoint uses config.contextWindowTokens (the actual
+    // model's context window), so it should NOT fire below 20% of that value.
+    //
+    // We pick a token count that is BELOW 20% of config.contextWindowTokens
+    // but would have been ABOVE 20% of the old hardcoded 128000 (when
+    // config.contextWindowTokens > 128000).
+    const { shouldCheckpoint } = await import("./../checkpointWriter.js");
+    const { config } = await import("./../config.js");
+    // 19% of the actual context window — below the 20% threshold.
+    const belowThreshold = Math.floor(config.contextWindowTokens * 0.19);
+    expect(shouldCheckpoint(belowThreshold)).toBe(0);
+    // And 21% of the actual context window — above the 20% threshold.
+    const aboveThreshold = Math.floor(config.contextWindowTokens * 0.21);
+    expect(shouldCheckpoint(aboveThreshold)).toBe(1);
+  });
+
+  it("shouldCheckpoint fires at 20% of config.contextWindowTokens (not 128000)", async () => {
+    const { shouldCheckpoint } = await import("./../checkpointWriter.js");
+    const { config } = await import("./../config.js");
+    // 20% of the actual configured context window.
+    const twentyPercent = Math.floor(config.contextWindowTokens * 0.20);
+    expect(shouldCheckpoint(twentyPercent)).toBe(1);
+  });
+
+  it("shouldCheckpoint fires at 45% of config.contextWindowTokens", async () => {
+    const { shouldCheckpoint, resetCheckpoints, writeCheckpoint } = await import(
+      "./../checkpointWriter.js"
+    );
+    const { config } = await import("./../config.js");
+    const { chat } = await import("./../apiClient.js");
+    resetCheckpoints();
+    (chat as any).mockResolvedValue({
+      choices: [{ message: { content: '{"intention":"x"}' } }],
+    });
+    // Complete checkpoint 1 first so checkpoint 2 can fire.
+    await writeCheckpoint(1);
+    const fortyFivePercent = Math.floor(config.contextWindowTokens * 0.45);
+    expect(shouldCheckpoint(fortyFivePercent)).toBe(2);
+  });
+
+  it("shouldCheckpoint fires at 70% of config.contextWindowTokens", async () => {
+    const { shouldCheckpoint, resetCheckpoints, writeCheckpoint } = await import(
+      "./../checkpointWriter.js"
+    );
+    const { config } = await import("./../config.js");
+    const { chat } = await import("./../apiClient.js");
+    resetCheckpoints();
+    (chat as any).mockResolvedValue({
+      choices: [{ message: { content: '{"intention":"x"}' } }],
+    });
+    await writeCheckpoint(1);
+    await writeCheckpoint(2);
+    const seventyPercent = Math.floor(config.contextWindowTokens * 0.70);
+    expect(shouldCheckpoint(seventyPercent)).toBe(3);
+  });
+
+  it("writeCheckpoint reports contextPercent based on config.contextWindowTokens", async () => {
+    const { writeCheckpoint } = await import("./../checkpointWriter.js");
+    const { config } = await import("./../config.js");
+    const { chat } = await import("./../apiClient.js");
+    const historyMock = await import("./../history.js");
+
+    (chat as any).mockResolvedValue({
+      choices: [{ message: { content: '{"intention":"x"}' } }],
+    });
+    // Use exactly 20% of the configured context window.
+    const twentyPercent = Math.floor(config.contextWindowTokens * 0.20);
+    vi.mocked(historyMock.estimateTokens).mockReturnValue(twentyPercent);
+
+    const result = await writeCheckpoint(1);
+    // With the fix, contextPercent should be 20 (20% of config.contextWindowTokens).
+    // OLD BUG: would have been 10 (20% of 256000 / 128000 hardcoded = 10%).
+    expect(result.contextPercent).toBe(20);
   });
 });

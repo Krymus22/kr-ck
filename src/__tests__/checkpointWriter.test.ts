@@ -17,12 +17,16 @@ describe("checkpointWriter", () => {
 
   it("shouldCheckpoint returns 0 when context is small", async () => {
     const { shouldCheckpoint } = await import("./../checkpointWriter.js");
-    expect(shouldCheckpoint(100)).toBe(0);
+    // Pass 128000 explicitly to pin the historical context window used by
+    // these regression tests. Production uses config.contextWindowTokens
+    // (256_000 for Kimi K2.6) — see checkpoint-firing-too-early regression
+    // test in checkpointWriter-extended.test.ts.
+    expect(shouldCheckpoint(100, 128000)).toBe(0);
   });
 
   it("shouldCheckpoint returns 1 at 20%", async () => {
     const { shouldCheckpoint } = await import("./../checkpointWriter.js");
-    expect(shouldCheckpoint(26000)).toBe(1); // ~20% of 128000
+    expect(shouldCheckpoint(26000, 128000)).toBe(1); // ~20% of 128000
   });
 
   it("shouldCheckpoint returns 2 at 45%", async () => {
@@ -32,8 +36,8 @@ describe("checkpointWriter", () => {
     const { writeCheckpoint } = await import("./../checkpointWriter.js");
     const { chat } = await import("./../apiClient.js");
     (chat as any).mockResolvedValue({ choices: [{ message: { content: '{"intention":"","nextAction":"","constraints":[],"taskTree":[],"currentWork":"","filesInvolved":[],"crossTaskDiscoveries":[],"errorsAndCorrections":[],"runtimeState":"","designDecisions":[],"miscNotes":""}' } }] });
-    await writeCheckpoint(1);
-    expect(shouldCheckpoint(58000)).toBe(2); // ~45%
+    await writeCheckpoint(1, 128000);
+    expect(shouldCheckpoint(58000, 128000)).toBe(2); // ~45%
   });
 
   it("shouldCheckpoint returns 0 if already checkpointed", async () => {
@@ -42,8 +46,8 @@ describe("checkpointWriter", () => {
     const { writeCheckpoint } = await import("./../checkpointWriter.js");
     const { chat } = await import("./../apiClient.js");
     (chat as any).mockResolvedValue({ choices: [{ message: { content: '{"intention":"","nextAction":"","constraints":[],"taskTree":[],"currentWork":"","filesInvolved":[],"crossTaskDiscoveries":[],"errorsAndCorrections":[],"runtimeState":"","designDecisions":[],"miscNotes":""}' } }] });
-    await writeCheckpoint(1);
-    expect(shouldCheckpoint(26000)).toBe(0); // Already done checkpoint 1
+    await writeCheckpoint(1, 128000);
+    expect(shouldCheckpoint(26000, 128000)).toBe(0); // Already done checkpoint 1
   });
 
   it("formatCheckpoint should format all fields", async () => {

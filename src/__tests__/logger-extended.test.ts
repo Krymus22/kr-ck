@@ -94,10 +94,37 @@ describe("logger — extended", () => {
       expect(logSpy).not.toHaveBeenCalled();
     });
 
-    it("banner NÃO é suprimido em TUI mode (apenas tool/reply são)", () => {
+    it("BUG FIX (scroll-steal v3): TODAS as funções de logger são suprimidas em TUI mode", () => {
+      // Bug Hunter: scroll stealing during streaming — root cause era que
+      // log.info / log.warn / log.error / log.success / log.banner / log.divider
+      // / log.throttle / log.debug / log.statusBar NÃO eram gated por tuiMode.
+      // Cada console.log/console.warn/console.error escrevia BETWEEN Ink renders,
+      // causando scroll steal durante streaming. Agora TODAS são gated.
       setTuiMode(true);
       banner("banner em TUI");
-      expect(logSpy).toHaveBeenCalled();
+      info("info em TUI");
+      success("success em TUI");
+      warn("warn em TUI");
+      error("error em TUI");
+      throttle("throttle em TUI");
+      debug("debug em TUI");
+      divider();
+      // Nenhum console.* deve ser emitido em TUI mode
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(debugSpy).not.toHaveBeenCalled();
+    });
+
+    it("banner É suprimido em TUI mode (Bug Hunter: scroll-steal fix)", () => {
+      // Antes do fix, banner NÃO era suprimido em TUI mode — isso causava
+      // scroll steal durante streaming. Agora banner É suprimido (igual às
+      // outras funções). O banner em produção é impresso via
+      // process.stdout.write ANTES do Ink assumir (ver index.ts), então
+      // logger.banner não é usado em produção.
+      setTuiMode(true);
+      banner("banner em TUI");
+      expect(logSpy).not.toHaveBeenCalled();
     });
   });
 

@@ -27,6 +27,7 @@
 import { chat } from "./apiClient.js";
 import * as history from "./history.js";
 import * as log from "./logger.js";
+import { config } from "./config.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -54,7 +55,36 @@ export interface CheckpointResult {
 // --- Config -----------------------------------------------------------------
 
 const CHECKPOINT_THRESHOLDS = [0.20, 0.45, 0.70];  // 20%, 45%, 70%
-const MAX_CONTEXT_TOKENS = 128_000;  // Kimi K2.6 context window
+
+/**
+ * Resolve the context window size (in tokens) to use for checkpoint math.
+ *
+ * BUG FIX (Bug Hunter: checkpoint firing too early): previously this was a
+ * hardcoded constant `MAX_CONTEXT_TOKENS = 128_000`. But the default model
+ * (Kimi K2.6) has a 256_000-token context window (see modelRegistry.ts), and
+ * `config.contextWindowTokens` already defaults to that value (see config.ts).
+ * Using 128_000 meant the 20% threshold fired at 25_600 tokens, which is only
+ * 10% of the actual 256_000 window — so the user saw "Salvando checkpoint…"
+ * at ~10–13% context after just 2 messages.
+ *
+ * §17.1.1 compliance: `config.contextWindowTokens` defaults to
+ * `getModelContextWindow(modelId)` from modelRegistry.ts (the registry is the
+ * source of truth for context window). The user can still override via the
+ * `CONTEXT_WINDOW_TOKENS` env var, but the default respects §1.1.
+ *
+ * The optional `override` parameter exists so tests can pin the value to
+ * 128_000 (preserving historical assertions) without depending on the
+ * registry / env.
+ */
+function resolveContextTokens(override?: number): number {
+  const fromConfig = config?.contextWindowTokens;
+  if (typeof fromConfig === "number" && fromConfig > 0) return fromConfig;
+  if (typeof override === "number" && override > 0) return override;
+  // Defensive fallback (e.g., partial config mock in a test that doesn't
+  // override). Matches the historical hardcoded value so behavior is
+  // unchanged if config is unavailable.
+  return 128_000;
+}
 
 // --- State ------------------------------------------------------------------
 
@@ -66,9 +96,22 @@ let lastCheckpointState: CheckpointState | null = null;
 /**
  * Check if it's time for a checkpoint based on current context size.
  * Returns the checkpoint number (1, 2, 3) or 0 if not needed.
+ *
+ * BUG FIX (Bug Hunter: checkpoint firing too early): `historyLength` is the
+ * current token estimate (NOT message count). It's compared against the
+ * configured context window (`config.contextWindowTokens`, which defaults to
+ * the registry value per §1.1) using the 20% / 45% / 70% thresholds.
+ *
+ * @param historyLength  Current token estimate (e.g., `history.estimateTokens()`).
+ * @param contextWindow  Optional override for the context window size. Used by
+ *                       tests to pin the value to 128_000 (preserving historical
+ *                       assertions). In production this is left undefined and
+ *                       `config.contextWindowTokens` is used (the actual model's
+ *                       context window from modelRegistry.ts).
  */
-export function shouldCheckpoint(historyLength: number): number {
-  const contextPercent = historyLength / MAX_CONTEXT_TOKENS;
+export function shouldCheckpoint(historyLength: number, contextWindow?: number): number {
+  const maxTokens = resolveContextTokens(contextWindow);
+  const contextPercent = historyLength / maxTokens;
 
   for (let i = 0; i < CHECKPOINT_THRESHOLDS.length; i++) {
     const checkpointNum = i + 1;
@@ -88,10 +131,13 @@ export function shouldCheckpoint(historyLength: number): number {
  * The LLM receives the current conversation history (or a summary of it)
  * and returns structured JSON.
  *
- * @param checkpointNum - 1, 2, or 3
+ * @param checkpointNum   - 1, 2, or 3
+ * @param contextWindow   - Optional override for the context window size (used
+ *                          by tests to pin to 128_000). Production leaves this
+ *                          undefined and `config.contextWindowTokens` is used.
  * @returns CheckpointResult with extracted state
  */
-export async function writeCheckpoint(checkpointNum: number): Promise<CheckpointResult> {
+export async function writeCheckpoint(checkpointNum: number, contextWindow?: number): Promise<CheckpointResult> {
   const start = Date.now();
   const history_msgs = history.getHistory();
   // Bug fix (Bug Hunter #2): previously used `history_msgs.length` (MESSAGE COUNT)
@@ -100,10 +146,17 @@ export async function writeCheckpoint(checkpointNum: number): Promise<Checkpoint
   // correctly passes estimateTokens() to shouldCheckpoint(); this function must
   // do the same for the reported contextPercent metadata. Falls back to 0 if
   // estimateTokens is not available (e.g., in tests with partial mocks).
+  //
+  // Bug fix (Bug Hunter: checkpoint firing too early): use
+  // `resolveContextTokens()` (which reads `config.contextWindowTokens`) instead
+  // of the old hardcoded `MAX_CONTEXT_TOKENS = 128_000`. This makes the
+  // reported contextPercent match what the user sees in the StatusBar (which
+  // also uses `config.contextWindowTokens`).
+  const maxTokens = resolveContextTokens(contextWindow);
   const currentTokens = typeof history.estimateTokens === "function"
     ? history.estimateTokens()
     : 0;
-  const contextPercent = Math.round((currentTokens / MAX_CONTEXT_TOKENS) * 100);
+  const contextPercent = Math.round((currentTokens / maxTokens) * 100);
 
   log.info(`[CHECKPOINT] Writing checkpoint ${checkpointNum} at ~${contextPercent}% context`);
 

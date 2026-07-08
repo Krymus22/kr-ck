@@ -1445,6 +1445,16 @@ async function sendAndProcess(
     // contextPercent = messageCount / 128000 — always near 0 (e.g. 50 msgs
     // = 0.04%), so checkpoints were NEVER triggered. Pass the token estimate
     // so the 20% / 45% / 70% thresholds actually fire.
+    //
+    // BUG FIX (Bug Hunter: checkpoint firing too early): the checkpointWriter
+    // now reads `config.contextWindowTokens` (the ACTUAL model context window
+    // from modelRegistry.ts via config.ts — defaults to 256_000 for Kimi K2.6)
+    // instead of the old hardcoded 128_000. Using 128_000 made the 20% threshold
+    // fire at 25_600 tokens (= 10% of the actual 256_000 window), which is why
+    // the user saw "Salvando checkpoint…" at ~13% context after 2 messages.
+    // No explicit override is passed here — checkpointWriter uses
+    // config.contextWindowTokens by default (per §1.1, the registry is the
+    // source of truth for context window).
     const currentTokens = history.estimateTokens();
     const checkpointNum = shouldCheckpoint(currentTokens);
     if (checkpointNum > 0) {
@@ -1648,7 +1658,20 @@ async function runPreTurnMaintenance(): Promise<void> {
 async function maybeWriteCheckpoint(): Promise<void> {
   try {
     const currentTokens = history.estimateTokens?.() ?? 0;
-    if (!shouldWriteCheckpoint(currentTokens) || currentTokens <= lastCheckpointTokens + 1000) return;
+    // BUG FIX (Bug Hunter: checkpoint firing too early): the default
+    // CheckpointWriterConfig in memory.ts uses contextBudget = 128_000 (a
+    // historical hardcoded value). The actual model context window is
+    // `config.contextWindowTokens` (256_000 for Kimi K2.6 — see
+    // modelRegistry.ts). Passing the explicit config here makes the second
+    // checkpoint system fire at the SAME thresholds as checkpointWriter.ts
+    // (20% / 45% / 70% of the REAL context window), so they don't disagree
+    // and the user doesn't see duplicate "Salvando checkpoint…" messages at
+    // conflicting percentages.
+    const checkpointWriterConfig = {
+      contextBudget: config.contextWindowTokens,
+      checkpointPercentages: [0.2, 0.45, 0.7],
+    };
+    if (!shouldWriteCheckpoint(currentTokens, checkpointWriterConfig) || currentTokens <= lastCheckpointTokens + 1000) return;
     const checkpoint = createCheckpoint(
       sessionStartTime,
       history.getHistory().map((m) => ({ role: m.role, content: typeof m.content === "string" ? m.content : "" })),
