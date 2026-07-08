@@ -277,6 +277,7 @@ vi.mock("../readBeforeWrite.js", () => ({
   recordRead: vi.fn(),
   clearReadPaths: vi.fn(),
   setReadBeforeWriteEnabled: vi.fn(),
+  setAgentLoopRunningChecker: vi.fn(),
 }));
 
 vi.mock("../pokaYoke.js", () => ({

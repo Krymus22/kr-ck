@@ -124,6 +124,14 @@ export async function editFile(
   edits: EditOperation[],
   options?: { createIfMissing?: boolean; backup?: boolean }
 ): Promise<string> {
+  // Guard: null/undefined/empty filePath (edge case hunter fix)
+  if (!filePath || typeof filePath !== "string" || filePath.trim() === "") {
+    return "[ERROR] filePath is required (received " + String(filePath) + ")";
+  }
+  // Guard: non-array edits
+  if (!Array.isArray(edits)) {
+    return "[ERROR] edits must be an array (received " + typeof edits + ")";
+  }
   const resolved = path.resolve(filePath);
   log.toolCall("editar_arquivo", { caminho: resolved, numEdits: edits.length });
 

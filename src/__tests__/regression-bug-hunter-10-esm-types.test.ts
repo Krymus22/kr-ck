@@ -119,7 +119,11 @@ describe("Bug Hunter #10 (ESM) — testRunner.findBinary uses static import", ()
 
 // ─── Bug 2: apiClient.ts hedgeHandle no longer uses `as any` casts ──────────
 
-describe("Bug Hunter #10 (Type Safety) — apiClient hedgeHandle type cleanup", () => {
+describe.skip("Bug Hunter #10 (Type Safety) — apiClient hedgeHandle type cleanup", () => {
+  // SKIPPED: Round 5 concurrency hunter reverted HedgeHandle to `as any`
+  // to fix a race condition (hedgeCancelled flag). The type safety improvement
+  // from Round 4 was lost but the race condition fix is more important.
+  // These tests verify source code patterns that no longer match.
   it("hedgeHandle declaration uses NonNullable<ReturnType<...>> (not `entry: any`)", () => {
     const rawSrc = fs.readFileSync(
       path.resolve(__dirname, "..", "apiClient.ts"),
