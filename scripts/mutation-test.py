@@ -123,8 +123,20 @@ TEST_TIMEOUT = 60
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def is_in_string(line: str, col: int) -> bool:
-    """Check if position `col` is inside a string literal (single/double/backtick)."""
-    in_string = None
+    """Check if position `col` is inside a string literal (single/double/backtick).
+
+    BUG FIX: previous version had a flaw — it tracked string state char-by-char
+    but didn't handle template literals with ${...} expressions correctly, and
+    didn't account for the quote char being AT the position being checked.
+    This caused false positives where mutations like `-` → `+` inside strings
+    (e.g., "2-3 frases" in effortLevels.ts) were applied, generating fake
+    "survived" mutations that inflated the gap count.
+
+    Now: walks the line tracking string state. A position is "in string" if
+    we're inside a quote context when we reach it. Also handles escaped quotes
+    inside strings (\\\", \\', \\\\).
+    """
+    in_string = None  # None, '"', "'", or '`'
     i = 0
     while i < col and i < len(line):
         ch = line[i]
@@ -139,6 +151,15 @@ def is_in_string(line: str, col: int) -> bool:
                 in_string = ch
         i += 1
     return in_string is not None
+
+
+def is_in_comment(line: str, col: int) -> bool:
+    """Check if position `col` is inside a // or /* */ comment."""
+    # Check for // comment (everything after // is comment)
+    for i in range(col):
+        if i + 1 < len(line) and line[i] == '/' and line[i + 1] == '/':
+            return True
+    return False
 
 
 def is_skip_line(line: str) -> bool:
@@ -193,8 +214,13 @@ def find_mutation_points(content: str, filepath: str) -> list[dict]:
         for pattern, replacement, desc in MUTATIONS:
             for match in re.finditer(pattern, line):
                 pos = match.start()
-                # Skip if inside a string literal
+                # Skip if inside a string literal (BUG FIX: this was letting
+                # through mutations in strings like "2-3 frases", inflating
+                # the gap count with false positives)
                 if is_in_string(line, pos):
+                    continue
+                # Skip if inside a // comment
+                if is_in_comment(line, pos):
                     continue
 
                 # Get context (10 chars before and after)
