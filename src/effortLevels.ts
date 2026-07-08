@@ -36,9 +36,17 @@ function loadInitialLevel(): EffortLevel {
   if (VALID_LEVELS.has(envVal as EffortLevel)) return envVal as EffortLevel;
   // 2. Persistent storage (set via /effort slash command)
   try {
-    const stored = typeof localStorage !== "undefined"
+    // BUG FIX: previously the stored value was compared case-sensitively
+    // against VALID_LEVELS (which contains only lowercase). So a stored
+    // value of "LOW" (e.g., from CLAUDE_KILLER_EFFORT_STORED=LOW set in
+    // a shell) would be rejected and fall through to "medium", even
+    // though the env-var path (CLAUDE_KILLER_EFFORT=LOW) accepts it.
+    // This was inconsistent. Now we lowercase the stored value to match
+    // the env-var path's case-insensitive behavior.
+    const rawStored = typeof localStorage !== "undefined"
       ? localStorage.getItem(STORAGE_KEY)
       : process.env[`${ENV_KEY}_STORED`];
+    const stored = rawStored?.toLowerCase();
     if (stored && VALID_LEVELS.has(stored as EffortLevel)) return stored as EffortLevel;
   } catch { /* localStorage not available */ }
   // 3. Default

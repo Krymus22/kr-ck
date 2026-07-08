@@ -37,6 +37,17 @@ export function getTodos(): ReadonlyArray<TodoItem> {
   return currentTodos;
 }
 
+/**
+ * Clear all todos. Equivalent to `setTodos([])`.
+ *
+ * Called by /reset, /session new, /session load, and auto-load on startup
+ * to prevent the previous session's todo list from leaking into the new
+ * session (state-leak bug fix — `currentTodos` is a module-level singleton).
+ */
+export function resetTodo(): void {
+  currentTodos = [];
+}
+
 export function setTodos(items: TodoItem[]): void {
   // Coerce statuses, keep only first in_progress if multiple submitted.
   const firstInProgress = { value: false };
@@ -77,15 +88,27 @@ export function todoWrite(args: { items?: TodoItem[]; todos?: TodoItem[]; todo?:
 
 // --- Bar renderer (used by index.ts) --------------------------------------
 
-function pad(s: string, n: number): string {
-  s = s.replaceAll(/\s+/g, " ");
-  if (s.length > n) s = s.slice(0, Math.max(1, n - 1)) + "...";
-  return s.padEnd(n);
-}
-
 /**
  * Returns a multi-line string representation of the current task list,
  * or empty string if there are no tasks.
+ *
+ * BUG FIX (alignment): the previous implementation measured string length
+ * with `.length` AFTER wrapping substrings in ANSI color codes. Because
+ * each `\x1b[38;2;...m` sequence adds ~23 chars that the terminal does
+ * NOT render visibly, the computed length was ~23 chars larger than the
+ * visible width. As a result, `padEnd(innerWidth)` added fewer spaces
+ * than needed, and the closing `|` fell ~23 chars short of the `+`
+ * border — producing a visibly broken box:
+ *
+ *     +----------------------------------------------------------------------------+
+ *     | [3 tasks]                                           |   <- "|" stops short
+ *     | OK Done                                              |
+ *     +----------------------------------------------------------------------------+
+ *
+ * The fix computes the VISIBLE row text first (no ANSI codes), truncates
+ * and pads based on the real character count, and only then re-injects
+ * the ANSI color around the icon. Now every line has exactly
+ * `innerWidth + 4` visible chars, matching the borders.
  */
 export function renderTodoBar(maxWidth = 80): string {
   if (currentTodos.length === 0) return "";
@@ -97,22 +120,53 @@ export function renderTodoBar(maxWidth = 80): string {
   const green = (s: string) => `\x1b[38;2;52;211;153m${s}\x1b[0m`;
   const grey = (s: string) => `\x1b[38;2;107;114;128m${s}\x1b[0m`;
 
-  const header = ` ${cyan("[" + currentTodos.length + " tasks]")}`;
-  lines.push(grey("  +" + "-".repeat(innerWidth) + "+") + "\n" + "  |" + header + " ".repeat(Math.max(0, innerWidth - header.length)) + "|");
+  // Top border: `  +---...---+` (visible width = innerWidth + 4)
+  lines.push(grey("  +" + "-".repeat(innerWidth) + "+"));
 
+  // Header line — pad based on VISIBLE length so the closing "|" aligns
+  // with the top border's "+". The previous code used `header.length`
+  // which INCLUDED ANSI escape codes, causing the box to be misaligned
+  // (closing "|" was ~23 chars short of the "+").
+  const headerVisible = ` [${currentTodos.length} tasks]`;
+  const headerPad = " ".repeat(Math.max(0, innerWidth - headerVisible.length));
+  lines.push("  |" + cyan(headerVisible) + headerPad + "|");
+
+  // Rows
   for (const t of currentTodos) {
-    let icon: string;
+    let iconVisible: string;
+    let iconColored: string;
     if (t.status === "completed") {
-      icon = green("OK");
+      iconVisible = "OK";
+      iconColored = green(iconVisible);
     } else if (t.status === "in_progress") {
-      icon = violet("[*]");
+      iconVisible = "[*]";
+      iconColored = violet(iconVisible);
     } else {
-      icon = grey("[ ]");
+      iconVisible = "[ ]";
+      iconColored = grey(iconVisible);
     }
     const display = t.status === "in_progress" && t.active_form ? t.active_form : t.content;
-    const padded = pad(" " + icon + " " + display, innerWidth);
-    lines.push("  |" + violet(padded.slice(0, innerWidth + 30)) + "|");
+
+    // Build the VISIBLE row text (no ANSI codes) so truncation/padding
+    // operate on real character counts.
+    const rowVisible = ` ${iconVisible} ${display}`.replace(/\s+/g, " ");
+    let truncated = rowVisible;
+    if (truncated.length > innerWidth) {
+      // Truncate to exactly innerWidth chars: (innerWidth - 3) chars + "..."
+      truncated = truncated.slice(0, Math.max(1, innerWidth - 3)) + "...";
+    }
+    // Pad to exactly innerWidth visible chars.
+    const padded = truncated.padEnd(innerWidth);
+
+    // Re-inject the ANSI color around the icon. The icon always sits at
+    // position [1, 1+iconVisible.length) (after the leading space). Since
+    // innerWidth >= 40, truncation never reaches the icon.
+    const before = padded.slice(0, 1); // leading space
+    const after = padded.slice(1 + iconVisible.length); // display + padding
+    lines.push("  |" + before + iconColored + after + "|");
   }
+
+  // Bottom border
   lines.push(grey("  +" + "-".repeat(innerWidth) + "+"));
   return lines.join("\n");
 }

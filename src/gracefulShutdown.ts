@@ -220,8 +220,26 @@ export function registerShutdownHandlers(): void {
   }
   handlersRegistered = true;
 
+  // BUG FIX (Bug Hunter #8c): previously the signal handler was
+  //   `async (signal) => { await shutdown(signal); setTimeout(() => process.exit(0), 100); }`
+  // If `shutdown(signal)` rejected (e.g., a handler inside shutdown threw an
+  // uncaught error that escaped the internal try/catch — such as `log.info()`
+  // itself throwing if stdout was closed), the `await` would throw, the
+  // `setTimeout` would never be scheduled, and the process would HANG —
+  // requiring the user to Ctrl+C twice. Wrap the shutdown call in try/catch
+  // so `process.exit` is ALWAYS reached, even if shutdown fails.
   const handler = async (signal: string) => {
-    await shutdown(signal);
+    try {
+      await shutdown(signal);
+    } catch (err) {
+      // Last-resort: shutdown itself failed. Don't hang the process —
+      // log the error (best-effort) and still exit.
+      try {
+        log.error(`[SHUTDOWN] Shutdown failed: ${(err as Error).message}`);
+      } catch {
+        // even log.error threw (e.g. stderr closed) — nothing more we can do
+      }
+    }
     // Give a brief moment for logs to flush
     setTimeout(() => process.exit(0), 100);
   };
@@ -230,10 +248,20 @@ export function registerShutdownHandlers(): void {
   process.on("SIGTERM", () => handler("SIGTERM"));
   process.on("SIGHUP", () => handler("SIGHUP"));
 
-  // Handle uncaught exceptions - save state before crashing
+  // Handle uncaught exceptions - save state before crashing.
+  // Same defensive wrapping as `handler` above: if `shutdown()` rejects,
+  // we still need to exit(1) so the process doesn't hang.
   process.on("uncaughtException", async (err) => {
-    log.error(`[SHUTDOWN] Uncaught exception: ${err.message}`);
-    await shutdown("uncaughtException");
+    try {
+      log.error(`[SHUTDOWN] Uncaught exception: ${err.message}`);
+      await shutdown("uncaughtException");
+    } catch (err2) {
+      try {
+        log.error(`[SHUTDOWN] Shutdown after uncaughtException failed: ${(err2 as Error).message}`);
+      } catch {
+        // stderr closed — nothing more we can do
+      }
+    }
     setTimeout(() => process.exit(1), 100);
   });
 }

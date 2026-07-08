@@ -88,7 +88,16 @@ export function loadImageFromFile(filePath: string): PastedImage | null {
 }
 
 export function imageToBase64(image: PastedImage): string {
-  return `data:image/${image.format};base64,${image.data.toString("base64")}`;
+  // BUG FIX: for `format: "jpg"`, the MIME type was emitted as
+  // `image/jpg`, which is NOT a registered IANA media type. Many APIs
+  // (OpenAI, Anthropic, Google Vision) reject `image/jpg` with a 400
+  // error and only accept the standard `image/jpeg`. Normalize "jpg"
+  // (and the canonical "jpeg") to the standard MIME `image/jpeg` so
+  // the data URI is always accepted downstream. Other formats are
+  // already valid IANA image/* subtypes.
+  const mimeSubtype =
+    image.format === "jpg" || image.format === "jpeg" ? "jpeg" : image.format;
+  return `data:image/${mimeSubtype};base64,${image.data.toString("base64")}`;
 }
 
 export function saveImageToFile(image: PastedImage, filePath: string): boolean {

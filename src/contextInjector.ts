@@ -62,6 +62,14 @@ export function getContextInjection(toolName: string): string {
 /**
  * Reduce the full TASK_STATE summary to only decision-critical fields.
  * Drops "Done" items (past) and notes - keeps Pending, Bugs, Decisions.
+ *
+ * Bug Hunter #2c: previously the section-state machine only transitioned
+ * on Todo/Decisions/Bugs/Dependencies (→ relevant) and Done/Notes (→ not).
+ * Any OTHER non-indented line (e.g. "Started: ...", "Updated: ...", or a
+ * section header we didn't enumerate like "Comments:") did NOT reset
+ * inRelevantSection — so indented items in that unknown section were
+ * wrongly kept and injected. Fix: treat ANY non-indented line as a section
+ * boundary; only Todo/Decisions/Bugs/Dependencies are relevant.
  */
 function compactSummary(full: string): string {
   const lines = full.split("\n");
@@ -74,18 +82,18 @@ function compactSummary(full: string): string {
       kept.push(line);
       continue;
     }
-    // Mark section transitions
-    if (/^(Todo|Decisions|Bugs|Dependencies):/.test(line)) {
-      inRelevantSection = true;
-      kept.push(line);
+    // Any non-indented line is a section header (or metadata like "Started:").
+    // Use this as the boundary: relevant sections stay open, everything else
+    // closes the current section.
+    if (!line.startsWith("  ")) {
+      inRelevantSection = /^(Todo|Decisions|Bugs|Dependencies):/.test(line);
+      if (inRelevantSection) {
+        kept.push(line);
+      }
       continue;
     }
-    if (/^(Done|Notes):/.test(line)) {
-      inRelevantSection = false;
-      continue;
-    }
-    // Keep items inside relevant sections
-    if (inRelevantSection && line.startsWith("  ")) {
+    // Indented line: keep only if inside a relevant section.
+    if (inRelevantSection) {
       kept.push(line);
     }
   }

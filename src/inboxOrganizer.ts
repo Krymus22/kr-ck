@@ -187,8 +187,23 @@ function moveFile(
     return { status: "skipped", destination: destPath, reason: `already exists in ${destFolder}/` };
   }
 
-  // Move (rename)
-  fs.renameSync(sourcePath, destPath);
+  // Move (rename). fs.renameSync throws EXDEV when source and destination
+  // live on different filesystems (e.g., /tmp on tmpfs and ~/.claude-killer
+  // on the user's home partition — common on Linux). The cross-device
+  // fallback is copy-then-unlink, which works across any mount boundary.
+  // BUG FIX: previously a single `fs.renameSync(sourcePath, destPath)`
+  // was used, which threw `EXDEV: cross-device link not permitted` and
+  // surfaced as an error in `organizeInbox` whenever the user's
+  // ~/.claude-killer dir was on a different mount from the OS temp dir
+  // (which the installer sometimes uses as a staging area for inbox files).
+  try {
+    fs.renameSync(sourcePath, destPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EXDEV") throw err;
+    fs.copyFileSync(sourcePath, destPath);
+    fs.unlinkSync(sourcePath);
+  }
   log.info(`[INBOX] Moved ${fileName} → ${destFolder}/`);
   return { status: "moved", destination: destPath };
 }

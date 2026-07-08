@@ -154,7 +154,9 @@ Be CONCISE. Each field should be 1-3 lines max. Only include what's relevant.`,
     const jsonEnd = content.lastIndexOf("}");
     if (jsonStart >= 0 && jsonEnd > jsonStart) {
       const jsonStr = content.slice(jsonStart, jsonEnd + 1);
-      const state = JSON.parse(jsonStr) as CheckpointState;
+      // Bug Hunter #2c: normalize partial LLM JSON (missing array fields).
+      const parsed = JSON.parse(jsonStr) as Partial<CheckpointState>;
+      const state = normalizeState(parsed);
 
       lastCheckpoint = checkpointNum;
       lastCheckpointState = state;
@@ -191,44 +193,54 @@ Be CONCISE. Each field should be 1-3 lines max. Only include what's relevant.`,
 /**
  * Format checkpoint state as a string for context injection.
  * This is what gets injected into the conversation to preserve memory.
+ *
+ * Bug Hunter #2c: defensive against partial state. Callers (and tests) may
+ * pass a state missing some fields (e.g. when the LLM returned incomplete
+ * JSON). Previously `state.constraints.length` would throw TypeError. Now
+ * each field is null-checked via `asArray()`.
  */
 export function formatCheckpoint(state: CheckpointState): string {
   const lines: string[] = [`[CHECKPOINT STATE]`];
-  lines.push(`Intention: ${state.intention}`);
-  lines.push(`Next action: ${state.nextAction}`);
+  lines.push(`Intention: ${state?.intention ?? ""}`);
+  lines.push(`Next action: ${state?.nextAction ?? ""}`);
 
-  if (state.constraints.length > 0) {
+  const constraints = asArray<string>(state?.constraints);
+  if (constraints.length > 0) {
     lines.push(`Constraints:`);
-    state.constraints.forEach((c) => lines.push(`  - ${c}`));
+    constraints.forEach((c) => lines.push(`  - ${c}`));
   }
 
-  if (state.taskTree.length > 0) {
+  const taskTree = asArray<string>(state?.taskTree);
+  if (taskTree.length > 0) {
     lines.push(`Remaining tasks:`);
-    state.taskTree.forEach((t) => lines.push(`  - ${t}`));
+    taskTree.forEach((t) => lines.push(`  - ${t}`));
   }
 
-  lines.push(`Current work: ${state.currentWork}`);
+  lines.push(`Current work: ${state?.currentWork ?? ""}`);
 
-  if (state.filesInvolved.length > 0) {
+  const filesInvolved = asArray<{ path: string; change: string }>(state?.filesInvolved);
+  if (filesInvolved.length > 0) {
     lines.push(`Files involved:`);
-    state.filesInvolved.forEach((f) => lines.push(`  - ${f.path}: ${f.change}`));
+    filesInvolved.forEach((f) => lines.push(`  - ${f?.path ?? "?"}: ${f?.change ?? ""}`));
   }
 
-  if (state.errorsAndCorrections.length > 0) {
+  const errorsAndCorrections = asArray<{ error: string; fix: string }>(state?.errorsAndCorrections);
+  if (errorsAndCorrections.length > 0) {
     lines.push(`Errors & corrections:`);
-    state.errorsAndCorrections.forEach((e) => lines.push(`  - ${e.error} → ${e.fix}`));
+    errorsAndCorrections.forEach((e) => lines.push(`  - ${e?.error ?? "?"} → ${e?.fix ?? ""}`));
   }
 
-  if (state.designDecisions.length > 0) {
+  const designDecisions = asArray<{ decision: string; rationale: string }>(state?.designDecisions);
+  if (designDecisions.length > 0) {
     lines.push(`Design decisions:`);
-    state.designDecisions.forEach((d) => lines.push(`  - ${d.decision} (${d.rationale})`));
+    designDecisions.forEach((d) => lines.push(`  - ${d?.decision ?? "?"} (${d?.rationale ?? ""})`));
   }
 
-  if (state.runtimeState) {
+  if (state?.runtimeState) {
     lines.push(`Runtime: ${state.runtimeState}`);
   }
 
-  if (state.miscNotes) {
+  if (state?.miscNotes) {
     lines.push(`Notes: ${state.miscNotes}`);
   }
 
@@ -271,5 +283,39 @@ function emptyState(): CheckpointState {
     runtimeState: "",
     designDecisions: [],
     miscNotes: "",
+  };
+}
+
+/**
+ * Coerce an unknown value into a typed array (empty if not an array).
+ * Used by normalizeState + formatCheckpoint to defend against partial / malformed
+ * LLM JSON (e.g. `{"intention":"..."}` with arrays missing entirely).
+ */
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+/**
+ * Normalize a partial (possibly malformed) parsed object into a full CheckpointState.
+ *
+ * Bug Hunter #2c: `JSON.parse(jsonStr) as CheckpointState` is just a type
+ * assertion — it does NOT validate. LLMs routinely return JSON missing fields
+ * (only intention, or arrays as null). Without normalization, downstream code
+ * that does `state.constraints.length` throws TypeError, the agent.ts
+ * try/catch swallows it, and the checkpoint is silently dropped.
+ */
+function normalizeState(parsed: Partial<CheckpointState>): CheckpointState {
+  return {
+    intention: typeof parsed.intention === "string" ? parsed.intention : "",
+    nextAction: typeof parsed.nextAction === "string" ? parsed.nextAction : "",
+    constraints: asArray<string>(parsed.constraints),
+    taskTree: asArray<string>(parsed.taskTree),
+    currentWork: typeof parsed.currentWork === "string" ? parsed.currentWork : "",
+    filesInvolved: asArray<{ path: string; change: string }>(parsed.filesInvolved),
+    crossTaskDiscoveries: asArray<string>(parsed.crossTaskDiscoveries),
+    errorsAndCorrections: asArray<{ error: string; fix: string }>(parsed.errorsAndCorrections),
+    runtimeState: typeof parsed.runtimeState === "string" ? parsed.runtimeState : "",
+    designDecisions: asArray<{ decision: string; rationale: string }>(parsed.designDecisions),
+    miscNotes: typeof parsed.miscNotes === "string" ? parsed.miscNotes : "",
   };
 }

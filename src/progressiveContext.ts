@@ -47,12 +47,32 @@ export interface ProgressiveReadResult {
  * @param filePath - File to read
  * @param symbolName - Function/class to extract (null = full read)
  * @returns ProgressiveReadResult with the content
+ *
+ * Bug Hunter #2c: previously `fs.readFileSync(filePath, "utf8")` was called
+ * OUTSIDE any try/catch. If the file didn't exist (the AI hallucinated a
+ * path, or detectSymbolRequest captured a path with trailing punctuation),
+ * the ENOENT propagated up and crashed the tool call. The parseFile branch
+ * had a try/catch but the initial read did not. Fix: wrap the read so we
+ * return a graceful error result instead of throwing.
  */
 export async function readSymbolFromFile(
   filePath: string,
   symbolName: string | null
 ): Promise<ProgressiveReadResult> {
-  const fullContent = fs.readFileSync(filePath, "utf8");
+  let fullContent: string;
+  try {
+    fullContent = fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    log.debug(`[PROGRESSIVE] Failed to read ${filePath}: ${(err as Error).message}`);
+    return {
+      content: `[ERROR] Could not read file: ${filePath} (${(err as Error).message})`,
+      partial: false,
+      symbolName: null,
+      fullFileLines: 0,
+      extractedLines: 0,
+      savingsPercent: 0,
+    };
+  }
   const fullLines = fullContent.split("\n").length;
 
   // If no symbol specified, return full file
@@ -108,13 +128,18 @@ export async function readSymbolFromFile(
     const content = extractedLines.join("\n");
 
     // Also include imports from the top of the file (first 20 lines usually)
-    const importLines = lines.slice(0, Math.min(20, startLine)).filter((l) =>
-      l.trim().startsWith("import") ||
-      l.trim().startsWith("local") && l.includes("require") ||
-      l.trim().startsWith("from") ||
-      l.trim().startsWith("#include") ||
-      l.trim().startsWith("use ")
-    );
+    // Bug Hunter #2c: use word-boundary regexes instead of startsWith("import"),
+    // which falsely matched "importantVar = 1", "importPath", etc. Also dropped
+    // the dead "from" branch (a line starting with bare `from` is invalid JS/TS).
+    const importLines = lines.slice(0, Math.min(20, startLine)).filter((l) => {
+      const trimmed = l.trim();
+      return (
+        /^import\b/.test(trimmed) ||                       // JS/TS: import ...
+        (/^local\b/.test(trimmed) && /\brequire\b/.test(trimmed)) ||  // Luau: local X = require(...)
+        /^#include\b/.test(trimmed) ||                     // C/C++
+        /^use\s/.test(trimmed)                             // Rust
+      );
+    });
 
     const fullExtracted = importLines.length > 0
       ? `// --- Imports (for context) ---\n${importLines.join("\n")}\n\n// --- ${symbolName} ---\n${content}`
@@ -181,9 +206,16 @@ export function detectSymbolRequest(userMessage: string): { filePath: string; sy
   for (const pattern of patterns) {
     const match = userMessage.match(pattern);
     if (match) {
+      // Bug Hunter #2c: strip trailing punctuation that the regex greedily
+      // captured as part of the file path. E.g. "show foo from bar.ts." (end
+      // of sentence) → filePath was "bar.ts." which then failed fs.readFileSync
+      // with ENOENT. Same for , ; : ! ? ) ] " ' — none are valid path chars.
+      const rawPath = match[2] ?? "";
+      const filePath = rawPath.replace(/[.,;:!?)\[\]"']+$/u, "");
+      if (!filePath) continue;  // all punctuation — skip and try next pattern
       return {
         symbolName: match[1]!,
-        filePath: match[2]!,
+        filePath,
       };
     }
   }

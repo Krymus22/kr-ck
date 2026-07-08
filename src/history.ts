@@ -42,6 +42,14 @@ export interface MemoryFile {
  * Walks up from cwd looking for memory files. Returns the list of files found
  * (closest = last = highest precedence). Capped at 10 parent dirs to avoid
  * runaway on weird FS layouts.
+ *
+ * Bug fix (Bug Hunter #2d): wraps fs.statSync / fs.readFileSync in try/catch.
+ * Previously, if a memory file was deleted between the existsSync check and
+ * the statSync/readFileSync calls (race condition), the function would throw
+ * ENOENT. This propagated up to getSystemPrompt() → ensureHistoryInitialized()
+ * → addUserMessage(), crashing the app on the user's first message after they
+ * (or a watcher) deleted a memory file. Now we skip files that disappear
+ * mid-walk, returning whatever we successfully read.
  */
 export function loadProjectMemoryFiles(): MemoryFile[] {
   const start = process.cwd();
@@ -51,9 +59,14 @@ export function loadProjectMemoryFiles(): MemoryFile[] {
   while (dir && safety-- > 0) {
     for (const file of MEMORY_FILENAMES) {
       const abs = path.join(dir, file);
-      if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-        parts.push({ file: abs, absDir: dir });
-        break; // one per dir to avoid duplicate chains like ./CLAUDE.md + ./.claude-killer/AGENTS.md
+      try {
+        if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
+          parts.push({ file: abs, absDir: dir });
+          break; // one per dir to avoid duplicate chains like ./CLAUDE.md + ./.claude-killer/AGENTS.md
+        }
+      } catch {
+        // File disappeared between existsSync and statSync (race condition)
+        // or permission denied — skip silently. Better than crashing the app.
       }
     }
     const parent = path.dirname(dir);
@@ -66,14 +79,20 @@ export function loadProjectMemoryFiles(): MemoryFile[] {
   // Reverse so closest (most specific) is last and treated as highest precedence
   parts.reverse();
 
-  return parts.map((p) => {
-    const stat = fs.statSync(p.file);
-    return {
-      relativePath: path.relative(start, p.file) || p.file,
-      absolutePath: p.file,
-      sizeBytes: stat.size,
-      content: fs.readFileSync(p.file, "utf8").trim(),
-    };
+  return parts.flatMap((p) => {
+    try {
+      const stat = fs.statSync(p.file);
+      return [{
+        relativePath: path.relative(start, p.file) || p.file,
+        absolutePath: p.file,
+        sizeBytes: stat.size,
+        content: fs.readFileSync(p.file, "utf8").trim(),
+      }];
+    } catch {
+      // File was deleted between the walk above and now (race condition)
+      // or permission denied — skip. Don't crash the caller.
+      return [];
+    }
   });
 }
 
@@ -480,10 +499,24 @@ export function getLoadedMemoryFiles(): MemoryFile[] {
   return loadProjectMemoryFilesCached();
 }
 
-/** Invalidate the memoized project memory (call on /memory reload). */
+/**
+ * Invalidate the memoized project memory (call on /memory reload).
+ *
+ * Bug fix (Bug Hunter #2d): also refreshes history[0] (the system prompt) so
+ * the IA sees the NEW memory content immediately. Previously, this function
+ * only updated the cache but left history[0] with the OLD system prompt
+ * (which was set at init time or last setCavemanLevel/resetHistory call).
+ * The IA continued to see stale memory until the next /reset — defeating the
+ * purpose of /memory reload. Same fix pattern as setCavemanLevel().
+ */
 export function reloadProjectMemory(): string | null {
   cachedMemoryFiles = undefined;
   const files = loadProjectMemoryFilesCached();
+  // Refresh history[0] so the IA sees the new memory content. This mirrors
+  // setCavemanLevel()'s pattern of updating the live system prompt in-place.
+  if (history.length > 0 && history[0].role === "system") {
+    history[0].content = getSystemPrompt();
+  }
   if (files.length === 0) return null;
   return files.map((f) => `--- MEMORY: ${f.relativePath} ---\n${f.content}`).join("\n\n");
 }
@@ -585,8 +618,23 @@ export function loadHistoryDirect(messages: Message[]): void {
   const orphans = [...toolCallIds].filter((id) => !toolResultIds.has(id));
   if (orphans.length > 0) {
     // Inject synthetic tool results for each orphan, placed right after the
-    // last assistant message that contains that tool_call_id. We insert them
-    // immediately after the assistant message to maintain chronological order.
+    // assistant message that contains that tool_call_id.
+    //
+    // BUG FIX (Bug Hunter #2a): The previous implementation inserted each
+    // synthetic tool message at `assistantIdx + 1` using splice. When multiple
+    // orphans shared the SAME assistant (multiple tool_calls in one assistant
+    // message, all orphaned), each new synthetic message was inserted at
+    // position `assistantIdx + 1`, pushing previously-inserted synthetic
+    // messages to higher indices. The resulting order was REVERSED relative to
+    // the tool_calls array order. The OpenAI API expects tool result messages
+    // to appear in the SAME ORDER as the tool_calls in the assistant message;
+    // reversed order causes 400 errors or confuses the model.
+    //
+    // Fix: for each orphan, find the END of the contiguous tool block right
+    // after the assistant (scanning forward over any existing tool messages
+    // — both real results for sibling tool_calls and previously-injected
+    // synthetic results), and insert the new synthetic message at that
+    // position. This preserves tool_calls order.
     for (const orphanId of orphans) {
       // Find the assistant message that has this tool_call_id
       const assistantIdx = history.findIndex(
@@ -594,8 +642,15 @@ export function loadHistoryDirect(messages: Message[]): void {
           (m as any).tool_calls.some((tc: any) => tc?.id === orphanId)
       );
       if (assistantIdx >= 0) {
-        // Insert synthetic tool result right after the assistant message
-        history.splice(assistantIdx + 1, 0, {
+        // Scan forward over the contiguous block of tool messages that
+        // immediately follow the assistant. Insert the synthetic tool result
+        // at the END of this block so that the tool messages remain in the
+        // same order as the tool_calls array on the assistant message.
+        let insertIdx = assistantIdx + 1;
+        while (insertIdx < history.length && history[insertIdx]!.role === "tool") {
+          insertIdx++;
+        }
+        history.splice(insertIdx, 0, {
           role: "tool",
           tool_call_id: orphanId,
           content: "[ERROR] Session interrupted — tool did not complete. The terminal was closed mid-tool-call. Please retry or check the current state.",
@@ -724,12 +779,72 @@ export function resetHistory(): void {
  * Replace the entire history with the provided messages.
  * Used by model-based compaction (IDEIA 3) to swap in a compacted history.
  * The first message MUST be the system prompt; if not, we prepend it.
+ *
+ * Bug fix (Bug Hunter #2d): repairs orphan tool_calls after replacement.
+ * Compaction strategies in contextCompaction.ts (merge-adjacent-tool-results,
+ * remove-consecutive-same-role, remove-old-error-messages) can drop tool
+ * messages while keeping the corresponding assistant tool_calls. This leaves
+ * "orphan tool_calls" — assistant messages with tool_calls that have no
+ * matching tool result. The OpenAI API rejects this with 400 ("An assistant
+ * message with 'tool_calls' must be followed by tool messages responding to
+ * each 'tool_call_id'"), permanently breaking the session. We inject a
+ * synthetic tool result for each orphan, mirroring the BS-4 fix in
+ * loadHistoryDirect() (with the same ordering-preserving approach as Bug
+ * Hunter #2a — synthetic results are inserted at the END of the contiguous
+ * tool block following the assistant, so tool messages stay in tool_calls
+ * array order). This is defense-in-depth: ideally the compaction strategies
+ * themselves wouldn't create orphans, but replaceHistory is the last line
+ * of defense before the API call.
  */
 export function replaceHistory(messages: Message[]): void {
   if (messages.length === 0 || messages[0].role !== "system") {
     history = [{ role: "system", content: getSystemPrompt() }, ...messages];
   } else {
     history = [...messages];
+  }
+
+  // ── Repair orphan tool_calls (compaction side-effect) ───────────────────
+  // Same logic as loadHistoryDirect's BS-4 fix, but with a compaction-specific
+  // message. Uses the Bug Hunter #2a ordering-preserving insertion: scan
+  // forward over the contiguous tool block following the assistant and insert
+  // at the END, so multiple orphans on the same assistant stay in tool_calls
+  // array order (API requirement).
+  const toolCallIds = new Set<string>();
+  const toolResultIds = new Set<string>();
+  for (const m of history) {
+    if (m.role === "assistant" && Array.isArray((m as any).tool_calls)) {
+      for (const tc of (m as any).tool_calls) {
+        if (tc?.id) toolCallIds.add(tc.id);
+      }
+    }
+    if (m.role === "tool" && typeof (m as any).tool_call_id === "string") {
+      toolResultIds.add((m as any).tool_call_id);
+    }
+  }
+
+  const orphans = [...toolCallIds].filter((id) => !toolResultIds.has(id));
+  if (orphans.length > 0) {
+    for (const orphanId of orphans) {
+      const assistantIdx = history.findIndex(
+        (m) => m.role === "assistant" && Array.isArray((m as any).tool_calls) &&
+          (m as any).tool_calls.some((tc: any) => tc?.id === orphanId)
+      );
+      if (assistantIdx >= 0) {
+        // Scan forward over the contiguous block of tool messages that
+        // immediately follow the assistant. Insert at the END so tool messages
+        // remain in the same order as the tool_calls array (Bug Hunter #2a).
+        let insertIdx = assistantIdx + 1;
+        while (insertIdx < history.length && history[insertIdx]!.role === "tool") {
+          insertIdx++;
+        }
+        history.splice(insertIdx, 0, {
+          role: "tool",
+          tool_call_id: orphanId,
+          content: "[ERROR] Tool result missing after compaction. The tool did not complete or its result was compacted away.",
+        } as Message);
+      }
+    }
+    console.warn(`[HISTORY] Repaired ${orphans.length} orphan tool_call(s) after replaceHistory (compaction side-effect)`);
   }
 }
 

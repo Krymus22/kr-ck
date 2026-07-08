@@ -738,6 +738,13 @@ describe("formatInjectedMemory", () => {
   });
 
   it("should limit skills to 5 in output", () => {
+    // Write project memory containing the trigger so findMatchingSkills
+    // actually matches the skills. (Without this, the context passed
+    // to findMatchingSkills is "" — and after the Bug Hunter #8d fix,
+    // empty context returns [] instead of all skills.)
+    // NOTE: findMatchingSkills checks `skill.trigger.includes(context)`,
+    // so the context must be a SUBSTRING of the trigger/description/name.
+    writeProjectMemory(testConfig, "format-test");
     for (let i = 0; i < 8; i++) {
       saveSkill(
         testConfig,

@@ -91,10 +91,19 @@ export interface TraceMessage {
 
 // --- Config ------------------------------------------------------------------
 
-const HOME = os.homedir();
+// BUG FIX: previously `const HOME = os.homedir();` was captured ONCE at module
+// load time. If `process.env.HOME` (or `USERPROFILE` on Windows) was changed
+// AFTER the module was imported — which happens routinely in tests, in
+// containers, and when the user's environment is reconfigured —
+// `getMemoryConfig()` still returned the stale home directory. Other modules
+// in this codebase (inboxOrganizer.getInboxDir, hookRunner.candidateHooksDirs)
+// correctly read `process.env.HOME` at CALL time. We now do the same here.
+function resolveHome(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
+}
 
 export function getMemoryConfig(projectRoot?: string): MemoryConfig {
-  const globalDir = path.join(HOME, ".claude-killer", "memory");
+  const globalDir = path.join(resolveHome(), ".claude-killer", "memory");
   const projectDir = projectRoot
     ? path.join(projectRoot, ".claude-killer")
     : path.join(process.cwd(), ".claude-killer");
@@ -464,6 +473,15 @@ export function listSkills(config: MemoryConfig): Skill[] {
 export function findMatchingSkills(config: MemoryConfig, context: string): Skill[] {
   const allSkills = listSkills(config);
   const contextLower = context.toLowerCase();
+
+  // BUG FIX: when context is empty (or whitespace-only), every string
+  // includes "" ("".includes("") === true), so the filter would match ALL
+  // skills. That made injectMemory() pull every saved skill into the
+  // system prompt whenever project memory was empty — easily blowing the
+  // token budget. Return [] for empty context instead.
+  if (contextLower.trim().length === 0) {
+    return [];
+  }
 
   // Sprint C bug fix: skill.trigger e skill.description podem ser undefined.
   // Usar optional chaining + fallback pra string vazia.

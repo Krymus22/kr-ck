@@ -195,22 +195,35 @@ export function formatPatterns(patterns: CodePatterns): string {
 
 let cachedPatterns: CodePatterns | null = null;
 let cacheTime = 0;
+// Bug Hunter #2c: previously the cache only tracked (patterns, time) — NOT the
+// projectRoot that was analyzed. If the caller passed a DIFFERENT root (e.g.
+// the user `cd`'d to another project, or a test reused the module across
+// fixtures), getPatternsCached returned stale patterns from the OLD root for
+// up to 5 minutes. This is a cross-session state leak. Fix: key the cache on
+// (projectRoot, time).
+let cachedProjectRoot: string | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000;  // 5 minutes
 
 /**
- * Get cached patterns (or extract if cache expired).
+ * Get cached patterns (or extract if cache expired / projectRoot changed).
  */
 export function getPatternsCached(projectRoot: string): CodePatterns {
-  if (cachedPatterns && Date.now() - cacheTime < CACHE_TTL_MS) {
+  if (
+    cachedPatterns &&
+    cachedProjectRoot === projectRoot &&
+    Date.now() - cacheTime < CACHE_TTL_MS
+  ) {
     return cachedPatterns;
   }
   cachedPatterns = extractPatterns(projectRoot);
   cacheTime = Date.now();
+  cachedProjectRoot = projectRoot;
   return cachedPatterns;
 }
 
-/** Clear cache (for tests). */
+/** Clear cache (for tests / /reset). */
 export function clearPatternCache(): void {
   cachedPatterns = null;
   cacheTime = 0;
+  cachedProjectRoot = null;
 }

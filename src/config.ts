@@ -13,10 +13,14 @@ import { detectProvider, getProviderConfig } from "./apiProvider.js";
 function requireEnv(key: string): string {
   const value = process.env[key];
   if (!value || value.trim() === "") {
+    // BUG FIX: example was hardcoded as "NVIDIA_API_KEY=nvapi-xxxx" regardless
+    // of which env var was missing. If requireEnv("ZENMUX_API_KEY") was called,
+    // the message would misleadingly suggest setting NVIDIA_API_KEY. Now uses
+    // the actual key name in the example.
     console.error(
       `\nX  Missing required environment variable: ${key}\n` +
         `   Set it in your shell or in a .env file.\n` +
-        `   Example: NVIDIA_API_KEY=nvapi-xxxx\n`
+        `   Example: ${key}=xxxx\n`
     );
     process.exit(1);
   }
@@ -31,7 +35,12 @@ function optionalInt(key: string, fallback: number): number {
 }
 
 function optionalBool(key: string, fallback: boolean): boolean {
-  const raw = process.env[key]?.toLowerCase();
+  // BUG FIX: previously did not trim whitespace, so DEBUG="  true  " (with
+  // surrounding whitespace from shell quoting or .env files) would fail the
+  // strict equality check and silently fall back to the default. This caused
+  // confusing behavior where users thought they enabled debug mode but it
+  // stayed off. Trim before comparing to handle these cases.
+  const raw = process.env[key]?.trim().toLowerCase();
   if (raw === "true" || raw === "1") return true;
   if (raw === "false" || raw === "0") return false;
   return fallback;
@@ -72,8 +81,14 @@ export const config = {
   /** API provider name ("nvidia" or "zenmux"). */
   apiProvider: _provider,
 
-  /** API key for the active provider. */
-  nvidiaApiKey: _providerConfig.apiKey,
+  /** API key for the active provider.
+   *
+   * BUG FIX: trimmed to remove accidental leading/trailing whitespace from
+   * shell quoting or .env files. Without this, NVIDIA_API_KEY="  nvapi-xxx  "
+   * would be sent verbatim to the API and cause confusing 401 Unauthorized
+   * errors. The apiProvider.ts getProviderConfig() does NOT trim, so we do
+   * it here as a defensive measure. */
+  nvidiaApiKey: _providerConfig.apiKey.trim(),
 
   /**
    * Multi-key pool (optional). Comma-separated list of NVIDIA API keys
@@ -127,8 +142,15 @@ export const config = {
   /**
    * Maximum number of simultaneous API calls (hard limit: 1 for MVP).
    * The concurrency mutex enforces this.
+   *
+   * BUG FIX: previously `Math.min(optionalInt(...), 1)` — Math.min returns
+   * the smaller value, so MAX_CONCURRENCY=-1 resulted in -1 (negative!),
+   * which broke the concurrency limiter (a negative limit means unlimited
+   * or always-block depending on the loop). Now clamped to [1, 1] so the
+   * hard limit is enforced regardless of user input. Per BUSINESS_RULES §2:
+   * maxConcurrency is "Hard limit (MVP)" = 1.
    */
-  maxConcurrency: Math.min(optionalInt("MAX_CONCURRENCY", 1), 1),
+  maxConcurrency: Math.max(1, Math.min(optionalInt("MAX_CONCURRENCY", 1), 1)),
 
   /**
    * How many times the auto-heal loop may retry writing a file

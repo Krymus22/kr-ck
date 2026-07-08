@@ -4,6 +4,8 @@
 
 import { describe, it, expect, afterAll, vi } from "vitest";
 import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 vi.mock("../logger.js", () => ({
   info: vi.fn(),
@@ -48,9 +50,12 @@ let sessionId: string | undefined;
 afterAll(() => {
   if (sessionId) {
     try {
-      const path = require("node:path");
+      // BUG FIX (Bug Hunter #8c): replaced `require("node:path")` with a
+      // top-level ESM `import` (project rule: "Use `import` not `require()`").
+      // Also use `os.homedir()` as the fallback (matches the source fix in
+      // telemetry.ts) so cleanup finds the right file even when HOME is unset.
       const telemetryDir = path.join(
-        process.env.HOME ?? process.env.USERPROFILE ?? ".",
+        process.env.HOME ?? process.env.USERPROFILE ?? os.homedir(),
         ".claude-killer",
         "telemetry"
       );

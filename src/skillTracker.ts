@@ -65,17 +65,23 @@ export function buildSkillReInjectionMessage(): string | null {
       const stat = fs.statSync(skillPath);
       if (stat.isDirectory()) continue;
 
-      const content = fs.readFileSync(skillPath, "utf8");
-      if (content.includes("\0")) continue;
+      // Bug fix (Bug Hunter #2b): for HUGE skill files (some skills embed
+      // large reference docs / generated content), the previous code loaded
+      // the ENTIRE file via fs.readFileSync, then truncated. That risked OOM
+      // for very large skill files. Now we cap the read at a byte budget via
+      // readBoundedContent() (mirrors fileRehydration.ts).
+      const maxChars = MAX_TOKENS_PER_SKILL * 4; // 20K chars
+      const { content, truncated: wasCapped } = readBoundedContent(skillPath, stat.size, maxChars);
+      if (content === null) continue; // binary file
 
-      const tokens = Math.ceil(content.length / 4);
-      const maxChars = MAX_TOKENS_PER_SKILL * 4;
-      const truncated = content.length > maxChars
+      const isTruncated = wasCapped || content.length > maxChars;
+      const truncated = isTruncated
         ? content.slice(0, maxChars) + "\n...[TRUNCATED — re-read with ler_arquivo for full content]..."
         : content;
 
-      skills.push({ path: skillPath, content: truncated, tokens: Math.min(tokens, MAX_TOKENS_PER_SKILL) });
-      totalTokens += Math.min(tokens, MAX_TOKENS_PER_SKILL);
+      const tokens = Math.min(Math.ceil(truncated.length / 4), MAX_TOKENS_PER_SKILL);
+      skills.push({ path: skillPath, content: truncated, tokens });
+      totalTokens += tokens;
     } catch {
       continue;
     }
@@ -97,6 +103,37 @@ export function buildSkillReInjectionMessage(): string | null {
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Read up to `maxChars` UTF-8 characters from `filePath`, without loading
+ * huge files into memory in full. Mirrors fileRehydration.readBoundedContent.
+ *
+ * Returns `{ content, truncated }` where `content` is null for binary files
+ * (NUL byte in inspected region) and `truncated` is true when the file was
+ * larger than the byte budget and we only read the first chunk.
+ */
+function readBoundedContent(
+  filePath: string,
+  fileSize: number,
+  maxChars: number,
+): { content: string | null; truncated: boolean } {
+  const byteBudget = maxChars * 4; // worst case: 4 bytes/char
+  if (fileSize <= byteBudget) {
+    const content = fs.readFileSync(filePath, "utf8");
+    if (content.includes("\0")) return { content: null, truncated: false };
+    return { content, truncated: false };
+  }
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(byteBudget);
+    const bytesRead = fs.readSync(fd, buf, 0, byteBudget, 0);
+    const content = buf.slice(0, bytesRead).toString("utf8");
+    if (content.includes("\0")) return { content: null, truncated: false };
+    return { content, truncated: true };
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /**

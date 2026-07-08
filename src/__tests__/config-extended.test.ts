@@ -101,8 +101,11 @@ describe("Config (extended)", () => {
     process.env.NVIDIA_API_KEY = "k";
     process.env.MAX_CONCURRENCY = "-1";
     const { config } = await import("../config.js");
-    // Math.min(-1, 1) = -1
-    expect(config.maxConcurrency).toBe(-1);
+    // BUG FIX: Math.max(1, Math.min(-1, 1)) = 1 (clamped to [1, 1]).
+    // Previously this returned -1 (Math.min(-1, 1) = -1), which broke the
+    // concurrency limiter. Per BUSINESS_RULES §2: maxConcurrency is a hard
+    // limit of 1, so negative values must be clamped up to 1.
+    expect(config.maxConcurrency).toBe(1);
   });
 
   // --- optionalBool edge cases ----------------------------------------------

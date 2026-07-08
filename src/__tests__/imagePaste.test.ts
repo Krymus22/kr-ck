@@ -121,10 +121,18 @@ describe("imagePaste.ts (real module)", () => {
       expect(result).toContain(Buffer.from("hello").toString("base64"));
     });
 
-    it("should handle jpg format", () => {
+    it("should handle jpg format (normalized to image/jpeg MIME)", () => {
       const img: PastedImage = { data: Buffer.from("data"), format: "jpg" };
       const result = imageToBase64(img);
-      expect(result).toMatch(/^data:image\/jpg;base64,/);
+      // BUG FIX: `image/jpg` is not a registered IANA MIME type and is
+      // rejected by OpenAI / Anthropic vision APIs. Normalize to `image/jpeg`.
+      expect(result).toMatch(/^data:image\/jpeg;base64,/);
+    });
+
+    it("should handle jpeg format (image/jpeg MIME)", () => {
+      const img: PastedImage = { data: Buffer.from("data"), format: "jpeg" };
+      const result = imageToBase64(img);
+      expect(result).toMatch(/^data:image\/jpeg;base64,/);
     });
 
     it("should handle unknown format", () => {

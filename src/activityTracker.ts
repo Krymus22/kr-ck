@@ -129,7 +129,16 @@ export function notifyActivity(): void {
 
 function notify(): void {
   const snap = getActivitySnapshot();
-  for (const l of listeners) {
+  // BUG FIX (Bug Hunter #8c): previously iterated the `listeners` Set
+  // directly. If a listener called `subscribeToActivity()` or its own
+  // unsubscribe() during iteration, the Set was mutated mid-iteration —
+  // leading to non-deterministic behavior (a newly-subscribed listener
+  // might be called or skipped depending on V8's Set iteration order, and
+  // an unsubscribed listener might still be called once). Snapshot the
+  // listeners into an array so notification is stable regardless of any
+  // subscribe/unsubscribe that happens inside a listener.
+  const snapshot = Array.from(listeners);
+  for (const l of snapshot) {
     try { l(snap); } catch { /* listener error must not break the agent */ }
   }
 }

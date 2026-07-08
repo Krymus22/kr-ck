@@ -198,7 +198,11 @@ export async function executePostToolCallHooks(
 
   for (const hook of postToolCallHooks.getAll()) {
     const hookResult = await hook(ctx, currentResult);
-    if (hookResult.modifiedResult) {
+    // BUG FIX: `if (hookResult.modifiedResult)` was falsy for the empty
+    // string "" — a hook that wanted to CLEAR the result (return "")
+    // had its override silently ignored. Use an explicit `undefined`
+    // check so empty-string overrides are honored.
+    if (hookResult.modifiedResult !== undefined) {
       currentResult = hookResult.modifiedResult;
     }
   }
@@ -225,7 +229,12 @@ export async function executePreFileWriteHooks(
       reason = result.reason;
       break;
     }
-    if (result.modifiedContent) {
+    // BUG FIX: `if (result.modifiedContent)` was falsy for the empty
+    // string "" — a hook that wanted to CLEAR the file content (return
+    // "") had its override silently ignored, and the original content
+    // was written instead. Use an explicit `undefined` check so empty-
+    // string overrides are honored.
+    if (result.modifiedContent !== undefined) {
       currentContent = result.modifiedContent;
     }
   }

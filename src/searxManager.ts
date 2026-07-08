@@ -26,7 +26,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, openSync } from "node:fs";
+import { existsSync, openSync, closeSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { platform } from "node:os";
@@ -467,6 +467,19 @@ export async function autoStartSearx(): Promise<boolean> {
         SEARXNG_SETTINGS_PATH: SEARX_SETTINGS,
       },
     });
+
+    // BUG FIX (fd leak): the child inherits `logFd` via stdio, but the
+    // PARENT also kept its own copy of the descriptor open forever. On a
+    // long-running CLI session this leaked one fd per autoStartSearx()
+    // call that took the Python path, eventually hitting the EMFILE
+    // limit. Close the parent's copy now that the child has its own.
+    // We do this AFTER spawn() returns — Node has already duplicated
+    // the fd into the child's stdio by that point.
+    try {
+      closeSync(logFd);
+    } catch {
+      /* fd may already be closed — ignore */
+    }
 
     searxPid = proc.pid ?? null;
     weStartedSearx = true;

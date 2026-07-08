@@ -88,21 +88,32 @@ export function buildRehydrationMessage(): string | null {
       const stat = fs.statSync(filePath);
       if (stat.isDirectory()) continue;
 
-      // Read content (binary-safe: skip if null bytes)
-      const content = fs.readFileSync(filePath, "utf8");
-      if (content.includes("\0")) continue; // binary file
+      // Bug fix (Bug Hunter #2b): for HUGE files (e.g. minified bundles,
+      // generated files, large data dumps) the previous code loaded the
+      // ENTIRE file into memory via fs.readFileSync, then truncated. That
+      // caused OOM kills when a session-edited file was 100MB+.
+      //
+      // Now we cap the read at a byte budget via readBoundedContent() — for
+      // files larger than the budget, we read only the first chunk using a
+      // Buffer + fs.readSync (random-access, no full load). This preserves
+      // the [TRUNCATED] contract from §6.3 while bounding memory usage.
+      const maxChars = MAX_TOKENS_PER_FILE * 4; // 20K chars
+      const { content, truncated: wasCapped } = readBoundedContent(filePath, stat.size, maxChars);
+      if (content === null) continue; // binary file
 
-      // Estimate tokens (4 chars/token)
-      const tokens = Math.ceil(content.length / 4);
-
-      // Truncate if exceeds per-file budget
-      const maxChars = MAX_TOKENS_PER_FILE * 4;
-      const truncated = content.length > maxChars
+      // Two layers of truncation:
+      //   1. readBoundedContent may have capped the READ at byteBudget (huge file)
+      //   2. Even after a full read, content may exceed the per-file char budget
+      // Either way, we mark with [TRUNCATED] per §6.3.
+      const isTruncated = wasCapped || content.length > maxChars;
+      const truncated = isTruncated
         ? content.slice(0, maxChars) + "\n...[TRUNCATED — file is larger, re-read with ler_arquivo if needed]..."
         : content;
 
-      files.push({ path: filePath, content: truncated, tokens: Math.min(tokens, MAX_TOKENS_PER_FILE) });
-      totalTokens += Math.min(tokens, MAX_TOKENS_PER_FILE);
+      // Estimate tokens (4 chars/token); cap at per-file budget
+      const tokens = Math.min(Math.ceil(truncated.length / 4), MAX_TOKENS_PER_FILE);
+      files.push({ path: filePath, content: truncated, tokens });
+      totalTokens += tokens;
     } catch {
       // Skip unreadable files
       continue;
@@ -125,6 +136,51 @@ export function buildRehydrationMessage(): string | null {
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Read up to `maxChars` UTF-8 characters from `filePath`, without loading
+ * huge files into memory in full.
+ *
+ * Strategy:
+ *   - If `fileSize` is small enough (≤ maxChars * 4 bytes, the worst-case
+ *     UTF-8 encoding), use fs.readFileSync (simple + fast).
+ *   - Otherwise, use fs.openSync + fs.readSync with a Buffer cap to avoid OOM.
+ *
+ * Returns an object:
+ *   - `content`: the (possibly partial) string content, or `null` if the
+ *     file is binary (contains a NUL byte in the inspected region).
+ *   - `truncated`: true if the file was larger than the read budget and we
+ *     only read the first chunk.
+ *
+ * The returned `content` may be longer than `maxChars` by a few bytes (UTF-8
+ * decoding can stretch the buffer); the caller is responsible for the final
+ * `.slice(0, maxChars)` truncation.
+ */
+function readBoundedContent(
+  filePath: string,
+  fileSize: number,
+  maxChars: number,
+): { content: string | null; truncated: boolean } {
+  // Worst case: 4 bytes per char.
+  const byteBudget = maxChars * 4;
+  if (fileSize <= byteBudget) {
+    const content = fs.readFileSync(filePath, "utf8");
+    if (content.includes("\0")) return { content: null, truncated: false };
+    return { content, truncated: false };
+  }
+  // Large file — read only the first byteBudget bytes.
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buf = Buffer.alloc(byteBudget);
+    const bytesRead = fs.readSync(fd, buf, 0, byteBudget, 0);
+    const content = buf.slice(0, bytesRead).toString("utf8");
+    // Binary check on the chunk we actually read
+    if (content.includes("\0")) return { content: null, truncated: false };
+    return { content, truncated: true };
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /**

@@ -358,15 +358,27 @@ export function listKnownModels(): ModelInfo[] {
 /**
  * Format a model's context window for display.
  * E.g., 256000 -> "256k", 1000000 -> "1M"
+ *
+ * Edge cases handled:
+ *   - 999_999 -> "1M" (NOT "1000.0k" — k branch rounds up to 1000)
+ *   - 1_999_999 -> "2M" (NOT "2.0M" — m branch rounds up to 2)
+ *   - Whole numbers never get a trailing ".0" (e.g., 2M, not 2.0M)
  */
 export function formatContextWindow(tokens: number): string {
   if (tokens >= 1_000_000) {
     const m = tokens / 1_000_000;
-    return m === Math.floor(m) ? `${m}M` : `${m.toFixed(1)}M`;
+    // Round to 1 decimal place, then drop the ".0" for whole numbers.
+    // This avoids "2.0M" for values like 1_999_999 (which rounds to 2.0).
+    const rounded = Number(m.toFixed(1));
+    return Number.isInteger(rounded) ? `${rounded}M` : `${rounded.toFixed(1)}M`;
   }
   if (tokens >= 1000) {
     const k = tokens / 1000;
-    return k === Math.floor(k) ? `${k}k` : `${k.toFixed(1)}k`;
+    // Round to 1 decimal place. If k rounds up to 1000 (e.g., 999_999 -> 1000.0),
+    // re-route to the M branch to avoid the ugly "1000.0k".
+    const rounded = Number(k.toFixed(1));
+    if (rounded >= 1000) return "1M";
+    return Number.isInteger(rounded) ? `${rounded}k` : `${rounded.toFixed(1)}k`;
   }
   return `${tokens}`;
 }

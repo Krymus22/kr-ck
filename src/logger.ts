@@ -51,6 +51,22 @@ export function isTuiMode(): boolean {
   return tuiMode;
 }
 
+/**
+ * Reset TUI mode flag (for tests).
+ *
+ * BUG FIX (Bug Hunter #8c): the `tuiMode` flag is module-level state with no
+ * reset function. If a test set `setTuiMode(true)` and forgot to reset (or
+ * threw before its afterEach), subsequent tests in the same Vitest worker
+ * would run with TUI mode ON — silently suppressing `reply`/`toolCall`/
+ * `toolResult` output and breaking test assertions that expect console.log
+ * to be called. This leaked state between test files.
+ *
+ * Exposing `_resetTuiModeForTests()` gives tests a deterministic reset.
+ */
+export function _resetTuiModeForTests(): void {
+  tuiMode = false;
+}
+
 // --- Public API -------------------------------------------------------------
 
 /** Print a banner line (Claude-Killer brand) */
@@ -328,8 +344,14 @@ export function toolCall(toolName: string, args: Record<string, unknown>): void 
   // In TUI mode, tool calls are rendered as "tool" messages in the chat
   // via the agent's onToolCall callback. console.log would break the TUI.
   if (tuiMode) return;
-  const preview = JSON.stringify(args).slice(0, 120);
-  console.log(c.muted(`  [TOOL CALL] ${toolName}(${preview}${preview.length >= 120 ? "..." : ""})`));
+  // BUG FIX (Bug Hunter #8c): previously the truncation check used
+  // `preview.length >= 120`, but `preview` was already sliced to 120 chars.
+  // When the JSON was EXACTLY 120 chars long, nothing was actually truncated,
+  // yet "..." was appended — misleading the user into thinking args were cut.
+  // Fix: compare against the ORIGINAL json length, not the sliced preview.
+  const json = JSON.stringify(args);
+  const preview = json.slice(0, 120);
+  console.log(c.muted(`  [TOOL CALL] ${toolName}(${preview}${json.length > 120 ? "..." : ""})`));
 }
 
 /** Print a tool-call result summary. */
