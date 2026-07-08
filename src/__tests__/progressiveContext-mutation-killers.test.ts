@@ -313,3 +313,108 @@ describe("mutation-killers / progressiveContext.ts — L138/L139 import regex", 
     expect(result.content).not.toContain("NotAnImport");
   });
 });
+
+describe("mutation-killers / progressiveContext.ts — L138 second `|| → &&` (Luau require)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-killer-mut-progctx-lua-"));
+  });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  /**
+   * Mutation: L138 second `||` → `&&` (between local-require and #include)
+   *
+   * The import filter is:
+   *   /^import\b/ || (/^local\b/ && /\brequire\b/) || /^#include\b/ || /^use\s/
+   *
+   * With the SECOND `||` mutated to `&&`:
+   *   /^import\b/ || ((/^local\b/ && /\brequire\b/) && /^#include\b/) || /^use\s/
+   *
+   * The middle clause becomes (local && require && #include) — impossible
+   * (a line can't be both local+require and #include). So Luau
+   * `local X = require(...)` imports are NEVER detected.
+   *
+   * Killing strategy: write a Luau file with `local X = require("lib")` at
+   * line 1. Extract "foo". Without mutation: the require line IS detected
+   * as an import → "Imports (for context)" header IS added. With mutation:
+   * the require line is NOT detected → no header. Test asserts header
+   * present → fails. ✓ KILLED.
+   */
+  it("Luau `local X = require(...)` IS detected as import (kills `|| → &&` on L138 second)", async () => {
+    const { readSymbolFromFile } = await import("./../progressiveContext.js");
+    const filePath = path.join(tmpDir, "test.luau");
+    const lines: string[] = ['local Rojo = require("@lune/rojo")'];
+    for (let i = 2; i <= 45; i++) {
+      if (i === 10) lines.push("function foo() {");
+      else if (i === 12) lines.push("  return 1;");
+      else if (i === 13) lines.push("}");
+      else if (i === 30) lines.push("function bar() {");
+      else if (i === 32) lines.push("  return 2;");
+      else if (i === 33) lines.push("}");
+      else lines.push(`-- line ${i}`);
+    }
+    fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
+
+    const result = await readSymbolFromFile(filePath, "foo");
+    expect(result.partial).toBe(true);
+    // Without mutation: `local X = require(...)` matches (local && require)
+    //   → import detected → header added.
+    // With mutation `|| → &&` on L138 second: middle clause requires
+    //   (local && require && #include) → impossible → not detected → no header.
+    expect(result.content).toContain("Imports (for context)");
+    expect(result.content).toContain("Rojo");
+  });
+});
+
+describe("mutation-killers / progressiveContext.ts — L139 `|| → &&` (#include)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-killer-mut-progctx-cc-"));
+  });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  /**
+   * Mutation: L139 `||` → `&&` (between #include and use\s)
+   *
+   * The import filter is:
+   *   /^import\b/ || (/^local\b/ && /\brequire\b/) || /^#include\b/ || /^use\s/
+   *
+   * With the THIRD `||` (L139) mutated to `&&`:
+   *   /^import\b/ || (/^local\b/ && /\brequire\b/) || (/^#include\b/ && /^use\s/)
+   *
+   * The last clause becomes (#include && use\s) — impossible (a line can't
+   * start with both #include and use). So C/C++ `#include` lines are NEVER
+   * detected as imports.
+   *
+   * Killing strategy: write a C file with `#include <stdio.h>` at line 1.
+   * Extract "foo". Without mutation: #include IS detected → header added.
+   * With mutation: #include NOT detected → no header. Test asserts header
+   * present → fails. ✓ KILLED.
+   */
+  it("C/C++ `#include` IS detected as import (kills `|| → &&` on L139)", async () => {
+    const { readSymbolFromFile } = await import("./../progressiveContext.js");
+    const filePath = path.join(tmpDir, "test.c");
+    const lines: string[] = ["#include <stdio.h>"];
+    for (let i = 2; i <= 45; i++) {
+      if (i === 10) lines.push("function foo() {");
+      else if (i === 12) lines.push("  return 1;");
+      else if (i === 13) lines.push("}");
+      else if (i === 30) lines.push("function bar() {");
+      else if (i === 32) lines.push("  return 2;");
+      else if (i === 33) lines.push("}");
+      else lines.push(`// line ${i}`);
+    }
+    fs.writeFileSync(filePath, lines.join("\n") + "\n", "utf8");
+
+    const result = await readSymbolFromFile(filePath, "foo");
+    expect(result.partial).toBe(true);
+    // Without mutation: `#include <stdio.h>` matches /^#include\b/ →
+    //   import detected → header added.
+    // With mutation `|| → &&` on L139: last clause requires
+    //   (#include && use\s) → impossible → not detected → no header.
+    expect(result.content).toContain("Imports (for context)");
+    expect(result.content).toContain("stdio.h");
+  });
+});
