@@ -12,34 +12,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Job 1: divide os arquivos em 20 grupos e exporta como output
+  # Job 1: divide os arquivos em 20 grupos e salva como artifact
   prepare:
     name: Prepare mutation groups
     runs-on: ubuntu-latest
-    outputs:
-      groups: ${{ steps.divide.outputs.groups }}
-      group-count: ${{ steps.divide.outputs.group-count }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Divide files into 20 groups
-        id: divide
         run: |
           python3 scripts/list-mutation-groups.py 20 > groups.json
-          echo "=== groups.json content (first 200 chars) ==="
-          head -c 200 groups.json
+          echo "=== groups.json (first 300 chars) ==="
+          head -c 300 groups.json
           echo ""
-          echo "=== groups.json size ==="
-          wc -c < groups.json
-          # Validate JSON
           python3 -c "import json; data=json.load(open('groups.json')); print(f'Valid JSON: {len(data)} groups')"
-          # Export groups as output (multiline via EOF heredoc)
-          echo "groups<<EOF" >> $GITHUB_OUTPUT
-          cat groups.json >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-          echo "group-count=$(python3 -c 'import json; print(len(json.load(open(\"groups.json\"))))')" >> $GITHUB_OUTPUT
+      - name: Upload groups file
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-groups
+          path: groups.json
+          retention-days: 1
 
   # Job 2: roda mutation testing em paralelo (1 job por grupo)
   mutation-test:
@@ -50,8 +44,8 @@ jobs:
     strategy:
       matrix:
         group-index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
-      fail-fast: false  # não cancela outros jobs se um falhar
-      max-parallel: 20  # limite do free tier do GitHub Actions
+      fail-fast: false
+      max-parallel: 20
     env:
       NVIDIA_API_KEY: dummy
       NODE_ENV: test
@@ -63,28 +57,23 @@ jobs:
           cache: "npm"
       - run: npm install --legacy-peer-deps
 
+      - name: Download groups file
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-groups
+          path: .
+
       - name: Get files for this group
         id: files
         run: |
-          set +e
           GROUP_INDEX=${{ matrix.group-index }}
-          # Read groups from the prepare job output
-          python3 -c "
-          import json, os
-          groups_str = '''${{ needs.prepare.outputs.groups }}'''
-          try:
-              groups = json.loads(groups_str)
-          except Exception as e:
-              print(f'ERROR parsing groups: {e}')
-              groups = []
+          FILES=$(python3 -c "
+          import json
+          groups = json.load(open('groups.json'))
           idx = $GROUP_INDEX
           if idx < len(groups):
-              files = ' '.join(groups[idx])
-              print(f'FILES={files}')
-          else:
-              print('FILES=')
-          " > /tmp/files_output.txt
-          source /tmp/files_output.txt
+              print(' '.join(groups[idx]))
+          ")
           echo "files=$FILES" >> $GITHUB_OUTPUT
           echo "Group $GROUP_INDEX files: $FILES"
 
