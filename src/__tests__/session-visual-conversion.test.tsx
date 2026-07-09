@@ -155,3 +155,155 @@ describe("convertSessionToVisualMessages — toolName resolution (thinking-vazan
     });
   });
 });
+
+// ─── Regression tests: content=null (reasoning models) ──────────────────────
+//
+// BUG: When reasoning models (GLM 5.2, DeepSeek V4 Pro) respond with only
+// reasoning_content + tool_calls (no visible text), content is saved as null
+// in the JSONL. convertSessionToVisualMessages was silently dropping these
+// messages, making the entire assistant turn disappear from the visual history.
+//
+// FIX: When content is null/empty BUT there are tool_calls, generate a
+// placeholder assistant message so the user sees the assistant was active.
+
+describe("convertSessionToVisualMessages — content=null (reasoning models)", () => {
+  it("assistant with content=null + tool_calls generates placeholder + tool calls", () => {
+    const sessionMsgs = [
+      {
+        role: "user",
+        content: "ler arquivo X",
+      },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "ler_arquivo", arguments: '{"caminho":"X"}' } },
+        ],
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    // Should have: [user] + [assistant placeholder] + [tool call]
+    expect(visual).toHaveLength(3);
+    expect(visual[0]).toMatchObject({ role: "user", content: "ler arquivo X" });
+    expect(visual[1]).toMatchObject({ role: "assistant" });
+    expect(visual[1]!.content).toContain("usando ferramentas");
+    expect(visual[1]!.content).toContain("ler_arquivo");
+    expect(visual[2]).toMatchObject({
+      role: "tool",
+      toolName: "ler_arquivo",
+      isResult: false,
+    });
+  });
+
+  it("assistant with content=null + multiple tool_calls lists all tool names", () => {
+    const sessionMsgs = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "ler_arquivo", arguments: "{}" } },
+          { id: "tc2", type: "function", function: { name: "buscar_texto", arguments: "{}" } },
+          { id: "tc3", type: "function", function: { name: "parse_ast", arguments: "{}" } },
+        ],
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    // Should have: [assistant placeholder] + [tool1] + [tool2] + [tool3]
+    expect(visual).toHaveLength(4);
+    expect(visual[0]).toMatchObject({ role: "assistant" });
+    expect(visual[0]!.content).toContain("ler_arquivo");
+    expect(visual[0]!.content).toContain("buscar_texto");
+    expect(visual[0]!.content).toContain("parse_ast");
+  });
+
+  it("assistant with content='' (empty string) + tool_calls also gets placeholder", () => {
+    const sessionMsgs = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "executar_comando", arguments: "{}" } },
+        ],
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    expect(visual).toHaveLength(2);
+    expect(visual[0]).toMatchObject({ role: "assistant" });
+    expect(visual[0]!.content).toContain("executar_comando");
+  });
+
+  it("assistant with content=undefined + tool_calls also gets placeholder", () => {
+    const sessionMsgs = [
+      {
+        role: "assistant",
+        content: undefined,
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "pensar", arguments: "{}" } },
+        ],
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    expect(visual).toHaveLength(2);
+    expect(visual[0]).toMatchObject({ role: "assistant" });
+  });
+
+  it("assistant with content=null + NO tool_calls generates nothing (no placeholder)", () => {
+    const sessionMsgs = [
+      {
+        role: "assistant",
+        content: null,
+        // No tool_calls — just reasoning, no visible action
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    // No visual message — there's nothing to show (no text, no tool calls)
+    expect(visual).toHaveLength(0);
+  });
+
+  it("session with all content=null still shows user messages + tool calls + placeholders", () => {
+    // Simulate a real reasoning model session: user asks, assistant thinks
+    // (no text) and calls tools, tool returns result, assistant thinks again
+    // and responds with text.
+    const sessionMsgs = [
+      { role: "user", content: "cria um arquivo" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "ler_arquivo", arguments: '{"caminho":"foo"}' } },
+        ],
+      },
+      { role: "tool", tool_call_id: "tc1", content: "file content" },
+      {
+        role: "assistant",
+        content: "Criei o arquivo com sucesso!",
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    // [user] + [assistant placeholder] + [tool call] + [tool result] + [assistant text]
+    expect(visual).toHaveLength(5);
+    expect(visual[0]).toMatchObject({ role: "user" });
+    expect(visual[1]).toMatchObject({ role: "assistant" });
+    expect(visual[1]!.content).toContain("usando ferramentas");
+    expect(visual[2]).toMatchObject({ role: "tool", isResult: false });
+    expect(visual[3]).toMatchObject({ role: "tool", isResult: true });
+    expect(visual[4]).toMatchObject({ role: "assistant", content: "Criei o arquivo com sucesso!" });
+  });
+
+  it("content as array with text parts works alongside tool_calls", () => {
+    const sessionMsgs = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Vou ler o arquivo" }],
+        tool_calls: [
+          { id: "tc1", type: "function", function: { name: "ler_arquivo", arguments: "{}" } },
+        ],
+      },
+    ];
+    const visual = convertSessionToVisualMessages(sessionMsgs);
+    // [assistant text] + [tool call] — no placeholder (content was present)
+    expect(visual).toHaveLength(2);
+    expect(visual[0]).toMatchObject({ role: "assistant", content: "Vou ler o arquivo" });
+    expect(visual[1]).toMatchObject({ role: "tool", isResult: false });
+  });
+});
