@@ -133,13 +133,13 @@ export const MODEL_REGISTRY: ModelInfo[] = [
   {
     id: "google/diffusiongemma-26b-a4b-it",
     name: "DiffusionGemma 26B A4B IT",
-    contextWindow: 128_000,
-    maxOutputTokens: 8_192,
+    contextWindow: 256_000,
+    maxOutputTokens: 4_096,
     costPer1MPrompt: 0,
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
-    hasThinking: false,
+    hasThinking: true,
     provider: "nvidia",
   },
   {
