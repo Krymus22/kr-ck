@@ -429,3 +429,172 @@ describe("Very deep stacks", () => {
     expect(getActivitySnapshot().depth).toBe(0);
   });
 });
+
+// ─── operationStartedAt (elapsed timer stability) ──────────────────────────
+// BUG FIX (elapsed-jumpy): These tests verify that the elapsed timer is
+// stable across nested push/pop. Previously, elapsedMs was computed from
+// the TOP activity's startedAt, which jumped around when activities nested.
+// Now it's computed from operationStartedAt (set when the stack first
+// became non-empty), so the timer is monotonically increasing.
+describe("operationStartedAt — elapsed timer stability", () => {
+  it("elapsedMs is 0 when stack is empty", () => {
+    const snap = getActivitySnapshot();
+    expect(snap.elapsedMs).toBe(0);
+  });
+
+  it("elapsedMs increases monotonically across nested push/pop", () => {
+    const done1 = pushActivity("thinking", "outer");
+    const snap1 = getActivitySnapshot();
+    const elapsed1 = snap1.elapsedMs;
+
+    // Wait a bit, then push a nested activity
+    const start = Date.now();
+    while (Date.now() - start < 50) { /* busy wait 50ms */ }
+
+    const done2 = pushActivity("tool", "inner");
+    const snap2 = getActivitySnapshot();
+    const elapsed2 = snap2.elapsedMs;
+
+    // elapsed2 should be > elapsed1 (timer didn't reset on nested push)
+    expect(elapsed2).toBeGreaterThan(elapsed1);
+
+    // Pop the inner activity — timer should continue, not jump back
+    done2();
+    const snap3 = getActivitySnapshot();
+    const elapsed3 = snap3.elapsedMs;
+
+    // elapsed3 should be > elapsed2 (timer continued, didn't reset on pop)
+    expect(elapsed3).toBeGreaterThanOrEqual(elapsed2);
+
+    // Cleanup
+    done1();
+  });
+
+  it("nested push does NOT reset elapsedMs to ~0", () => {
+    const done1 = pushActivity("thinking", "outer");
+
+    // Wait 100ms
+    const start = Date.now();
+    while (Date.now() - start < 100) { /* busy wait */ }
+
+    // Push nested — elapsed should NOT reset
+    const done2 = pushActivity("tool", "inner");
+    const snap = getActivitySnapshot();
+
+    // elapsed should be >= 100ms (from outer push), NOT ~0ms (from inner push)
+    expect(snap.elapsedMs).toBeGreaterThanOrEqual(90);
+
+    done2();
+    done1();
+  });
+
+  it("popping nested activity does NOT jump elapsed backward", () => {
+    const done1 = pushActivity("thinking", "outer");
+
+    // Wait 100ms
+    const start1 = Date.now();
+    while (Date.now() - start1 < 100) { /* busy wait */ }
+
+    const done2 = pushActivity("tool", "inner");
+
+    // Wait another 100ms
+    const start2 = Date.now();
+    while (Date.now() - start2 < 100) { /* busy wait */ }
+
+    const elapsedBeforePop = getActivitySnapshot().elapsedMs;
+
+    // Pop inner — elapsed should NOT jump back to outer's startedAt
+    done2();
+    const elapsedAfterPop = getActivitySnapshot().elapsedMs;
+
+    // After pop, elapsed should be >= before pop (continued forward)
+    expect(elapsedAfterPop).toBeGreaterThanOrEqual(elapsedBeforePop);
+
+    done1();
+  });
+
+  it("elapsed resets to 0 when ALL activities are popped", () => {
+    const done1 = pushActivity("thinking", "first");
+    const done2 = pushActivity("tool", "second");
+
+    // Pop both — stack becomes empty, operationStartedAt cleared
+    done2();
+    done1();
+
+    const snap = getActivitySnapshot();
+    expect(snap.current).toBeNull();
+    expect(snap.elapsedMs).toBe(0);
+  });
+
+  it("elapsed does NOT reset when popping to non-empty stack", () => {
+    const done1 = pushActivity("thinking", "outer");
+    const done2 = pushActivity("tool", "inner");
+
+    // Wait 100ms
+    const start = Date.now();
+    while (Date.now() - start < 100) { /* busy wait */ }
+
+    // Pop inner — stack still has outer, elapsed should continue
+    done2();
+    const snap = getActivitySnapshot();
+    expect(snap.elapsedMs).toBeGreaterThanOrEqual(90);
+
+    done1();
+  });
+
+  it("new operation after clearing gets a fresh elapsed timer", () => {
+    const done1 = pushActivity("thinking", "first operation");
+    // Wait 100ms
+    const start1 = Date.now();
+    while (Date.now() - start1 < 100) { /* busy wait */ }
+    done1();
+
+    // Stack is now empty — operationStartedAt is null
+    expect(getActivitySnapshot().elapsedMs).toBe(0);
+
+    // New operation — fresh timer
+    const done2 = pushActivity("tool", "second operation");
+    const snap = getActivitySnapshot();
+    // Fresh timer — elapsed should be very small (< 50ms)
+    expect(snap.elapsedMs).toBeLessThan(50);
+
+    done2();
+  });
+
+  it("clearActivity resets operationStartedAt", () => {
+    const done1 = pushActivity("thinking", "outer");
+    // Wait 100ms
+    const start = Date.now();
+    while (Date.now() - start < 100) { /* busy wait */ }
+
+    clearActivity();
+    const snap = getActivitySnapshot();
+    expect(snap.current).toBeNull();
+    expect(snap.elapsedMs).toBe(0);
+
+    // Safety: done1 should be a no-op (already cleared)
+    done1();
+  });
+
+  it("mid-stack pop (popping from the middle) keeps operationStartedAt", () => {
+    // Push 3 activities
+    const done1 = pushActivity("thinking", "first");
+    const done2 = pushActivity("tool", "second");
+    const done3 = pushActivity("tool", "third");
+
+    // Wait 100ms
+    const start = Date.now();
+    while (Date.now() - start < 100) { /* busy wait */ }
+
+    // Pop from the middle (done2 pops indices 1..2, leaving only done1)
+    done2();
+    const snap = getActivitySnapshot();
+    // Stack is non-empty (has done1), so elapsed should continue
+    expect(snap.elapsedMs).toBeGreaterThanOrEqual(90);
+    expect(snap.current?.label).toBe("first");
+
+    done1();
+    // done3 was already popped by done2 (mid-stack pop), so this is a no-op
+    done3();
+  });
+});

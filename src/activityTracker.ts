@@ -40,6 +40,23 @@ export type ActivityCategory =
 
 export interface ActivityState {
   stack: ActivityEntry[];
+  /**
+   * Timestamp of when the stack went from empty → non-empty (i.e., when
+   * the current "operation" started). Used to compute elapsedMs so that
+   * nested push/pop don't reset the timer.
+   *
+   * BUG FIX (elapsed-jumpy): previously, elapsedMs was computed from
+   * `current.startedAt` (the TOP of the stack). When activities nested
+   * (e.g., tool call inside streaming), each push set a new `startedAt`,
+   * and each pop restored an older `startedAt`. The displayed elapsed
+   * jumped between ~0 (just-pushed activity) and a large number (outer
+   * activity's old startedAt) — appearing as "random seconds". By using
+   * `operationStartedAt` (set once when the stack becomes non-empty,
+   * cleared when it becomes empty again), the elapsed timer is stable:
+   * it starts when the first activity is pushed and stops when the last
+   * activity is popped, regardless of nesting.
+   */
+  operationStartedAt: number | null;
 }
 
 export interface ActivityEntry {
@@ -61,14 +78,22 @@ export interface ActivitySnapshot {
 
 type Listener = (snapshot: ActivitySnapshot) => void;
 
-let state: ActivityState = { stack: [] };
+let state: ActivityState = { stack: [], operationStartedAt: null };
 const listeners = new Set<Listener>();
 
 /** Returns the current activity snapshot. */
 export function getActivitySnapshot(): ActivitySnapshot {
   const current = state.stack.at(-1) ?? null;
   const depth = state.stack.length;
-  const elapsedMs = current ? Date.now() - current.startedAt : 0;
+  // BUG FIX (elapsed-jumpy): compute elapsedMs from `operationStartedAt`
+  // (when the stack first became non-empty) instead of `current.startedAt`
+  // (when the topmost activity was pushed). This way, nested push/pop
+  // don't cause the elapsed timer to jump around or appear to "stop
+  // climbing". The timer starts when the first activity is pushed and
+  // stops when the last activity is popped.
+  const elapsedMs = state.operationStartedAt !== null
+    ? Date.now() - state.operationStartedAt
+    : 0;
   return {
     current,
     depth,
@@ -96,7 +121,16 @@ export function subscribeToActivity(listener: Listener): () => void {
  */
 export function pushActivity(category: ActivityCategory, label: string): () => void {
   const entry: ActivityEntry = { category, label, startedAt: Date.now() };
-  state = { ...state, stack: [...state.stack, entry] };
+  // BUG FIX (elapsed-jumpy): set operationStartedAt ONLY when the stack
+  // was empty (i.e., this is the first activity of a new operation).
+  // If the stack already had activities (nested push), keep the existing
+  // operationStartedAt so the elapsed timer doesn't reset.
+  const wasEmpty = state.stack.length === 0;
+  state = {
+    ...state,
+    stack: [...state.stack, entry],
+    operationStartedAt: wasEmpty ? entry.startedAt : state.operationStartedAt,
+  };
   notify();
   return () => popActivity(entry);
 }
@@ -109,14 +143,23 @@ function popActivity(entry: ActivityEntry): void {
   const idx = state.stack.indexOf(entry);
   if (idx === -1) return; // already popped
   const newStack = state.stack.slice(0, idx);
-  state = { ...state, stack: newStack };
+  // BUG FIX (elapsed-jumpy): clear operationStartedAt ONLY when the stack
+  // becomes empty (i.e., the last activity was popped). If there are still
+  // activities on the stack (nested pop), keep the existing
+  // operationStartedAt so the elapsed timer continues smoothly.
+  const nowEmpty = newStack.length === 0;
+  state = {
+    ...state,
+    stack: newStack,
+    operationStartedAt: nowEmpty ? null : state.operationStartedAt,
+  };
   notify();
 }
 
 /** Clear the entire activity stack (e.g. when the agent loop terminates). */
 export function clearActivity(): void {
   if (state.stack.length === 0) return;
-  state = { stack: [] };
+  state = { stack: [], operationStartedAt: null };
   notify();
 }
 
@@ -219,6 +262,6 @@ export function withActivitySync<T>(
 
 /** Reset state — used by tests to start from a clean slate. */
 export function _resetActivityForTests(): void {
-  state = { stack: [] };
+  state = { stack: [], operationStartedAt: null };
   listeners.clear();
 }

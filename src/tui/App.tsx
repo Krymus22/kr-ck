@@ -2431,19 +2431,24 @@ export function App() {
       ))}
 
       {/* Chat history
-          flexGrow={1} so the chat-history Box absorbs all remaining vertical
-          space (keeps the input/status bar pinned at the bottom of the
-          terminal). justifyContent="flex-end" pushes ChatDisplay to the
-          BOTTOM of this Box, so the chat content sits right above the input
-          box with NO empty/black gap between them. The unused space ends up
-          at the TOP of this Box (between system messages and chat content),
-          which is far less jarring than a gap right above the input box.
-          BUG FIX (black-gap-above-input): previously, without
-          justifyContent="flex-end", ChatDisplay sat at the TOP of this
-          tall Box and the space below it (between last chat message and
-          input box) was empty/black — the user saw a "big empty space
-          between messages" near the bottom of the chat. */}
-      <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
+          NO flexGrow — the chat-history Box is exactly as tall as its content.
+          This means the input box sits RIGHT BELOW the chat (no empty gap
+          between last message and input), and the StatusBar sits right below
+          the input. Any remaining terminal space is at the very bottom (below
+          the StatusBar), which is just the terminal background — not a "gap
+          between messages".
+
+          BUG FIX (black-gap + scroll-steal): previously this Box had
+          flexGrow={1} to pin the input to the bottom of the terminal. That
+          created a large empty space inside this Box (between chat content
+          and input) — the "black gap" the user saw. Adding
+          justifyContent="flex-end" moved the gap to the TOP of this Box,
+          but caused scroll-steal during typing (every keystroke re-rendered
+          the live frame including the empty space, and any layout shift
+          made the terminal briefly scroll up to older chat). Removing
+          flexGrow entirely eliminates both issues: no gap, no scroll-steal.
+          The input now floats right below the chat (like Claude Code). */}
+      <Box flexDirection="column">
         <ChatDisplay messages={messages} />
       </Box>
 
