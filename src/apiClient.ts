@@ -310,14 +310,50 @@ export const TOOL_DEFINITIONS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: "executar_comando",
       description:
-        "Run a shell command. Pass 'comando' (PT) or 'command' (EN) with the shell command.",
+        "Run a shell command. Pass 'comando' (PT) or 'command' (EN) with the shell command. " +
+        "Set background: true for long-running commands (rojo serve, npm run dev, tsc --watch) — " +
+        "the command runs in the background and returns immediately. " +
+        "Use verificar_comando to check background process output, parar_comando to stop it.",
       parameters: {
         type: "object",
         properties: {
           comando: { type: "string", description: "The shell command to execute." },
           command: { type: "string", description: "Alias for comando (EN)." },
           cwd: { type: "string", description: "Working directory (optional)." },
+          background: { type: "boolean", description: "If true, run in background. Use for servers, watchers, etc. Default: false." },
         },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "verificar_comando",
+      description:
+        "Check the output of a background command started with executar_comando { background: true }. " +
+        "Returns accumulated stdout/stderr and process status (running or exited). " +
+        "If called without an ID, lists all background processes.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Process ID (returned by executar_comando background). If omitted, lists all processes." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "parar_comando",
+      description:
+        "Stop a background command started with executar_comando { background: true }. " +
+        "Sends SIGTERM (graceful), then SIGKILL after 2 seconds.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "number", description: "Process ID to stop (returned by executar_comando background)." },
+        },
+        required: ["id"],
       },
     },
   },

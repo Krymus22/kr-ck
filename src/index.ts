@@ -206,6 +206,8 @@ async function main(): Promise<void> {
     autoStopSearx();
     setTuiMode(false);
     shutdownMCPServers();
+    // Kill any background processes spawned by executar_comando { background: true }
+    try { import("./backgroundProcesses.js").then(m => m.killAllBackgroundProcesses()); } catch { /* ignore */ }
     unmount();
     process.exit(0);
   };

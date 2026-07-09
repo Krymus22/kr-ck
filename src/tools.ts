@@ -462,6 +462,12 @@ export interface ExecutarComandoArgs {
   cwd?: string;
   /** Optional timeout in milliseconds (default: 60000) */
   timeoutMs?: number;
+  /**
+   * If true, the command runs in the BACKGROUND and returns immediately
+   * with a process ID. Use verificar_comando to check output later.
+   * Useful for long-running commands: rojo serve, npm run dev, tsc --watch.
+   */
+  background?: boolean;
 }
 
 /**
@@ -485,6 +491,14 @@ export async function executarComando(
     const msg = t("tool.command_start_failed", "comando is required (empty or non-string)");
     log.toolResult("executar_comando", false, "invalid args");
     return msg;
+  }
+
+  // Background mode: start the process and return immediately
+  if (args.background === true) {
+    const { startBackgroundProcess, listBackgroundProcesses } = await import("./backgroundProcesses.js");
+    const proc = startBackgroundProcess(args.comando, args.cwd);
+    log.toolResult("executar_comando", true, `background PID ${proc.pid}`);
+    return `[BACKGROUND] Process #${proc.id} started (PID ${proc.pid}).\nCommand: ${args.comando}\n\nUse verificar_comando to check output.\nUse parar_comando to stop it.\n\n${listBackgroundProcesses()}`;
   }
 
   // Clamp timeout: negative or zero would fire setTimeout immediately and

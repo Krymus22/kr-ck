@@ -125,19 +125,19 @@ export function validateScoutModel(): string | null {
 
 // --- System prompt ----------------------------------------------------------
 
-const SCOUT_SYSTEM_PROMPT = `You are a SCOUT sub-agent for Claude-Killer. Your job: make all the read/search tool calls the main agent needs, then say "DONE".
+const SCOUT_SYSTEM_PROMPT = `You are a SCOUT sub-agent for Claude-Killer. Your ONLY job is to make read/search tool calls quickly.
 
-YOU ARE FAST: You use a smaller, faster model. Your ONLY purpose is to execute read/search calls quickly so the main (slower) model doesn't have to.
+YOU ARE FAST: You use a smaller, faster model. Your purpose is to execute read/search calls so the main (slower) model doesn't have to.
 
 RULES:
 - You have ONLY read tools: ler_arquivo, buscar_arquivos, buscar_texto, parse_ast.
 - You CANNOT edit, write, or run commands. Just read and search.
-- Do AT MOST 50 tool calls. Execute ALL the tasks given to you. Explore deeply if needed — navigate UIs, read nested files.
-- DO NOT summarize, DO NOT interpret, DO NOT write analysis — just make the calls.
+- Do AT MOST ${50} tool calls. Execute ALL the tasks given to you.
+- You MUST call at least ONE tool before responding. Do NOT respond with "DONE" without making tool calls first.
 - After ALL tool calls are done, respond with exactly: DONE
-- The main agent will receive the FULL results of your tool calls (file contents, search results) directly in its context — it does NOT need you to summarize them.
+- The main agent will receive the FULL results of your tool calls (file contents, search results) directly.
 
-Your output is irrelevant — only your tool calls matter. The tool results are passed verbatim to the main agent.`;
+CRITICAL: Start by calling the appropriate tool for each task. Do not explain what you will do — just do it.`;
 
 // --- Read-only tools (same as subAgents READ_ONLY mode) ---------------------
 
@@ -353,12 +353,30 @@ async function chatWithScoutModel(
 
     const choice = response.choices?.[0];
     if (!choice) {
+      log.warn(`[SCOUT] No choice in response (model=${scoutModel}). Response: ${JSON.stringify(response).slice(0, 200)}`);
       return { content: "", tool_calls: undefined, finish_reason: "error" };
     }
 
+    const content = choice.message?.content ?? "";
+    const toolCalls = choice.message?.tool_calls as unknown[] | undefined;
+    const reasoning = (choice.message as any)?.reasoning_content ?? "";
+
+    // BUG FIX (scout-no-results): Some reasoning models (DiffusionGemma 26B)
+    // return ONLY reasoning_content with no content and no tool_calls on the
+    // first call. The scout then sees empty content + no tool_calls → treats
+    // it as "no useful response" → returns completed=false → "no results".
+    // Fix: log the situation so we can diagnose, and treat reasoning-only
+    // responses as "model is thinking, continue the loop" instead of error.
+    if (!content && (!toolCalls || toolCalls.length === 0)) {
+      log.warn(`[SCOUT] Model ${scoutModel} returned no content and no tool_calls. finish_reason=${choice.finish_reason}. reasoning_content=${reasoning.length} chars. Treating as 'thinking' — will retry.`);
+      // Return with content="DONE" so the loop breaks and we return what we have
+      // (which may be nothing — but at least we don't show "no results" error)
+      return { content: "DONE", tool_calls: undefined, finish_reason: choice.finish_reason ?? "stop" };
+    }
+
     return {
-      content: choice.message?.content ?? "",
-      tool_calls: choice.message?.tool_calls as unknown[] | undefined,
+      content,
+      tool_calls: toolCalls,
       finish_reason: choice.finish_reason ?? "stop",
     };
   } catch (err) {
@@ -532,8 +550,19 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
         tool_calls: response.tool_calls,
       });
 
-      // If no tool calls, the scout is done (said "DONE" or ran out of ideas)
+      // If no tool calls, the scout is done — BUT only if it made at least
+      // one tool call. If it hasn't made any tool calls yet, nudge it.
       if (!response.tool_calls || response.tool_calls.length === 0) {
+        if (toolResults.length === 0 && callNum < maxCalls) {
+          // BUG FIX (scout-no-results): model responded without making any
+          // tool calls. Nudge it to make at least one call before giving up.
+          log.warn(`[SCOUT] Model responded without tool calls at round ${callNum}. Nudging...`);
+          history.push({
+            role: "user",
+            content: "You MUST call at least one tool (ler_arquivo, buscar_arquivos, buscar_texto, or parse_ast) before responding. Make the tool call NOW.",
+          });
+          continue;
+        }
         break;
       }
 

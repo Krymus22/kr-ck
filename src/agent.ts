@@ -469,8 +469,32 @@ const toolHandlers: Record<string, ToolHandler> = {
     const result = await executarComando({
       comando: asString(args.comando ?? args.command),
       cwd: args.cwd as string | undefined,
+      background: args.background === true,
     });
     return { resultStr: result, usedHeal: false };
+  },
+
+  "verificar_comando": async (args) => {
+    const { getProcessOutput, listBackgroundProcesses } = await import("./backgroundProcesses.js");
+    const id = args.id as number | undefined;
+    if (id === undefined || id === null) {
+      return { resultStr: listBackgroundProcesses(), usedHeal: false };
+    }
+    const output = getProcessOutput(Number(id));
+    if (output === null) {
+      return { resultStr: `[ERROR] No background process with ID ${id}. Use verificar_comando without an ID to list all processes.`, usedHeal: false };
+    }
+    return { resultStr: output, usedHeal: false };
+  },
+
+  "parar_comando": async (args) => {
+    const { killProcess } = await import("./backgroundProcesses.js");
+    const id = Number(args.id);
+    const killed = killProcess(id);
+    if (killed) {
+      return { resultStr: `[OK] Background process #${id} stopped (SIGTERM sent).`, usedHeal: false };
+    }
+    return { resultStr: `[ERROR] Could not stop process #${id} — not found or already exited.`, usedHeal: false };
   },
 
   "editar_arquivo": async (args) => {
@@ -1385,6 +1409,8 @@ const READ_ONLY_TOOLS = new Set([
   "ler_estado",
   // Listing project memory files is read-only (just returns the cached list).
   "listar_memoria",
+  // Background process management is read-only (checking status, listing)
+  "verificar_comando",
 ]);
 
 const FILE_TOOLS = new Set([
