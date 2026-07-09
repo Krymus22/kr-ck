@@ -549,6 +549,13 @@ describe("operationStartedAt — elapsed timer stability", () => {
     while (Date.now() - start1 < 100) { /* busy wait */ }
     done1();
 
+    // BUG FIX (timer-trava): operationStartedAt is NOT immediately nulled
+    // when the stack empties — there's a 500ms grace period to prevent
+    // timer resets from brief stack flickers. Use clearActivity() to
+    // immediately null it (simulating the end of an operation, not just
+    // a brief pop→push gap).
+    clearActivity();
+
     // Stack is now empty — operationStartedAt is null
     expect(getActivitySnapshot().elapsedMs).toBe(0);
 

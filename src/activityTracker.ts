@@ -121,15 +121,21 @@ export function subscribeToActivity(listener: Listener): () => void {
  */
 export function pushActivity(category: ActivityCategory, label: string): () => void {
   const entry: ActivityEntry = { category, label, startedAt: Date.now() };
-  // BUG FIX (elapsed-jumpy): set operationStartedAt ONLY when the stack
-  // was empty (i.e., this is the first activity of a new operation).
-  // If the stack already had activities (nested push), keep the existing
-  // operationStartedAt so the elapsed timer doesn't reset.
+  // BUG FIX (timer-trava): cancel any pending grace timer — if a push
+  // happens within the grace period after a pop, preserve the existing
+  // operationStartedAt so the timer continues smoothly.
+  if (operationGraceTimer) {
+    clearTimeout(operationGraceTimer);
+    operationGraceTimer = null;
+  }
   const wasEmpty = state.stack.length === 0;
   state = {
     ...state,
     stack: [...state.stack, entry],
-    operationStartedAt: wasEmpty ? entry.startedAt : state.operationStartedAt,
+    // Only set a new operationStartedAt if the stack was empty AND there's
+    // no existing one (grace period expired or clearActivity was called).
+    // If operationStartedAt is still set (grace period in progress), keep it.
+    operationStartedAt: (wasEmpty && state.operationStartedAt === null) ? entry.startedAt : state.operationStartedAt,
   };
   notify();
   return () => popActivity(entry);
@@ -138,27 +144,54 @@ export function pushActivity(category: ActivityCategory, label: string): () => v
 /**
  * Pop the matching activity (or any activity above it on the stack) off.
  * Safe to call multiple times.
+ *
+ * BUG FIX (timer-trava): when the stack becomes empty, operationStartedAt
+ * is NOT immediately nulled. Instead, a grace period (500ms) is used —
+ * if a new pushActivity happens within that window, the timer continues
+ * smoothly without resetting. Only if the stack stays empty for >500ms
+ * does operationStartedAt get cleared. This prevents the "timer trava"
+ * bug where brief stack flickers (pop → push between tool calls) reset
+ * the elapsed counter to 0.
  */
+const OPERATION_GRACE_PERIOD_MS = 500;
+let operationGraceTimer: ReturnType<typeof setTimeout> | null = null;
+
 function popActivity(entry: ActivityEntry): void {
   const idx = state.stack.indexOf(entry);
   if (idx === -1) return; // already popped
   const newStack = state.stack.slice(0, idx);
-  // BUG FIX (elapsed-jumpy): clear operationStartedAt ONLY when the stack
-  // becomes empty (i.e., the last activity was popped). If there are still
-  // activities on the stack (nested pop), keep the existing
-  // operationStartedAt so the elapsed timer continues smoothly.
   const nowEmpty = newStack.length === 0;
+
+  if (nowEmpty) {
+    // Don't immediately null operationStartedAt — schedule a grace period.
+    // If a new pushActivity happens before the timer fires, the timer is
+    // cancelled and operationStartedAt is preserved (timer continues).
+    if (operationGraceTimer) clearTimeout(operationGraceTimer);
+    operationGraceTimer = setTimeout(() => {
+      operationGraceTimer = null;
+      state = { ...state, operationStartedAt: null };
+      notify();
+    }, OPERATION_GRACE_PERIOD_MS);
+  }
+
   state = {
     ...state,
     stack: newStack,
-    operationStartedAt: nowEmpty ? null : state.operationStartedAt,
+    // Keep operationStartedAt — the grace timer will clear it if the stack
+    // stays empty for >500ms. If a push happens before that, pushActivity
+    // cancels the timer and preserves operationStartedAt.
   };
   notify();
 }
 
 /** Clear the entire activity stack (e.g. when the agent loop terminates). */
 export function clearActivity(): void {
-  if (state.stack.length === 0) return;
+  if (state.stack.length === 0 && state.operationStartedAt === null) return;
+  // Cancel any pending grace timer
+  if (operationGraceTimer) {
+    clearTimeout(operationGraceTimer);
+    operationGraceTimer = null;
+  }
   state = { stack: [], operationStartedAt: null };
   notify();
 }

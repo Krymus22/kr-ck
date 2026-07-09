@@ -704,10 +704,11 @@ function processContentChunk(
   onToken?: (token: string) => void,
   onThinking?: () => void,
 ): void {
-  if (state.isFirstChunk) {
-    state.isFirstChunk = false;
-    onStreamStart?.();
-  }
+  // BUG FIX (tok/s-aleatorio): onStreamStart is now fired in processStreamChunk
+  // on the first chunk of ANY type (reasoning, content, tool_calls).
+  // Previously it was fired here only on the first content chunk, which
+  // excluded reasoning time from streamStartTime → absurd tok/s values.
+  // The isFirstChunk flag is already false by the time we get here.
 
   // If repetition was already detected, ignore further tokens
   if (state.repetitionDetected) return;
@@ -890,6 +891,21 @@ function processStreamChunk(
   if (!state.responseCreated) state.responseCreated = chunk.created ?? 0;
 
   const delta = choice.delta ?? {};
+
+  // BUG FIX (tok/s-aleatorio): fire onStreamStart on the FIRST chunk of ANY
+  // type (reasoning, content, tool_calls) — not just content. Previously,
+  // onStreamStart only fired in processContentChunk (first content chunk).
+  // For reasoning models (GLM 5.2, Kimi K2, DeepSeek R1), the model thinks
+  // for minutes BEFORE emitting content. streamStartTime was set to the
+  // first content chunk, but usage.completion_tokens included reasoning
+  // tokens → tok/s = (reasoning + content tokens) / (content-only time) =
+  // absurd values like 3000 tok/s.
+  // Now onStreamStart fires on the first chunk overall, so streamStartTime
+  // covers the full stream including reasoning → tok/s is accurate.
+  if (state.isFirstChunk) {
+    state.isFirstChunk = false;
+    onStreamStart?.();
+  }
 
   const reasoning = delta.reasoning_content ?? ("reasoning" in delta ? delta.reasoning : undefined);
   if (reasoning) {

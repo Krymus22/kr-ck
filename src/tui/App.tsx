@@ -1886,7 +1886,10 @@ export function App() {
       (token: string) => {
         streamContent += token;
         streamContentRef.current = streamContent;
-        tokenCount++;
+        // BUG FIX (tok/s-aleatorio): don't count empty tokens (heartbeats/
+        // keep-alive chunks) in tokenCount. NVIDIA NIM sends onToken("")
+        // as keep-alive during reasoning — counting them inflates tok/s.
+        if (token.length > 0) tokenCount++;
         // Update tok/s every 10 tokens — based on THIS stream's token count
         // and THIS stream's elapsed time only (both reset on onStreamStart).
         if (tokenCount % 10 === 0 && streamStartTime > 0) {
@@ -2622,7 +2625,7 @@ export function App() {
           review was in progress. Now it stays visible as long as ANY
           activity is on the stack. */}
       <ThinkingIndicator
-        active={status === "thinking" || status === "compacting" || getActivitySnapshot().current !== null}
+        active={status === "thinking" || status === "streaming" || status === "compacting" || getActivitySnapshot().current !== null}
         label={status === "compacting" ? "COMPACTANDO" : undefined}
       />
 
