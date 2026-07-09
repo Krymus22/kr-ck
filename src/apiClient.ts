@@ -654,7 +654,12 @@ function createStreamRequest(
   // This prevents errors on ZenMux (which doesn't accept chat_template_kwargs)
   // and on models that don't support thinking at all (kimi-k2.7-code-free).
   const modelInfo = getModelInfo(effectiveModel);
-  const shouldSendThinking = providerSendsThinkingMode() && modelInfo.hasThinking;
+  // BUG FIX (scout-thinking): check disableThinkingOverride — when true (set by
+  // chatWithModel for scout calls), do NOT send thinking_mode even if the model
+  // supports it. The scout only needs fast tool calls, not reasoning. Thinking
+  // would consume the model's token budget (e.g., 4096 for DiffusionGemma)
+  // leaving nothing for tool_calls.
+  const shouldSendThinking = !disableThinkingOverride && providerSendsThinkingMode() && modelInfo.hasThinking;
 
   const requestBody: any = {
     model: effectiveModel,
@@ -1462,6 +1467,15 @@ export async function chat(
 let modelOverride: string | null = null;
 
 /**
+ * When true, createStreamRequest will NOT send chat_template_kwargs (thinking_mode)
+ * even if the model has hasThinking=true. Used by the scout to disable thinking —
+ * the scout only needs fast tool calls, not reasoning. Thinking would consume
+ * the model's token budget (e.g., 4096 for DiffusionGemma) leaving nothing
+ * for tool_calls.
+ */
+let disableThinkingOverride = false;
+
+/**
  * Call the API with a DIFFERENT model than config.model.
  *
  * Used by the scout sub-agent (scoutAgent.ts) to call a smaller, faster
@@ -1479,18 +1493,18 @@ export async function chatWithModel(
   messages: Message[],
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
   modelId: string,
+  disableThinking = false,
 ): Promise<ChatResponse> {
   // Set the override — createStreamRequest will use this instead of config.model
   modelOverride = modelId;
+  disableThinkingOverride = disableThinking;
 
   try {
-    log.debug(`[CHAT_WITH_MODEL] Calling ${modelId} (override set, config.model=${config.model} unchanged)`);
-    // Use the standard chat() function — it reads modelOverride via createStreamRequest.
-    // No streaming callbacks — scout calls are non-interactive.
+    log.debug(`[CHAT_WITH_MODEL] Calling ${modelId} (override set, config.model=${config.model} unchanged, thinking=${disableThinking ? "disabled" : "default"})`);
     return await chat(messages, undefined, undefined, undefined, tools);
   } finally {
-    // Always clear the override — never leave it set
     modelOverride = null;
+    disableThinkingOverride = false;
   }
 }
 

@@ -139,7 +139,7 @@ export const MODEL_REGISTRY: ModelInfo[] = [
     costPer1MCompletion: 0,
     supportsTools: true,
     supportsParallelTools: true,
-    hasThinking: false,
+    hasThinking: true,
     provider: "nvidia",
   },
   {

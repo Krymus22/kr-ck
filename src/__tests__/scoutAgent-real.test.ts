@@ -19,7 +19,7 @@ import * as os from "node:os";
 const hasApiKey = !!process.env.NVIDIA_API_KEY || !!process.env.NVIDIA_API_KEYS;
 
 // Skip in CI — requires real API key and network access
-const shouldSkip = !hasApiKey || process.env.CI === "true" || process.env.NODE_ENV === "test";
+const shouldSkip = !hasApiKey || process.env.CI === "true" || process.env.SCOUT_SKIP_REAL_TEST === "1";
 
 describe.skipIf(shouldSkip)("scoutAgent — real API test", () => {
   let tmpDir: string;

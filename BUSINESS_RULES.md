@@ -49,7 +49,7 @@
 | `deepseek-ai/deepseek-r1` | nvidia | 128k | 32,768 | ❌ | ✅ |
 | `deepseek-ai/deepseek-v3.1` | nvidia | 128k | 8,192 | ✅ | ❌ |
 | `deepseek-ai/deepseek-v4-pro` | nvidia | **1M** | **32,768** | ✅ | ✅ |
-| `google/diffusiongemma-26b-a4b-it` | nvidia | 256k | 4,096 | ✅ | ❌ |
+| `google/diffusiongemma-26b-a4b-it` | nvidia | 256k | 4,096 | ✅ | ✅ |
 | `mistralai/mistral-medium-3.5-128b` | nvidia | 128k | 8,192 | ✅ | ❌ |
 | `thudm/glm-4.5` | nvidia | 128k | 8,192 | ✅ | ❌ |
 | `z-ai/glm-5.2-free` | zenmux | 1M | 16,384 | ✅ | ✅ |

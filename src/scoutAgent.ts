@@ -349,6 +349,7 @@ async function chatWithScoutModel(
       messages as any,
       tools as any,
       scoutModel,
+      true, // disableThinking — scout doesn't need reasoning, just fast tool calls
     );
 
     const choice = response.choices?.[0];
@@ -544,9 +545,13 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
       }
 
       // Add assistant message to history
+      // BUG FIX (empty-content-400): NVIDIA API rejects assistant messages
+      // with null/empty content ("Empty content is not allowed for assistant
+      // messages"). When the model returns only tool_calls (no text), set
+      // content to a non-empty placeholder so the next API call doesn't 400.
       history.push({
         role: "assistant",
-        content: response.content,
+        content: response.content || "(calling tools)",
         tool_calls: response.tool_calls,
       });
 
@@ -573,8 +578,22 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
         const tcId = tc.id ?? `scout-tc-${callNum}-${tcIdx}-${Date.now()}`;
         let parsedArgs: Record<string, unknown> = {};
         try {
+          // BUG FIX (malformed-json): some models generate arguments with
+          // trailing characters after the JSON. Try strict parse first,
+          // then fall back to extracting the JSON object.
           const argStr = tc.function?.arguments?.trim() || "{}";
-          parsedArgs = JSON.parse(argStr);
+          try {
+            parsedArgs = JSON.parse(argStr);
+          } catch {
+            // Try extracting just the JSON object { ... }
+            const firstBrace = argStr.indexOf("{");
+            const lastBrace = argStr.lastIndexOf("}");
+            if (firstBrace >= 0 && lastBrace > firstBrace) {
+              parsedArgs = JSON.parse(argStr.slice(firstBrace, lastBrace + 1));
+            } else {
+              throw new Error("No valid JSON object found");
+            }
+          }
         } catch (parseErr) {
           const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
           log.warn(`[SCOUT] Malformed JSON args for ${toolName}: ${parseMsg}`);
