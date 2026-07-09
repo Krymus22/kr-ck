@@ -675,7 +675,7 @@ describe("Tool handlers registration", () => {
 
     const result = await dispatchToolCallPublic(tc);
 
-    expect(mockedExecutarComando).toHaveBeenCalledWith({ comando: "npm test" });
+    expect(mockedExecutarComando).toHaveBeenCalledWith({ comando: "npm test", background: false });
     expect(result.resultStr).toBe("tests passed");
   });
 
