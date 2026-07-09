@@ -81,6 +81,7 @@ export function startSession(cwd?: string, customId?: string): string {
     id,
     createdAt: new Date().toLocaleString("sv-SE"), // local time ISO format
     cwd: cwd ?? process.cwd(),
+    projectCwd: cwd ?? process.cwd(), // directory the user is working in (restored on auto-load)
   });
   fs.writeFileSync(filePath, header + "\n", "utf8");
 
@@ -154,10 +155,36 @@ export function appendCompactionSnapshot(
 }
 
 /**
+ * Read the `projectCwd` field from a session file's header.
+ * This is the directory the user was working in when the session was active.
+ * Returns null if the file doesn't exist or has no projectCwd field.
+ */
+export function getSessionProjectCwd(sessionPath: string): string | null {
+  try {
+    const content = fs.readFileSync(sessionPath, "utf8");
+    const firstLine = content.split("\n")[0];
+    if (!firstLine) return null;
+    const header = JSON.parse(firstLine);
+    if (header.type === "session-header" && typeof header.projectCwd === "string") {
+      return header.projectCwd;
+    }
+    // Fallback: old sessions have `cwd` field
+    if (header.type === "session-header" && typeof header.cwd === "string") {
+      return header.cwd;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get the last session for the current project directory.
  * Returns null if no sessions exist.
+ * Also returns the projectCwd from the session header (if available) so
+ * the caller can restore the working directory.
  */
-export function getLastSession(cwd?: string): { id: string; path: string } | null {
+export function getLastSession(cwd?: string): { id: string; path: string; projectCwd: string | null } | null {
   const dir = getProjectSessionDir(cwd);
   if (!fs.existsSync(dir)) return null;
 
@@ -169,9 +196,13 @@ export function getLastSession(cwd?: string): { id: string; path: string } | nul
   if (files.length === 0) return null;
 
   const lastFile = files[0]!;
+  const filePath = path.join(dir, lastFile);
+  const projectCwd = getSessionProjectCwd(filePath);
+
   return {
     id: lastFile.replace(".jsonl", ""),
-    path: path.join(dir, lastFile),
+    path: filePath,
+    projectCwd,
   };
 }
 
@@ -324,6 +355,28 @@ export function setActiveSession(sessionId: string, cwd?: string): void {
   const resolvedId = resolveSessionId(sessionId, dir);
   activeSessionId = resolvedId;
   activeSessionPath = path.join(dir, `${resolvedId}.jsonl`);
+}
+
+/**
+ * Update the `projectCwd` field in the active session's header.
+ * Called when the user changes directory via /cd or FolderBrowser.
+ * This ensures the session remembers which project directory was active,
+ * so on next startup the directory is restored automatically.
+ */
+export function updateSessionProjectCwd(newCwd: string): void {
+  if (!activeSessionPath) return;
+  try {
+    const content = fs.readFileSync(activeSessionPath, "utf8");
+    const lines = content.split("\n");
+    if (lines.length === 0) return;
+    const header = JSON.parse(lines[0]!);
+    header.projectCwd = newCwd;
+    lines[0] = JSON.stringify(header);
+    fs.writeFileSync(activeSessionPath, lines.join("\n"), "utf8");
+    log.debug(`[SESSION] Updated projectCwd to ${newCwd}`);
+  } catch (err) {
+    log.debug(`[SESSION] Failed to update projectCwd: ${(err as Error).message}`);
+  }
 }
 
 /**

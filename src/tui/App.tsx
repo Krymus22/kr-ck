@@ -64,7 +64,7 @@ import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 import { getSearxStatus } from "../searxManager.js";
 import { loadConfig as loadDotfileConfig, updateConfig as updateDotfileConfig, saveConfig as saveDotfileConfig } from "../dotfileConfig.js";
-import { listSessions, deleteSession, renameSession, startSession, getLastSession, loadSessionMessages, setActiveSession, getActiveSessionId } from "../session.js";
+import { listSessions, deleteSession, renameSession, startSession, getLastSession, loadSessionMessages, setActiveSession, getActiveSessionId, updateSessionProjectCwd } from "../session.js";
 // Static import (no circular dep) — fixes the syncPlan() race condition.
 // Previously syncPlan() used `await import("../planExecutor.js")` which
 // scheduled a microtask that could fire AFTER createPlan() was called in
@@ -584,6 +584,7 @@ function handleCdCommand(arg: string | null): CommandResult {
     const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
     try {
       process.chdir(home);
+      updateSessionProjectCwd(process.cwd());
       return { handled: true, message: `[OK] Working directory changed to:\n  ${process.cwd()}` };
     } catch (err) {
       return { handled: true, message: `[ERROR] Could not change to home: ${(err as Error).message}` };
@@ -614,6 +615,7 @@ function handleCdCommand(arg: string | null): CommandResult {
   try {
     process.chdir(resolved);
     const newCwd = process.cwd();
+    updateSessionProjectCwd(newCwd);
     const lines = [
       `[OK] Working directory changed:`,
       `  ${newCwd}`,
@@ -1392,17 +1394,44 @@ export function App() {
   // (in the useState initializer below) and consumed by useEffect to
   // populate the `messages` state after the first render.
   const loadedVisualMessagesRef = useRef<ChatMessage[]>([]);
+  // Flag to show FolderBrowser on startup if no session was loaded
+  const needsFolderBrowserRef = useRef(false);
 
   useState(() => {
     try {
       const last = getLastSession();
       if (last) {
+        // ── Load session BEFORE chdir (race-condition fix) ──────────────
+        // `loadSessionMessages` and `setActiveSession` use `process.cwd()`
+        // (via `getProjectSessionDir`) to locate the session file. The
+        // session file lives in the hash of the cwd at the time
+        // `startSession` was called — NOT necessarily in `last.projectCwd`.
+        //
+        // Scenario that breaks if we chdir FIRST:
+        //   1. User runs claude-killer from /startup. Session is saved in
+        //      hash(/startup).
+        //   2. User runs `/cd /project`. `updateSessionProjectCwd` rewrites
+        //      the header's projectCwd to /project, but the session FILE is
+        //      still in hash(/startup).
+        //   3. On next startup (cwd=/startup), `getLastSession` correctly
+        //      finds the session in hash(/startup) and returns
+        //      projectCwd=/project.
+        //   4. If we `process.chdir(/project)` BEFORE `loadSessionMessages`,
+        //      the lookup uses hash(/project) — and returns null because
+        //      the file is in hash(/startup). The session is silently
+        //      dropped and the FolderBrowser opens (wrong behavior).
+        //
+        // Fix: load messages + setActiveSession FIRST (uses original cwd),
+        // THEN chdir to projectCwd so subsequent tools run in the right dir.
+        // §17.3.10 (setActiveSession before loadHistoryDirect) is preserved.
         const loaded = loadSessionMessages(last.id);
         if (loaded && loaded.messages.length > 0) {
           // Set active session FIRST — prevents appendMessage from
           // auto-creating a new session file (double-write bug fix).
+          // §17.3.10: must be before loadHistoryDirect.
           setActiveSession(last.id);
           // BUG FIX (BS-18): clear readBeforeWrite state on auto-load too.
+          // §17.3.11: clearReadPaths on auto-load.
           clearReadPaths();
           clearSessionFiles();
           clearInvokedSkills();
@@ -1440,12 +1469,42 @@ export function App() {
         }
         // If session has 0 messages, don't load it and don't create new —
         // lazy init will handle it on first real message.
+
+        // ── Restore project directory from session header ─────────────
+        // The session remembers which directory the user was working in.
+        // Restore it via process.chdir() so all tools/validators run in
+        // the correct project, NOT in the claude-killer install directory.
+        // MUST run AFTER loadSessionMessages + setActiveSession above,
+        // otherwise the cwd change breaks the session-file lookup (the
+        // file lives in the ORIGINAL cwd's hash dir, not projectCwd's).
+        if (last.projectCwd) {
+          try {
+            process.chdir(last.projectCwd);
+            console.error(`[SESSION] Restored project directory: ${last.projectCwd}`);
+          } catch {
+            console.error(`[SESSION] Could not restore project directory: ${last.projectCwd} — dir may not exist`);
+          }
+        }
       }
       // Don't call startSession() here — let appendMessage create it lazily
       // when the first real message is sent. This avoids empty session files.
     } catch {
       // Session load failure should not prevent app from starting
     }
+
+    // ── If no session was loaded, show FolderBrowser so user can pick a project ──
+    // The claude-killer is typically installed in its own directory, so
+    // process.cwd() points to the install dir, NOT the user's project.
+    // By showing FolderBrowser on startup, the user selects their project
+    // directory, which is then saved in the session header (projectCwd)
+    // and restored on next startup.
+    if (!loadedVisualMessagesRef.current.length) {
+      // Will be shown via state — see showFolderBrowser below
+      // We can't call setShowFolderBrowser here (it's defined later in the
+      // component), so we use a ref flag instead.
+      needsFolderBrowserRef.current = true;
+    }
+
     return true; // useState initializer must return something
   });
 
@@ -1458,6 +1517,11 @@ export function App() {
   useEffect(() => {
     if (loadedVisualMessagesRef.current.length > 0) {
       setMessages(loadedVisualMessagesRef.current);
+    }
+    // Show FolderBrowser on startup if no session was loaded
+    if (needsFolderBrowserRef.current) {
+      setShowFolderBrowser(true);
+      needsFolderBrowserRef.current = false;
     }
   }, []);
 
@@ -2271,6 +2335,7 @@ export function App() {
               try {
                 process.chdir(selectedPath);
                 const newCwd = process.cwd();
+                updateSessionProjectCwd(newCwd);
                 // Recarrega project memory do novo diretório
                 try {
                   history.reloadProjectMemory();
