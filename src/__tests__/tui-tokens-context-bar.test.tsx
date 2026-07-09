@@ -107,6 +107,9 @@ vi.mock("../history.js", () => ({
   addSystemMessage: vi.fn(),
   historySummary: vi.fn(() => ""),
   historyLength: vi.fn(() => 0),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../externalTools.js", () => ({
@@ -128,7 +131,32 @@ vi.mock("../todo.js", () => ({
 }));
 
 vi.mock("../memory.js", () => ({ getMemoryConfig: vi.fn(() => ({})) }));
-vi.mock("../session.js", () => ({ startSession: vi.fn(() => "test-session"), appendMessage: vi.fn(), getLastSession: vi.fn(() => null), loadSessionMessages: vi.fn(() => []), setActiveSession: vi.fn(), getActiveSessionId: vi.fn(() => null), listSessions: vi.fn(() => []), deleteSession: vi.fn(() => true), renameSession: vi.fn(() => true) }));
+vi.mock("../session.js", () => ({
+  startSession: vi.fn(() => "test-session"),
+  appendMessage: vi.fn(),
+  appendCompactionSnapshot: vi.fn(),
+  getLastSession: vi.fn(() => ({
+    id: "test-session",
+    path: "/tmp/test-session.jsonl",
+    projectCwd: "/tmp",
+    effortLevel: null,
+  })),
+  loadSessionMessages: vi.fn(() => ({
+    messages: [{ role: "user", content: "dummy-previous-message" }],
+    lastSnapshot: null,
+    postSnapshotMessages: [{ role: "user", content: "dummy-previous-message" }],
+    effortLevel: null,
+  })),
+  getSessionProjectCwd: vi.fn(() => "/tmp"),
+  getSessionEffortLevel: vi.fn(() => null),
+  updateSessionProjectCwd: vi.fn(),
+  updateSessionEffortLevel: vi.fn(),
+  setActiveSession: vi.fn(),
+  getActiveSessionId: vi.fn(() => "test-session"),
+  listSessions: vi.fn(() => []),
+  deleteSession: vi.fn(() => true),
+  renameSession: vi.fn(() => true),
+}));
 vi.mock("../gracefulShutdown.js", () => ({ registerShutdownHandlers: vi.fn() }));
 vi.mock("../configSeeder.js", () => ({ seedUserConfig: vi.fn() }));
 vi.mock("../toolUpdater.js", () => ({ performUpdateCheck: vi.fn(async () => ({})) }));

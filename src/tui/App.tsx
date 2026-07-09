@@ -1161,6 +1161,55 @@ function expandAtMentions(input: string): string {
   });
 }
 
+// --- InputBox Component (memoized to prevent re-render during streaming) ----
+//
+// BUG FIX (input-travado): During streaming, the App re-renders 12x/second
+// (setMessages throttle) + 5x/second (ThinkingIndicator setSnapshot/setDots).
+// Each App re-render re-renders the TextInput, which can reset the terminal
+// cursor position — making the input appear "locked" while the AI is working.
+// The user types but nothing appears (or appears with a big delay).
+//
+// Fix: extract the TextInput (and its prompt ">") into a separate component
+// memoized with React.memo. This component ONLY re-renders when its props
+// change (input value, placeholder, overlay state) — NOT when messages,
+// status, todos, or any other App state changes. The TextInput's internal
+// cursor position is preserved across App re-renders.
+//
+// The handleChange and handleSubmit callbacks are already useCallback'd in
+// App, so they're stable references — React.memo's shallow comparison works
+// correctly.
+
+interface InputBoxProps {
+  value: string;
+  onChange: (val: string) => void;
+  onSubmit: (val: string) => void;
+  placeholder: string;
+  overlayOpen: boolean;
+}
+
+const InputBox = React.memo(function InputBox({
+  value,
+  onChange,
+  onSubmit,
+  placeholder,
+  overlayOpen,
+}: Readonly<InputBoxProps>) {
+  if (overlayOpen) {
+    return <Text color={colors.muted}>[ Overlay aberto - pressione Esc para fechar ]</Text>;
+  }
+  return (
+    <>
+      <Text color={colors.primary} bold>{"> "}</Text>
+      <TextInput
+        value={value}
+        onChange={onChange}
+        onSubmit={onSubmit}
+        placeholder={placeholder}
+      />
+    </>
+  );
+});
+
 // --- Autocomplete Component -------------------------------------------------
 
 const AUTOCOMPLETE_PAGE_SIZE = 8;  // max items visible at once
@@ -2490,30 +2539,31 @@ export function App() {
         <Box flexDirection="row">
           <Box flexGrow={1}>
             {/*
-              BUG FIX: hide the main TextInput whenever ANY overlay that
+              BUG FIX (input-travado): the TextInput is now wrapped in a
+              memoized InputBox component. During streaming, the App
+              re-renders 12x/second (setMessages) + 5x/second
+              (ThinkingIndicator). Without memoization, each re-render
+              re-rendered the TextInput, resetting the terminal cursor and
+              making the input appear "locked". The memoized InputBox only
+              re-renders when its props change (value, placeholder,
+              overlayOpen), preserving the cursor position.
+
+              overlayOpen: hide the main TextInput whenever ANY overlay that
               captures keyboard input is open (Hub, FolderBrowser,
               ConfiguratorChat, QuestionPrompt). Previously only Hub and
               FolderBrowser were checked, so when ConfiguratorChat or
               QuestionPrompt was open, the main TextInput was still mounted
               and receiving stdin — causing every keystroke to go to BOTH
               the overlay's useInput handler AND the main TextInput's
-              onChange (e.g. typing "hello" in QuestionPrompt's type mode
-              also appended "hello" to the chat input, and pressing Enter
-              submitted the chat input as a new message to the agent).
+              onChange.
             */}
-            {showHub || showFolderBrowser || showConfigurator || pendingQuestion ? (
-              <Text color={colors.muted}>[ Overlay aberto - pressione Esc para fechar ]</Text>
-            ) : (
-              <>
-                <Text color={colors.primary} bold>{"> "}</Text>
-                <TextInput
-                  value={input}
-                  onChange={handleChange}
-                  onSubmit={handleSubmit}
-                  placeholder={status === "idle" ? "Digite sua mensagem..." : "Digite uma sidequest..."}
-                />
-              </>
-            )}
+            <InputBox
+              value={input}
+              onChange={handleChange}
+              onSubmit={handleSubmit}
+              placeholder={status === "idle" ? "Digite sua mensagem..." : "Digite uma sidequest..."}
+              overlayOpen={showHub || showFolderBrowser || showConfigurator || !!pendingQuestion}
+            />
           </Box>
         </Box>
 

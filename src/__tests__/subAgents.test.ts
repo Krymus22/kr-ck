@@ -42,6 +42,9 @@ vi.mock("../effortLevels.js", () => ({
 
 vi.mock("../history.js", () => ({
   getSystemPrompt: vi.fn().mockReturnValue("MOCK MAIN SYSTEM PROMPT"),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 // Mock agent.js to avoid loading the real agent (which has many side effects)

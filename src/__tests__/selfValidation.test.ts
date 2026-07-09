@@ -10,6 +10,9 @@ vi.mock("../logger.js", () => ({
 
 vi.mock("../history.js", () => ({
   addSystemMessage: vi.fn(),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../effortLevels.js", () => ({

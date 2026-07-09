@@ -59,6 +59,9 @@ vi.mock("../history.js", () => ({
   getHistory: vi.fn(() => []),
   estimateTokens: vi.fn(() => 0),
   addSystemMessage: vi.fn(),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 // Mock testRunner (loaded by bugHunter) — avoids spawning real test runners.

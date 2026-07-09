@@ -47,6 +47,9 @@ vi.mock("../apiClient.js", () => ({ chat: vi.fn() }));
 vi.mock("../history.js", () => ({
   getHistory: vi.fn(() => []),
   estimateTokens: vi.fn(() => 0),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../taskState.js", () => ({ getTaskStateSummary: vi.fn() }));

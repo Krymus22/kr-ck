@@ -187,6 +187,9 @@ vi.mock("../history.js", () => ({
   getCavemanLevel: mockedGetCavemanLevel,
   setCavemanLevel: mockedSetCavemanLevel,
   reloadProjectMemory: mockedReloadProjectMemory,
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 // Mock externalTools (hoisted — /tools, /toolinfo precisam de registry)
@@ -248,6 +251,38 @@ vi.mock("../inboxOrganizer.js", () => ({
 vi.mock("../toolConfigurator.js", () => ({
   configureTool: vi.fn(async () => ({ success: true, message: "OK" })),
   detectToolsWithoutManifest: vi.fn(() => []),
+}));
+
+// Mock session — return a valid session so FolderBrowser doesn't open
+// (FolderBrowser-on-startup intercepts stdin and breaks tests).
+// projectCwd uses process.cwd() so the auto-load doesn't change the test's
+// cwd (the /cd test needs to verify cwd changes AFTER the command, not
+// from the auto-load).
+vi.mock("../session.js", () => ({
+  startSession: vi.fn(() => "test-session"),
+  appendMessage: vi.fn(),
+  appendCompactionSnapshot: vi.fn(),
+  getLastSession: vi.fn(() => ({
+    id: "test-session",
+    path: "/tmp/test-session.jsonl",
+    projectCwd: process.cwd(),
+    effortLevel: null,
+  })),
+  loadSessionMessages: vi.fn(() => ({
+    messages: [{ role: "user", content: "dummy-previous-message" }],
+    lastSnapshot: null,
+    postSnapshotMessages: [{ role: "user", content: "dummy-previous-message" }],
+    effortLevel: null,
+  })),
+  getSessionProjectCwd: vi.fn(() => process.cwd()),
+  getSessionEffortLevel: vi.fn(() => null),
+  updateSessionProjectCwd: vi.fn(),
+  updateSessionEffortLevel: vi.fn(),
+  setActiveSession: vi.fn(),
+  getActiveSessionId: vi.fn(() => "test-session"),
+  listSessions: vi.fn(() => []),
+  deleteSession: vi.fn(() => true),
+  renameSession: vi.fn(() => true),
 }));
 
 // ─── Imports (após mocks) ───────────────────────────────────────────────────

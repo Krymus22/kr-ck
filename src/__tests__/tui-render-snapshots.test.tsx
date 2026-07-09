@@ -131,6 +131,9 @@ vi.mock("../history.js", () => ({
   addSystemMessage: vi.fn(),
   historySummary: vi.fn(() => "0 msgs"),
   historyLength: vi.fn(() => 0),
+  loadHistoryDirect: vi.fn(),
+  getSystemPrompt: vi.fn(() => "system prompt"),
+  optimizeContext: vi.fn(),
 }));
 
 // Mock externalTools (App.tsx uses it)
