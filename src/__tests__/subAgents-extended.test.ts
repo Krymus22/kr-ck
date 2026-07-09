@@ -42,7 +42,6 @@ vi.mock("../effortLevels.js", () => ({
 vi.mock("../history.js", () => ({
   getSystemPrompt: vi.fn().mockReturnValue("MOCK MAIN SYSTEM PROMPT"),
   loadHistoryDirect: vi.fn(),
-  getSystemPrompt: vi.fn(() => "system prompt"),
   optimizeContext: vi.fn(),
 }));
 

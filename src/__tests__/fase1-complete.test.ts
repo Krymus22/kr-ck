@@ -63,7 +63,6 @@ vi.mock("../history.js", () => ({
   reloadProjectMemory: vi.fn(() => null),
   loadHistoryDirect: vi.fn(),
   getSystemPrompt: vi.fn(() => "system prompt"),
-  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../tools.js", () => ({

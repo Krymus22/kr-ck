@@ -54,7 +54,6 @@ vi.mock("../history.js", () => ({
   estimateTokens: vi.fn(() => 0),
   loadHistoryDirect: vi.fn(),
   getSystemPrompt: vi.fn(() => "system prompt"),
-  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../tools.js", () => ({

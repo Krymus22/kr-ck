@@ -61,7 +61,6 @@ const mockGetSystemPrompt = vi.hoisted(() => vi.fn());
 vi.mock("../history.js", () => ({
   getSystemPrompt: mockGetSystemPrompt,
   loadHistoryDirect: vi.fn(),
-  getSystemPrompt: vi.fn(() => "system prompt"),
   optimizeContext: vi.fn(),
 }));
 

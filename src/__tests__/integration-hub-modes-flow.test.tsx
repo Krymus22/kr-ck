@@ -258,7 +258,6 @@ vi.mock("../history.js", () => ({
   optimizeContext: vi.fn(), estimateTokens: vi.fn(() => 0),
   loadHistoryDirect: vi.fn(),
   getSystemPrompt: vi.fn(() => "system prompt"),
-  optimizeContext: vi.fn(),
 }));
 
 vi.mock("../apiKeyPool.js", () => ({ getPoolSize: vi.fn(() => 1), formatPoolStats: vi.fn(() => "") }));
