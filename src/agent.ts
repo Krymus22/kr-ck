@@ -264,7 +264,7 @@ const SCOUT_TOOL_DEFINITION = {
         },
         max_tool_calls: {
           type: "number",
-          description: "Max tool calls (default 50, max 50). Increase if you need deep exploration.",
+          description: "Max tool calls (default 50, max 100). Increase if you need deep exploration (e.g., navigating deep UI hierarchies in Roblox).",
         },
       },
       required: ["objetivo", "tarefas"],

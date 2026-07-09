@@ -53,7 +53,7 @@ export interface ScoutArgs {
   tasks: ScoutTask[];
   /** Diretório base (default: cwd) */
   cwd?: string;
-  /** Max tool calls (default 50 — scout can explore deep UIs) */
+  /** Max tool calls (default 50, max 100 — scout can explore deep UIs) */
   maxToolCalls?: number;
   /**
    * Optional callback fired BEFORE each tool call — lets the TUI show
@@ -132,7 +132,7 @@ YOU ARE FAST: You use a smaller, faster model. Your purpose is to execute read/s
 RULES:
 - You have ONLY read tools: ler_arquivo, buscar_arquivos, buscar_texto, parse_ast.
 - You CANNOT edit, write, or run commands. Just read and search.
-- Do AT MOST ${50} tool calls. Execute ALL the tasks given to you.
+- Do AT MOST ${maxCalls} tool calls. Execute ALL the tasks given to you. Explore deeply if needed — navigate UIs, read nested files.
 - You MUST call at least ONE tool before responding. Do NOT respond with "DONE" without making tool calls first.
 - After ALL tool calls are done, respond with exactly: DONE
 - The main agent will receive the FULL results of your tool calls (file contents, search results) directly.
@@ -442,7 +442,7 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
   // BUG FIX (maxToolCalls-clamp): clamp maxToolCalls to [1, 50] to prevent
   // DoS via prompt injection (model could pass maxToolCalls: 1000000).
   const rawMaxCalls = args.maxToolCalls ?? 50;
-  const maxCalls = Math.max(1, Math.min(50, typeof rawMaxCalls === "number" && !Number.isNaN(rawMaxCalls) ? rawMaxCalls : 12));
+  const maxCalls = Math.max(1, Math.min(100, typeof rawMaxCalls === "number" && !Number.isNaN(rawMaxCalls) ? rawMaxCalls : 50));
   const scoutModel = getScoutModel();
 
   // BUG FIX (input-validation): validate objective and tasks to avoid
