@@ -22,6 +22,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import * as log from "./logger.js";
+// Import getEffortLevel so startSession() can persist the current effort
+// level into the session header. This is a one-way dependency
+// (session → effortLevels → history, no cycle back to session).
+import { getEffortLevel, type EffortLevel } from "./effortLevels.js";
+
+const VALID_EFFORT_LEVELS = new Set<string>(["low", "medium", "high", "max"]);
+
+/**
+ * Check if a string is a valid EffortLevel.
+ * Used to validate values read from session headers (defensive — old
+ * sessions or hand-edited files might have invalid values).
+ */
+function isValidEffortLevel(s: unknown): s is EffortLevel {
+  return typeof s === "string" && VALID_EFFORT_LEVELS.has(s);
+}
 
 // --- Session directory structure --------------------------------------------
 
@@ -68,12 +83,22 @@ let activeSessionPath: string | null = null;
  * Called automatically on first message if no session is active.
  * @param cwd  Override cwd (for testing). Defaults to process.cwd().
  * @param customId  Custom session ID (for testing/renaming). Defaults to generated.
+ *
+ * The current effort level (low/medium/high/max) is captured in the header
+ * so it can be restored when the session is loaded later. This makes effort
+ * level per-session — switching sessions restores each session's effort.
  */
 export function startSession(cwd?: string, customId?: string): string {
   const dir = getProjectSessionDir(cwd);
   ensureSessionDir(dir);
   const id = customId ?? generateSessionId();
   const filePath = path.join(dir, `${id}.jsonl`);
+
+  // Capture the current effort level AT SESSION CREATION TIME. If the user
+  // changes effort later via /effort, updateSessionEffortLevel() rewrites
+  // this field. On load, loadSessionMessages() returns it so the caller
+  // can call setEffortLevel() to restore it.
+  const currentEffort = getEffortLevel();
 
   // Write header (first line = metadata)
   const header = JSON.stringify({
@@ -82,12 +107,13 @@ export function startSession(cwd?: string, customId?: string): string {
     createdAt: new Date().toLocaleString("sv-SE"), // local time ISO format
     cwd: cwd ?? process.cwd(),
     projectCwd: cwd ?? process.cwd(), // directory the user is working in (restored on auto-load)
+    effortLevel: currentEffort, // current thinking effort (restored on load)
   });
   fs.writeFileSync(filePath, header + "\n", "utf8");
 
   activeSessionId = id;
   activeSessionPath = filePath;
-  log.debug(`[SESSION] New session started: ${id}`);
+  log.debug(`[SESSION] New session started: ${id} (effort: ${currentEffort})`);
   return id;
 }
 
@@ -179,12 +205,62 @@ export function getSessionProjectCwd(sessionPath: string): string | null {
 }
 
 /**
+ * Read the `effortLevel` field from a session file's header.
+ * This is the thinking effort that was active when the session was last used.
+ * Returns null if the file doesn't exist, has no effortLevel field, OR has
+ * an invalid value (defensive against old/hand-edited sessions).
+ */
+export function getSessionEffortLevel(sessionPath: string): EffortLevel | null {
+  try {
+    const content = fs.readFileSync(sessionPath, "utf8");
+    const firstLine = content.split("\n")[0];
+    if (!firstLine) return null;
+    const header = JSON.parse(firstLine);
+    if (header.type === "session-header" && isValidEffortLevel(header.effortLevel)) {
+      return header.effortLevel;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Update the `effortLevel` field in the active session's header.
+ * Called when the user changes effort via /effort so the new level
+ * persists across restarts and is restored when this session is loaded.
+ *
+ * No-op if no session is active (e.g., effort changed before any message
+ * was sent — the lazy-init startSession() will capture the current level
+ * when it eventually runs).
+ *
+ * Follows the same read-modify-write pattern as updateSessionProjectCwd().
+ */
+export function updateSessionEffortLevel(level: EffortLevel): void {
+  if (!activeSessionPath) return;
+  if (!isValidEffortLevel(level)) return;
+  try {
+    const content = fs.readFileSync(activeSessionPath, "utf8");
+    const lines = content.split("\n");
+    if (lines.length === 0) return;
+    const header = JSON.parse(lines[0]!);
+    header.effortLevel = level;
+    lines[0] = JSON.stringify(header);
+    fs.writeFileSync(activeSessionPath, lines.join("\n"), "utf8");
+    log.debug(`[SESSION] Updated effortLevel to ${level}`);
+  } catch (err) {
+    log.debug(`[SESSION] Failed to update effortLevel: ${(err as Error).message}`);
+  }
+}
+
+/**
  * Get the last session for the current project directory.
  * Returns null if no sessions exist.
- * Also returns the projectCwd from the session header (if available) so
- * the caller can restore the working directory.
+ * Also returns the projectCwd and effortLevel from the session header
+ * (if available) so the caller can restore the working directory and
+ * thinking effort.
  */
-export function getLastSession(cwd?: string): { id: string; path: string; projectCwd: string | null } | null {
+export function getLastSession(cwd?: string): { id: string; path: string; projectCwd: string | null; effortLevel: EffortLevel | null } | null {
   const dir = getProjectSessionDir(cwd);
   if (!fs.existsSync(dir)) return null;
 
@@ -198,11 +274,13 @@ export function getLastSession(cwd?: string): { id: string; path: string; projec
   const lastFile = files[0]!;
   const filePath = path.join(dir, lastFile);
   const projectCwd = getSessionProjectCwd(filePath);
+  const effortLevel = getSessionEffortLevel(filePath);
 
   return {
     id: lastFile.replace(".jsonl", ""),
     path: filePath,
     projectCwd,
+    effortLevel,
   };
 }
 
@@ -236,6 +314,16 @@ export interface LoadedSession {
    * as `messages` (all messages are "post-snapshot" in that case).
    */
   postSnapshotMessages: unknown[];
+  /**
+   * The thinking effort level recorded in the session header at the
+   * time the session was last used. null if the header doesn't have an
+   * effortLevel field (old sessions created before this feature) or if
+   * the value is invalid.
+   *
+   * The caller should call setEffortLevel() with this value (when non-null)
+   * to restore the per-session effort level.
+   */
+  effortLevel: EffortLevel | null;
 }
 
 /**
@@ -268,7 +356,7 @@ export function loadSessionMessages(sessionId: string, cwd?: string): LoadedSess
       if (fs.existsSync(oldPath)) {
         try {
           const data = JSON.parse(fs.readFileSync(oldPath, "utf8"));
-          return { messages: data.messages ?? [], lastSnapshot: null, postSnapshotMessages: data.messages ?? [] };
+          return { messages: data.messages ?? [], lastSnapshot: null, postSnapshotMessages: data.messages ?? [], effortLevel: null };
         } catch {
           return null;
         }
@@ -321,7 +409,10 @@ export function loadSessionMessages(sessionId: string, cwd?: string): LoadedSess
     if (!snapshotSeen) {
       postSnapshotMessages = messages;
     }
-    return { messages, lastSnapshot, postSnapshotMessages };
+    // Read the effort level from the session header (for restoration on load).
+    // null if the header doesn't have it (old sessions) or has an invalid value.
+    const effortLevel = getSessionEffortLevel(filePath);
+    return { messages, lastSnapshot, postSnapshotMessages, effortLevel };
   } catch {
     return null;
   }

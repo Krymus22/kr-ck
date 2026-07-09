@@ -326,3 +326,132 @@ describe("session — JSONL auto-persist (Claude Code style)", () => {
     expect(loaded!.lastSnapshot!.messages).toHaveLength(1);
   });
 });
+
+describe("session — effort level persistence (per-session)", () => {
+  /**
+   * These tests cover the feature where the thinking effort level
+   * (low/medium/high/max) is persisted in the session header and restored
+   * when the session is loaded. This makes effort per-session — switching
+   * sessions restores each session's effort.
+   */
+
+  it("startSession escreve effortLevel atual no header", async () => {
+    const { startSession, getLastSession } = await loadSessionModule();
+    startSession();
+    const last = getLastSession();
+    expect(last).not.toBeNull();
+    const content = fs.readFileSync(last!.path, "utf8");
+    const header = JSON.parse(content.split("\n")[0]!);
+    // effortLevel field should be present and a valid level
+    expect(header.effortLevel).toBeDefined();
+    expect(["low", "medium", "high", "max"]).toContain(header.effortLevel);
+  });
+
+  it("getLastSession retorna effortLevel do header", async () => {
+    const { startSession, getLastSession } = await loadSessionModule();
+    startSession();
+    const last = getLastSession();
+    expect(last).not.toBeNull();
+    expect(last!.effortLevel).toBeDefined();
+    expect(["low", "medium", "high", "max"]).toContain(last!.effortLevel);
+  });
+
+  it("loadSessionMessages retorna effortLevel do header", async () => {
+    const { startSession, appendMessage, getLastSession, loadSessionMessages } = await loadSessionModule();
+    startSession();
+    appendMessage({ role: "user", content: "hello" });
+    const last = getLastSession();
+    const loaded = loadSessionMessages(last!.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.effortLevel).toBeDefined();
+    expect(["low", "medium", "high", "max"]).toContain(loaded!.effortLevel);
+  });
+
+  it("updateSessionEffortLevel reescreve o header com novo level", async () => {
+    const { startSession, updateSessionEffortLevel, getLastSession } = await loadSessionModule();
+    startSession();
+    // Change to "max"
+    updateSessionEffortLevel("max");
+    const last = getLastSession();
+    expect(last).not.toBeNull();
+    expect(last!.effortLevel).toBe("max");
+    // Verify by reading the file directly
+    const content = fs.readFileSync(last!.path, "utf8");
+    const header = JSON.parse(content.split("\n")[0]!);
+    expect(header.effortLevel).toBe("max");
+  });
+
+  it("updateSessionEffortLevel ignora level inválido", async () => {
+    const { startSession, updateSessionEffortLevel, getLastSession } = await loadSessionModule();
+    startSession();
+    // Capture original level
+    const lastBefore = getLastSession();
+    const originalLevel = lastBefore!.effortLevel;
+    // Try to set invalid level — should be a no-op
+    updateSessionEffortLevel("extreme" as any);
+    const lastAfter = getLastSession();
+    expect(lastAfter!.effortLevel).toBe(originalLevel);
+  });
+
+  it("updateSessionEffortLevel é no-op quando não há sessão ativa", async () => {
+    const { updateSessionEffortLevel } = await loadSessionModule();
+    // Should not throw — just silently return
+    expect(() => updateSessionEffortLevel("high")).not.toThrow();
+  });
+
+  it("updateSessionEffortLevel preserva outras mensagens do arquivo", async () => {
+    const { startSession, appendMessage, updateSessionEffortLevel, getLastSession, loadSessionMessages } = await loadSessionModule();
+    startSession();
+    appendMessage({ role: "user", content: "msg1" });
+    appendMessage({ role: "assistant", content: "reply1" });
+    updateSessionEffortLevel("high");
+    const last = getLastSession();
+    const loaded = loadSessionMessages(last!.id);
+    // Messages should still be there (not corrupted by the header rewrite)
+    expect(loaded!.messages.length).toBe(2);
+    expect(loaded!.messages[0]).toMatchObject({ role: "user", content: "msg1" });
+    expect(loaded!.messages[1]).toMatchObject({ role: "assistant", content: "reply1" });
+    // And effort should be updated
+    expect(loaded!.effortLevel).toBe("high");
+  });
+
+  it("sessões antigas sem effortLevel retornam null (backward compat)", async () => {
+    const { startSession, getLastSession, loadSessionMessages, getProjectSessionDir } = await loadSessionModule();
+    // Don't use startSession — manually create an old-style header without effortLevel
+    startSession();
+    const last = getLastSession();
+    expect(last).not.toBeNull();
+    // Rewrite the header to remove effortLevel (simulate old session)
+    const content = fs.readFileSync(last!.path, "utf8");
+    const lines = content.split("\n");
+    const header = JSON.parse(lines[0]!);
+    delete header.effortLevel;
+    lines[0] = JSON.stringify(header);
+    fs.writeFileSync(last!.path, lines.join("\n"), "utf8");
+    // Now load — effortLevel should be null (not crash, not default)
+    const loaded = loadSessionMessages(last!.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.effortLevel).toBeNull();
+    // getLastSession should also return null for effortLevel
+    const last2 = getLastSession();
+    expect(last2!.effortLevel).toBeNull();
+    void getProjectSessionDir; // silence unused warning if any
+  });
+
+  it("valor inválido de effortLevel no header retorna null (defensive)", async () => {
+    const { startSession, getLastSession, loadSessionMessages } = await loadSessionModule();
+    startSession();
+    const last = getLastSession();
+    // Rewrite the header with an invalid effortLevel
+    const content = fs.readFileSync(last!.path, "utf8");
+    const lines = content.split("\n");
+    const header = JSON.parse(lines[0]!);
+    header.effortLevel = "extreme"; // invalid
+    lines[0] = JSON.stringify(header);
+    fs.writeFileSync(last!.path, lines.join("\n"), "utf8");
+    // load should return null for effortLevel (not the invalid value)
+    const loaded = loadSessionMessages(last!.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.effortLevel).toBeNull();
+  });
+});

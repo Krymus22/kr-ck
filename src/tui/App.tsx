@@ -64,7 +64,7 @@ import { useTerminalWidth } from "./useTerminal.js";
 import type { AskUserQuestion, AskUserResponse } from "../askUser.js";
 import { getSearxStatus } from "../searxManager.js";
 import { loadConfig as loadDotfileConfig, updateConfig as updateDotfileConfig, saveConfig as saveDotfileConfig } from "../dotfileConfig.js";
-import { listSessions, deleteSession, renameSession, startSession, getLastSession, loadSessionMessages, setActiveSession, getActiveSessionId, updateSessionProjectCwd } from "../session.js";
+import { listSessions, deleteSession, renameSession, startSession, getLastSession, loadSessionMessages, setActiveSession, getActiveSessionId, updateSessionProjectCwd, updateSessionEffortLevel } from "../session.js";
 // Static import (no circular dep) — fixes the syncPlan() race condition.
 // Previously syncPlan() used `await import("../planExecutor.js")` which
 // scheduled a microtask that could fire AFTER createPlan() was called in
@@ -250,6 +250,16 @@ function handleSessionCommand(arg: string | null): CommandResult {
       // No compaction — full message list IS what the IA had at shutdown.
       history.loadHistoryDirect(loaded.messages as any);
     }
+    // Restore the loaded session's effort level (low/medium/high/max).
+    // Each session remembers its own effort — switching sessions restores
+    // the effort that was active when the loaded session was last used.
+    // Only restore if the session has a valid effortLevel field; old
+    // sessions (created before this feature) have null and we keep the
+    // current level. The visual label is refreshed by handleSlashCommandFlow
+    // which calls setEffortLabel(getEffortLabel()) after this returns.
+    if (loaded.effortLevel) {
+      setEffortLevel(loaded.effortLevel);
+    }
     return {
       handled: true,
       resetChat: true,
@@ -257,7 +267,7 @@ function handleSessionCommand(arg: string | null): CommandResult {
       // will use resetChat to clear the visual state, then we need to
       // re-populate it with the loaded session's messages.
       visualMessages: convertSessionToVisualMessages(loaded.messages),
-      message: `[OK] Session loaded: ${id}\n${loaded.messages.length} messages restored${loaded.lastSnapshot ? ` (from ${loaded.lastSnapshot.method} compaction snapshot)` : ""}.`,
+      message: `[OK] Session loaded: ${id}\n${loaded.messages.length} messages restored${loaded.lastSnapshot ? ` (from ${loaded.lastSnapshot.method} compaction snapshot)` : ""}.${loaded.effortLevel ? `\nEffort restored to: ${loaded.effortLevel.toUpperCase()}` : ""}`,
     };
   }
 
@@ -911,6 +921,14 @@ function handleEffortCommand(arg: string | null): CommandResult {
     return { handled: true, message: `Invalid level: ${arg}\nOptions: low, medium, high, max` };
   }
   setEffortLevel(level as any);
+  // Persist the new effort level to the active session's header so it's
+  // restored when the session is loaded later (auto-load on startup OR
+  // /session load). Without this, the effort level resets to default
+  // (medium or env-var) every time the user restarts the app — even if
+  // they were using /effort max in the previous session.
+  // No-op if no session is active yet (lazy init will capture the current
+  // level when startSession() runs on the first message).
+  updateSessionEffortLevel(level as any);
   // Note: setEffortLevel() already updates the system prompt (history[0])
   // immediately via getSystemPrompt(), so the IA DOES get the new effort
   // on the next request. The visual label update is handled by
@@ -1459,6 +1477,20 @@ export function App() {
           }
 
           console.error(`[SESSION] Resumed: ${last.id} (${loaded.messages.length} messages${loaded.lastSnapshot ? `, snapshot from ${loaded.lastSnapshot.method} compaction` : ""})`);
+
+          // ── Restore effort level from session header ──────────────
+          // The session's effort level (low/medium/high/max) is stored in
+          // the header so each session remembers its own effort. Without
+          // this, loading a previous session would silently reset effort
+          // to the default (medium) — the user's /effort max from the
+          // previous session would be lost.
+          // Only restore if the session has a valid effortLevel field;
+          // old sessions (created before this feature) have null and we
+          // keep the current level (env var / localStorage / default).
+          if (loaded.effortLevel) {
+            setEffortLevel(loaded.effortLevel);
+            console.error(`[SESSION] Restored effort level: ${loaded.effortLevel}`);
+          }
 
           // ── Visual messages: convert ALL messages for display ──────
           // The user sees the FULL conversation history (including messages
@@ -2398,8 +2430,20 @@ export function App() {
         </Box>
       ))}
 
-      {/* Chat history */}
-      <Box flexDirection="column" flexGrow={1}>
+      {/* Chat history
+          flexGrow={1} so the chat-history Box absorbs all remaining vertical
+          space (keeps the input/status bar pinned at the bottom of the
+          terminal). justifyContent="flex-end" pushes ChatDisplay to the
+          BOTTOM of this Box, so the chat content sits right above the input
+          box with NO empty/black gap between them. The unused space ends up
+          at the TOP of this Box (between system messages and chat content),
+          which is far less jarring than a gap right above the input box.
+          BUG FIX (black-gap-above-input): previously, without
+          justifyContent="flex-end", ChatDisplay sat at the TOP of this
+          tall Box and the space below it (between last chat message and
+          input box) was empty/black — the user saw a "big empty space
+          between messages" near the bottom of the chat. */}
+      <Box flexDirection="column" flexGrow={1} justifyContent="flex-end">
         <ChatDisplay messages={messages} />
       </Box>
 
