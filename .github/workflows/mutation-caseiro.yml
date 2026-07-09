@@ -29,7 +29,7 @@ jobs:
           echo ""
           python3 -c "import json; data=json.load(open('groups.json')); print(f'Valid JSON: {len(data)} groups')"
       - name: Upload groups file
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-groups
           path: groups.json
@@ -110,7 +110,7 @@ jobs:
 
       - name: Upload group report
         if: always() && steps.files.outputs.files != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-report-group-${{ matrix.group-index }}
           path: |
@@ -220,7 +220,7 @@ jobs:
           PYEOF
 
       - name: Upload final aggregated report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-final-report
           path: final-report/

@@ -27,7 +27,7 @@ jobs:
         continue-on-error: true
       - name: Upload OSV results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: osv-results
           path: osv-results.json
