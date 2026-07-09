@@ -55,7 +55,7 @@ describe("Snapshot: robloxMcpGuard", () => {
         "list_roblox_studios": "read",
         "mouse_input": "playtest",
         "multi_edit": "write",
-        "playtest_subagent": "playtest",
+        "playtest_subagent": "write",
         "run_script_in_play_mode": "execute",
         "screen_capture": "playtest",
         "script_grep": "read",

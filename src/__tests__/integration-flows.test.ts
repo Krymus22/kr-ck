@@ -167,10 +167,10 @@ describe("Flow 3: Mode Roblox → MCP Guard", () => {
   });
 
   it("classifica todas as tools corretamente", () => {
-    const writes = ["multi_edit", "generate_mesh", "generate_material", "generate_procedural_model", "insert_from_creator_store"];
+    const writes = ["multi_edit", "generate_mesh", "generate_material", "generate_procedural_model", "insert_from_creator_store", "playtest_subagent"];
     const reads = ["script_read", "script_search", "script_grep", "search_game_tree", "inspect_instance", "explore_subagent", "list_roblox_studios", "console_output"];
     const execs = ["execute_luau", "run_script_in_play_mode"];
-    const plays = ["start_stop_play", "screen_capture", "playtest_subagent", "character_navigation", "keyboard_input", "mouse_input"];
+    const plays = ["start_stop_play", "screen_capture", "character_navigation", "keyboard_input", "mouse_input"];
 
     for (const t of writes) expect(classifyMcpTool(t)).toBe("write");
     for (const t of reads) expect(classifyMcpTool(t)).toBe("read");

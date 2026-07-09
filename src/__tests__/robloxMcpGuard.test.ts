@@ -72,7 +72,7 @@ describe("robloxMcpGuard", () => {
     it("classifica tools playtest", () => {
       expect(classifyMcpTool("start_stop_play")).toBe("playtest");
       expect(classifyMcpTool("screen_capture")).toBe("playtest");
-      expect(classifyMcpTool("playtest_subagent")).toBe("playtest");
+      expect(classifyMcpTool("playtest_subagent")).toBe("write");
       expect(classifyMcpTool("character_navigation")).toBe("playtest");
       expect(classifyMcpTool("keyboard_input")).toBe("playtest");
       expect(classifyMcpTool("mouse_input")).toBe("playtest");
