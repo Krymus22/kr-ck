@@ -305,7 +305,11 @@ describe("bugHunter: runBugHunter", () => {
     expect(r.completed).toBe(true);
   });
 
-  it("does not block when only medium/low findings (no critical/high)", async () => {
+  it("blocks when only medium/low findings (Bug Hunter blocks ANY findings)", async () => {
+    // BUG FIX (medium-low-never-blocks): previously shouldBlock was false for
+    // medium/low, making MAX_MEDIUM_LOW_ROUNDS=3 dead code (§10.1 violation).
+    // Now shouldBlock = findings.length > 0 (ANY severity). The agent.ts
+    // handler distinguishes severity and applies the appropriate cap.
     const f = path.join(tmpDir, "medium.lua");
     fs.writeFileSync(f, "x\n");
     chatMock.mockResolvedValue({
@@ -318,7 +322,7 @@ describe("bugHunter: runBugHunter", () => {
     });
     const r = await runBugHunter([f], "task", "done");
     expect(r.findings.length).toBeGreaterThan(0);
-    expect(r.shouldBlock).toBe(false);  // Only critical/high block
+    expect(r.shouldBlock).toBe(true);  // ANY findings block (medium/low capped at 3 rounds by agent.ts)
   });
 });
 
