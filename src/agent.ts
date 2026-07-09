@@ -214,25 +214,33 @@ const SCOUT_TOOL_DEFINITION = {
   function: {
     name: "usar_scout",
     description:
-      "Delegate read-only exploration to a FASTER, smaller model (scout). " +
-      "Use this when you need to read multiple files or search code before editing — " +
-      "the scout gathers context quickly and returns a summary, so you can skip the " +
-      "read phase and go straight to editing. " +
+      "PREFER THIS over ler_arquivo/buscar_texto/explorar_subagente for reading files and searching code. " +
+      "Delegates ALL your read/search tasks to a FAST smaller model that executes them in seconds (1-3s per call) " +
+      "instead of you doing each call yourself (10-30s each with the large model). " +
+      "The scout reads files, searches code, and returns the FULL RAW CONTENT of every file and search result directly to you — " +
+      "NOT a summary. You get the actual file contents, line numbers, and search matches in your context, " +
+      "so you can go straight to editing without re-reading anything. " +
+      "The scout can do up to 50 tool calls and explore deeply (nested UIs, multiple directories). " +
+      "USE THIS whenever you need to: read 2+ files, search for patterns, explore project structure, " +
+      "find UI elements, understand how a system works, or gather any context before editing. " +
       "The scout CANNOT edit files — it only reads and searches. " +
-      "Feature must be enabled (SCOUT_ENABLED=1). " +
-      "Tasks: each task is a read/search operation (read_file, search_files, search_text, explore).",
+      "Only use ler_arquivo directly for a SINGLE quick read. " +
+      "Only use explorar_subagente for conceptual questions that need reasoning. " +
+      "This tool is always available when you see it in your tool list.",
     parameters: {
       type: "object",
       properties: {
         objetivo: {
           type: "string",
           description:
-            "The overall objective for the scout. What context do you need? " +
-            "Example: 'Collect context about the inventory system — read the main module, find all DataStore calls, identify the UI structure.'",
+            "What context do you need and why? Be specific. " +
+            "Examples: 'Read InventoryService.luau, find all DataStore calls, and map the UI structure for the inventory panel' " +
+            "or 'Find where PlayerData is loaded and what functions modify it' " +
+            "or 'Search for all RemoteEvent connections and read the client-side handlers'.",
         },
         tarefas: {
           type: "array",
-          description: "List of specific read/search tasks for the scout.",
+          description: "List of read/search tasks. Be thorough — the scout is fast and can do up to 50 calls.",
           items: {
             type: "object",
             properties: {
@@ -244,8 +252,11 @@ const SCOUT_TOOL_DEFINITION = {
               descricao: {
                 type: "string",
                 description:
-                  "What to do. Example: 'read src/inventory/InventoryService.luau' " +
-                  "or 'search for all SetAsync calls' or 'find files matching *.spec.luau'.",
+                  "Specific instruction. Examples: " +
+                  "'read src/InventoryService.luau' " +
+                  "'search for all SetAsync calls in src/' " +
+                  "'find all .spec.luau files' " +
+                  "'explore the UI structure under StarterGui/InventoryPanel'.",
               },
             },
             required: ["tipo", "descricao"],
@@ -253,7 +264,7 @@ const SCOUT_TOOL_DEFINITION = {
         },
         max_tool_calls: {
           type: "number",
-          description: "Max tool calls for the scout (default 12). Don't set unless you need to limit.",
+          description: "Max tool calls (default 50, max 50). Increase if you need deep exploration.",
         },
       },
       required: ["objetivo", "tarefas"],
