@@ -605,16 +605,23 @@ function createStreamRequest(
 ) {
   const c = clientOverride ?? client;
 
+  // BUG FIX (scout-race-condition): use modelOverride if set (by chatWithModel
+  // for scout calls), otherwise fall back to config.model. This avoids
+  // mutating config.model (which is global state) and eliminates the race
+  // condition where two concurrent chatWithModel calls would clobber each
+  // other's model swap.
+  const effectiveModel = modelOverride ?? config.model;
+
   // Dynamic thinking mode: only send chat_template_kwargs when:
   //   1. Provider supports it (NVIDIA: yes, ZenMux: no — thinking is built-in)
   //   2. Model has thinking (checked from modelRegistry)
   // This prevents errors on ZenMux (which doesn't accept chat_template_kwargs)
   // and on models that don't support thinking at all (kimi-k2.7-code-free).
-  const modelInfo = getModelInfo(config.model);
+  const modelInfo = getModelInfo(effectiveModel);
   const shouldSendThinking = providerSendsThinkingMode() && modelInfo.hasThinking;
 
   const requestBody: any = {
-    model: config.model,
+    model: effectiveModel,
     messages,
     tools: tools ?? TOOL_DEFINITIONS,
     tool_choice: "auto",
@@ -625,7 +632,7 @@ function createStreamRequest(
     // context bar in the TUI never updates (total_tokens stays 0), and
     // auto-compaction never triggers (it checks total_tokens vs contextWindow).
     stream_options: { include_usage: true },
-    max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(config.model)),
+    max_tokens: Math.min(config.maxTokens, getModelMaxOutputTokens(effectiveModel)),
     temperature: config.temperature,
     top_p: config.topP,
   };
@@ -1346,6 +1353,59 @@ export async function chat(
 
   // All retries exhausted — return error response instead of hanging forever
   throw new Error(`API não respondeu após ${MAX_CHAT_RETRIES + 1} tentativas. Possíveis causas: servidor sobrecarregado, modelo em cold start, ou problema de rede. Tente novamente em alguns minutos.`);
+}
+
+/**
+ * Module-level model override for scout calls.
+ *
+ * BUG FIX (scout-race-condition): previously chatWithModel mutated config.model
+ * directly, causing a race condition where concurrent chatWithModel calls (or
+ * chatWithModel + chat()) would clobber each other's model swap.
+ *
+ * Now chatWithModel sets this variable, createStreamRequest reads it with
+ * priority over config.model, and chatWithModel clears it in a finally block.
+ *
+ * This is safe because:
+ * 1. The scout is serialized by acquireSubAgentSlot (semaphore) — only one
+ *    scout runs at a time.
+ * 2. The main agent doesn't call chat() during await runScout() (it's
+ *    waiting for the tool result).
+ * 3. Even if a race did occur, the override is cleared in finally, so
+ *    config.model is never permanently corrupted (unlike the old swap approach).
+ */
+let modelOverride: string | null = null;
+
+/**
+ * Call the API with a DIFFERENT model than config.model.
+ *
+ * Used by the scout sub-agent (scoutAgent.ts) to call a smaller, faster
+ * model while keeping the main agent's model unchanged.
+ *
+ * Sets modelOverride (module-level) so createStreamRequest uses the scout
+ * model instead of config.model. The override is cleared in a finally block.
+ *
+ * @param messages  Conversation history
+ * @param tools      Tool definitions (optional)
+ * @param modelId    The model ID to use (must be in MODEL_REGISTRY)
+ * @returns          ChatResponse from the API
+ */
+export async function chatWithModel(
+  messages: Message[],
+  tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
+  modelId: string,
+): Promise<ChatResponse> {
+  // Set the override — createStreamRequest will use this instead of config.model
+  modelOverride = modelId;
+
+  try {
+    log.debug(`[CHAT_WITH_MODEL] Calling ${modelId} (override set, config.model=${config.model} unchanged)`);
+    // Use the standard chat() function — it reads modelOverride via createStreamRequest.
+    // No streaming callbacks — scout calls are non-interactive.
+    return await chat(messages, undefined, undefined, undefined, tools);
+  } finally {
+    // Always clear the override — never leave it set
+    modelOverride = null;
+  }
 }
 
 // BUG FIX (BUG 6): helper for cancelar/abortar um stream perdedor do hedging.

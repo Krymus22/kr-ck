@@ -620,8 +620,44 @@ think → pensar
 
 ### 10.6 Read-only vs write tools
 
-- **READ_ONLY_TOOLS**: `ler_arquivo, buscar_arquivos, buscar_texto, buscar_web, ler_url, parse_ast, explorar_subagente, ler_estado, listar_memoria` — executam em **paralelo**.
+- **READ_ONLY_TOOLS**: `ler_arquivo, buscar_arquivos, buscar_texto, buscar_web, ler_url, parse_ast, explorar_subagente, usar_scout, ler_estado, listar_memoria` — executam em **paralelo**.
 - **WRITE_FILE_TOOLS**: `editar_arquivo, editar_multi_arquivos, desfazer_edicao` — executam **sequencialmente**.
+
+### 10.7 Scout Sub-agent (modelo menor para aceleração)
+
+> Arquivo: `src/scoutAgent.ts`
+
+**PROBLEMA**: O modelo principal (ex: GLM 5.2) é excelente mas lento no servidor NVIDIA. Cada chamada de tool exige um round-trip completo (IA → tool → IA), e o modelo grande é lento para processar cada step.
+
+**SOLUÇÃO**: O agente principal delega leituras/buscas para o scout — um sub-agente com modelo menor e rápido. O scout faz todas as leituras, coleta os resultados, e retorna um summary estruturado. A IA principal recebe o summary e pode pular direto para a edição.
+
+| Parâmetro | Env Var | Default | Regra |
+|-----------|---------|---------|-------|
+| `SCOUT_ENABLED` | `SCOUT_ENABLED` | `0` (off) | `1` ou `true` para ativar |
+| `SCOUT_MODEL` | `SCOUT_MODEL` | `mistralai/mistral-medium-3.5-128b` | Modelo menor (deve suportar tools) |
+| `SCOUT_MAX_DURATION_MS` | `SCOUT_MAX_DURATION_MS` | `120000` (2min) | Timeout global do scout |
+| Max tool calls | — | `12` (clamp `[1, 50]`) | Limite de rounds de tool calls |
+| Max tool result bytes | — | `8192` | Truncamento para evitar context overflow |
+
+**Segurança**:
+- **READ-ONLY**: só tem `ler_arquivo, buscar_arquivos, buscar_texto, parse_ast`. NÃO pode editar/escrever/executar.
+- **Path traversal blocking**: `resolveAndCheckPath` usa `path.relative()` + `fs.realpathSync()` para bloquear `../`, paths absolutos fora do projeto, e symlinks.
+- **Cwd validation**: `args.cwd` é validado contra `process.cwd()` — não pode escapar do projeto.
+- **Anti-recursão**: scout não pode ser chamado de dentro de sub-agentes (guard via `CLAUDE_KILLER_AGENT_ID`).
+- **Timeout global**: scout retorna erro após `SCOUT_MAX_DURATION_MS` (default 2min).
+
+**Tool**: `usar_scout` (adicionada ao tool set quando `SCOUT_ENABLED=1`).
+- Args: `objetivo` (string), `tarefas` (array de `{tipo, descricao}`), `max_tool_calls` (opcional), `cwd` (opcional, validado).
+- Retorna: summary estruturado com `## Summary`, `## Files Inspected`, `## Key Findings`.
+- `filesInspected` é incluído no resultado para o agente principal saber quais arquivos já foram lidos (read-before-write tracking).
+
+**Fluxo**:
+1. Agente principal chama `usar_scout({ objetivo, tarefas })`
+2. Scout usa modelo menor (via `chatWithModel` com `modelOverride`) para fazer leituras/buscas
+3. Scout retorna summary estruturado
+4. Agente principal usa o summary como contexto e pula direto para a edição
+
+**Race condition prevention**: `chatWithModel` usa `modelOverride` (variável module-level) em vez de mutar `config.model` global. O override é limpo no `finally` — nunca corrompe `config.model` permanentemente.
 
 ---
 

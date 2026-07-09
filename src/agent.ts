@@ -97,6 +97,7 @@ import { getContextInjection, resetContextInjection } from "./contextInjector.js
 import { shouldSelfValidate, injectSelfValidationPrompt, resetSelfValidation } from "./selfValidation.js";
 import { getEffortLevel, setEffortLevel } from "./effortLevels.js";
 import { runSubAgent } from "./subAgents.js";
+import { runScout, formatScoutResult, isScoutEnabled, type ScoutArgs, type ScoutTask, type ScoutResult } from "./scoutAgent.js";
 import { generateTestSuggestionForFile, resetAutoTestSuggestions } from "./autoTestGenerator.js";
 import { formatPoolStats, getPoolSize } from "./apiKeyPool.js";
 import {
@@ -203,6 +204,63 @@ const MAX_CONCURRENT_SUB_AGENTS = parseInt(
 let activeSubAgents = 0;
 const subAgentWaitQueue: Array<() => void> = [];
 
+// --- Scout tool definition (IDEIA: acelerar leituras com modelo menor) ------
+// The scout tool lets the main agent delegate read-only exploration to a
+// smaller, faster model. The scout reads files, searches code, and returns
+// a summary — so the main (larger, slower) model can skip the read phase
+// and go straight to editing.
+const SCOUT_TOOL_DEFINITION = {
+  type: "function" as const,
+  function: {
+    name: "usar_scout",
+    description:
+      "Delegate read-only exploration to a FASTER, smaller model (scout). " +
+      "Use this when you need to read multiple files or search code before editing — " +
+      "the scout gathers context quickly and returns a summary, so you can skip the " +
+      "read phase and go straight to editing. " +
+      "The scout CANNOT edit files — it only reads and searches. " +
+      "Feature must be enabled (SCOUT_ENABLED=1). " +
+      "Tasks: each task is a read/search operation (read_file, search_files, search_text, explore).",
+    parameters: {
+      type: "object",
+      properties: {
+        objetivo: {
+          type: "string",
+          description:
+            "The overall objective for the scout. What context do you need? " +
+            "Example: 'Collect context about the inventory system — read the main module, find all DataStore calls, identify the UI structure.'",
+        },
+        tarefas: {
+          type: "array",
+          description: "List of specific read/search tasks for the scout.",
+          items: {
+            type: "object",
+            properties: {
+              tipo: {
+                type: "string",
+                description: "Type of task.",
+                enum: ["read_file", "search_files", "search_text", "explore"],
+              },
+              descricao: {
+                type: "string",
+                description:
+                  "What to do. Example: 'read src/inventory/InventoryService.luau' " +
+                  "or 'search for all SetAsync calls' or 'find files matching *.spec.luau'.",
+              },
+            },
+            required: ["tipo", "descricao"],
+          },
+        },
+        max_tool_calls: {
+          type: "number",
+          description: "Max tool calls for the scout (default 12). Don't set unless you need to limit.",
+        },
+      },
+      required: ["objetivo", "tarefas"],
+    },
+  },
+};
+
 async function acquireSubAgentSlot(): Promise<void> {
   if (activeSubAgents < MAX_CONCURRENT_SUB_AGENTS) {
     activeSubAgents++;
@@ -254,6 +312,11 @@ function getMergedTools(): OpenAI.Chat.Completions.ChatCompletionTool[] {
   const allTools = [...TOOL_DEFINITIONS, ...externalTools];
   allTools.push(THINK_TOOL_DEFINITION);
   allTools.push(ASK_USER_TOOL_DEFINITION);
+  // Scout tool (only added when feature is enabled, so the model doesn't
+  // see it when disabled — avoids confusion about a tool that returns error)
+  if (isScoutEnabled()) {
+    allTools.push(SCOUT_TOOL_DEFINITION);
+  }
 
   if (mcpTools.length > 0) {
     allTools.push(...mcpTools);
@@ -786,6 +849,81 @@ const toolHandlers: Record<string, ToolHandler> = {
     }
   },
 
+  // --- Scout: delegate read-only exploration to a faster, smaller model ---
+  // This tool lets the main agent delegate read/search tasks to a scout
+  // sub-agent that uses a smaller, faster model. The scout gathers context
+  // and returns a summary, so the main model can skip the read phase.
+  "usar_scout": async (args) => {
+    // Feature gate — if disabled, return error so the model knows
+    if (!isScoutEnabled()) {
+      return {
+        resultStr: "[ERROR] Scout feature is disabled. Set SCOUT_ENABLED=1 to enable. You can continue reading files directly with ler_arquivo/buscar_texto.",
+        usedHeal: false,
+      };
+    }
+
+    // BUG FIX (anti-recursion): prevent scout from being called inside a
+    // sub-agent (which would cause deadlock via acquireSubAgentSlot).
+    // Sub-agents set CLAUDE_KILLER_AGENT_ID env var — if it's set, we're
+    // inside a sub-agent context and must refuse.
+    if (process.env.CLAUDE_KILLER_AGENT_ID) {
+      return {
+        resultStr: "[ERROR] usar_scout cannot be called from inside a sub-agent (would deadlock). Use ler_arquivo/buscar_texto directly.",
+        usedHeal: false,
+      };
+    }
+
+    const objective = asString(args.objetivo ?? args.objective);
+    if (!objective) {
+      return { resultStr: "[ERROR] 'objetivo' is required (what context you need from the scout).", usedHeal: false };
+    }
+
+    // Parse tasks array
+    const rawTasks = args.tarefas ?? args.tasks;
+    if (!Array.isArray(rawTasks) || rawTasks.length === 0) {
+      return { resultStr: "[ERROR] 'tarefas' must be a non-empty array of {tipo, descricao}.", usedHeal: false };
+    }
+
+    const tasks: ScoutTask[] = rawTasks.map((t: any) => ({
+      type: (t.tipo ?? t.type ?? "explore") as ScoutTask["type"],
+      description: asString(t.descricao ?? t.description ?? ""),
+    })).filter((t: ScoutTask) => t.description);
+
+    if (tasks.length === 0) {
+      return { resultStr: "[ERROR] No valid tasks provided. Each task needs a 'descricao'.", usedHeal: false };
+    }
+
+    const cwd = args.cwd ? asString(args.cwd) : undefined;
+    const maxCalls = args.max_tool_calls as number | undefined;
+
+    // Scout uses the sub-agent slot semaphore (same concurrency limit)
+    await acquireSubAgentSlot();
+    try {
+      const scoutArgs: ScoutArgs = { objective, tasks, cwd, maxToolCalls: maxCalls };
+      const result = await runScout(scoutArgs);
+
+      if (result === null) {
+        return {
+          resultStr: "[SCOUT] Feature disabled or failed to start. Continue with ler_arquivo/buscar_texto directly.",
+          usedHeal: false,
+        };
+      }
+
+      if (!result.completed) {
+        return {
+          resultStr: `[SCOUT FAILED] Model: ${result.modelUsed}, Error: ${result.error ?? "unknown"}. Continue with ler_arquivo/buscar_texto directly.`,
+          usedHeal: false,
+        };
+      }
+
+      // Return the formatted summary for the main agent to use as context
+      const formatted = formatScoutResult(result);
+      return { resultStr: formatted, usedHeal: false };
+    } finally {
+      releaseSubAgentSlot();
+    }
+  },
+
   // --- Multi-key pool status (IDEIA Fase 1) ------------------------------
   // Sprint C bug fix (BUG-S): todo_write estava definido em TOOL_DEFINITIONS
   // mas NÃO tinha handler. IA via a tool, chamava, e recebia "Ferramenta
@@ -1218,6 +1356,9 @@ const READ_ONLY_TOOLS = new Set([
   // IDEIA 5: explorar_subagente is read-only (only reads code, never edits)
   // and benefits from parallel execution with other read-only tools.
   "explorar_subagente",
+  // Scout is read-only (delegates to a smaller model that only reads files
+  // and searches code — never edits). Benefits from parallel execution.
+  "usar_scout",
   // Task state read is read-only.
   "ler_estado",
   // Listing project memory files is read-only (just returns the cached list).
