@@ -2525,8 +2525,18 @@ export function App() {
       <TodoPanel todos={todos} />
       {planSteps.length > 0 && <PlanPanel steps={planSteps} />}
 
-      {/* Autocomplete dropdown */}
-      {showAutocomplete && acMatches.length > 0 && (
+      {/* Autocomplete dropdown
+          BUG FIX (scroll-steal-autocomplete): previously the wrapper Box was
+          conditionally rendered (`showAutocomplete && acMatches.length > 0`),
+          which meant the Autocomplete box MOUNTED/UNMOUNTED as the user typed
+          (e.g., typing "/h" → 2 matches, "/he" → 1 match, "/hex" → 0 matches
+          → box disappears). Each mount/unmount changed the total frame height,
+          causing the terminal to scroll up briefly (scroll-steal).
+          Fix: always render the wrapper Box when showAutocomplete is true
+          (user is typing a "/" command). The Autocomplete component itself
+          returns null when there are 0 matches, but the Box wrapper stays
+          mounted — keeping the frame height stable. */}
+      {showAutocomplete && (
         <Box marginBottom={1}>
           <Autocomplete query={input} selectedIndex={acIndex} onSelect={(cmd) => setInput(cmd + " ")} />
         </Box>

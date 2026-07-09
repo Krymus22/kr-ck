@@ -44,7 +44,7 @@
  * usage (App.tsx) doesn't pass it.
  */
 
-import React from "react";
+import React, { useMemo } from "react";
 import { Box, Text, Static } from "ink";
 import { colors, icons } from "./theme.js";
 import { MarkdownRenderer } from "./MarkdownRenderer.js";
@@ -265,13 +265,25 @@ function splitStaticLive(messages: ChatMessage[]): { staticMsgs: ChatMessage[]; 
   };
 }
 
-export function ChatDisplay({ messages, maxVisible }: Readonly<ChatDisplayProps>) {
+export const ChatDisplay = React.memo(function ChatDisplay({ messages, maxVisible }: Readonly<ChatDisplayProps>) {
   // Apply maxVisible to the total message list if provided (backwards compat
   // for tests). Production usage (App.tsx) does NOT pass this prop, so all
   // messages are considered.
   const candidateMsgs = maxVisible !== undefined ? messages.slice(-maxVisible) : messages;
 
-  const { staticMsgs, liveMsgs } = splitStaticLive(candidateMsgs);
+  // BUG FIX (scroll-steal-during-typing): splitStaticLive was called WITHOUT
+  // useMemo, creating new array references (staticMsgs/liveMsgs) on every
+  // render. Even though `messages` keeps the same reference during typing
+  // (handleChange only calls setInput, not setMessages), the new array refs
+  // from splitStaticLive caused the <Static> children to be re-evaluated
+  // and the live frame to be repainted on every keystroke — causing the
+  // terminal to briefly scroll up (scroll-steal).
+  //
+  // Fix: useMemo with [candidateMsgs] deps. Since candidateMsgs IS messages
+  // (when maxVisible is undefined) and messages is reference-stable during
+  // typing, the memo skips recalculation on keystrokes — no new arrays,
+  // no <Static> re-evaluation, no live frame repaint.
+  const { staticMsgs, liveMsgs } = useMemo(() => splitStaticLive(candidateMsgs), [candidateMsgs]);
 
   // BUG FIX (indexOf-on2): previously the <Static> and live render loops
   // called `messages.indexOf(msg)` for each item to compute a stable key.
@@ -326,7 +338,7 @@ export function ChatDisplay({ messages, maxVisible }: Readonly<ChatDisplayProps>
       })}
     </Box>
   );
-}
+});
 
 /** Safely parse args stored as JSON string in msg.content (for tool call messages). */
 function parseArgsSafe(content: string): Record<string, unknown> {

@@ -585,7 +585,11 @@ function detectRepetition(state: StreamState): boolean {
       }
 
       if (count >= 8) {
-        console.log(`[REPETITION_DETECTED] Phrase "${phrase.slice(0, 50)}..." repeated ${count}x — aborting generation`);
+        // BUG FIX (scroll-steal): was console.log — raw console.log bypasses
+        // the logger's TUI mode suppression (setTuiMode), injecting text
+        // between Ink frames and causing the terminal to scroll up during
+        // streaming. Use log.info instead (suppressed when TUI mode is active).
+        log.info(`[REPETITION_DETECTED] Phrase "${phrase.slice(0, 50)}..." repeated ${count}x — aborting generation`);
         return true;
       }
     }
@@ -789,7 +793,8 @@ function processContentChunk(
       // Truncate repeated garbage
       state.totalContent = state.totalContent.slice(0, -500) +
         "\n\n[GERAÇÃO INTERROMPIDA: repetição detectada. Tente reformular sua pergunta.]";
-      console.log("[REPETITION] Generation aborted — returning partial content");
+      // BUG FIX (scroll-steal): was console.log — use log.info (suppressed in TUI mode).
+      log.info("[REPETITION] Generation aborted — returning partial content");
     }
   }
 }
