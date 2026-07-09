@@ -94,10 +94,17 @@ const TOOL_CLASSIFICATION: Record<string, McpToolCategory> = {
   // ── PLAYTEST (allowed — controls game runtime, not code) ──────────────────
   "start_stop_play": "playtest",
   "screen_capture": "playtest",
-  "playtest_subagent": "playtest",
   "character_navigation": "playtest",
   "keyboard_input": "playtest",
   "mouse_input": "playtest",
+
+  // ── SUB-AGENT (BLOCKED — bypasses safety pipeline) ────────────────────────
+  // playtest_subagent spawns a sub-agent INSIDE Roblox Studio that can execute
+  // code and modify the game WITHOUT going through our safety pipeline
+  // (aplicar_diff, Bug Hunter, DataGuard, read-before-write, rollback).
+  // This is a backdoor that bypasses ALL safety checks — must be blocked.
+  // explore_subagent is read-only (just inspects the game tree) so it's safe.
+  "playtest_subagent": "write",
 
   // ── SESSION (allowed — session management) ────────────────────────────────
   "set_active_studio": "session",
