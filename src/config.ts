@@ -154,14 +154,14 @@ export const config = {
   ),
 
   /** Threshold (0.0-1.0) of context window that triggers auto-compact.
-   *  Default 0.65 (was 0.75) — more aggressive to prevent OOM kills on long
-   *  multi-turn sessions. When context reaches this %, the agent pauses
-   *  (after completing the current tool call / thinking / write) and runs
-   *  SYNCHRONOUS compaction before continuing. */
-  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.65),
+   *  Default 0.70 — when context reaches 70%, LLM-based compaction runs
+   *  FIRST (priority strategy), preserving architectural decisions and
+   *  unresolved bugs. Heuristic/mechanical compaction only runs as fallback
+   *  if LLM fails or effortLevel="low". */
+  contextCompactThreshold: optionalFloat("CONTEXT_COMPACT_THRESHOLD", 0.70),
 
   /** Threshold (0.0-1.0) of context window that warns user with yellow bar. */
-  contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.6),
+  contextWarnThreshold: optionalFloat("CONTEXT_WARN_THRESHOLD", 0.65),
 
   /** Approximate USD cost per 1k prompt tokens (estimate only). */
   // BUG FIX: previously defaulted to 0. Now we look up the actual cost

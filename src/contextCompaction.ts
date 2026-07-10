@@ -190,10 +190,12 @@ export async function smartCompact(maxTokens: number = 50000): Promise<{ compact
   // "Compactando contexto…" via the ThinkingIndicator, so this redundant
   // console.log is removed entirely. (log.info above is gated by tuiMode.)
 
-  // IDEIA 3: When context is critically full AND effort allows, use the
-  // model to produce a high-fidelity summary. This preserves architectural
-  // decisions, unresolved bugs, and planned next steps - much better than
-  // blind truncation. Mirrors Claude Code's compaction approach.
+  // PRIORITY: LLM-based compaction is the PRIMARY strategy (not fallback).
+  // When the context hits the threshold (default 70%), the LLM compaction
+  // runs FIRST — it produces a high-fidelity summary preserving architectural
+  // decisions, unresolved bugs, and planned next steps. Only if the LLM
+  // compaction fails (network error, effortLevel="low", or didn't save
+  // enough tokens) do we fall back to heuristic/mechanical compaction.
   //
   // CRITICAL FIX: smartCompact is now ASYNC and BLOCKING. Previously it was
   // sync and kicked off compaction in the background (fire-and-forget), which
@@ -203,7 +205,9 @@ export async function smartCompact(maxTokens: number = 50000): Promise<{ compact
   let compacted = false;
   let savedTokens = 0;
 
-  if (shouldUseIntelligentCompaction() && before > maxTokens * 1.2) {
+  // LLM compaction runs as soon as threshold is hit (no * 1.2 multiplier).
+  // Only skipped if effortLevel="low" (shouldUseIntelligentCompaction returns false).
+  if (shouldUseIntelligentCompaction()) {
     const modelCompacted = await modelBasedCompactionAsync();
     if (modelCompacted.compacted) {
       log.success(`[COMPACTION] Model-based compaction saved ${modelCompacted.savedTokens} tokens`);

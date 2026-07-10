@@ -80,8 +80,8 @@
 | `topP` | `TOP_P` | `0.95` | NVIDIA recommended |
 | `maxTokens` | `MAX_TOKENS` | `131_072` | Teto alto — registry é o cap real |
 | `contextWindowTokens` | `CONTEXT_WINDOW_TOKENS` | do registry | NÃO override manual |
-| `contextCompactThreshold` | `CONTEXT_COMPACT_THRESHOLD` | **`0.65`** (65%) | Era 0.75, baixado pra evitar OOM |
-| `contextWarnThreshold` | `CONTEXT_WARN_THRESHOLD` | `0.60` (60%) | StatusBar fica amarelo |
+| `contextCompactThreshold` | `CONTEXT_COMPACT_THRESHOLD` | **`0.70`** (70%) | LLM compaction priority — dispara LLM primeiro, heurística só como fallback |
+| `contextWarnThreshold` | `CONTEXT_WARN_THRESHOLD` | `0.65` (65%) | StatusBar fica amarelo |
 | `maxHealRetries` | `MAX_HEAL_RETRIES` | `3` | |
 | `rateLimitRpm` | `RATE_LIMIT_RPM` | `40` | Free tier NVIDIA |
 | `maxConcurrency` | `MAX_CONCURRENCY` | `1` | Hard limit (MVP) |
@@ -92,7 +92,7 @@
 ### Regras imutáveis de config
 
 - **Sempre usar context window do registry**, não do config manual. O config é derivado do model.
-- **`contextCompactThreshold = 0.65`** — NÃO aumentar pra 0.75 (causa OOM em sessões longas multi-turn).
+- **`contextCompactThreshold = 0.70`** — LLM compaction é PRIORIDADE (roda primeiro aos 70%). Heurística só roda se LLM falhar ou effortLevel="low".
 - **API key é obrigatória** — sem `NVIDIA_API_KEY`/`NVIDIA_API_KEYS`/`ZENMUX_API_KEY`, o CLI exita com código 1.
 
 ---
@@ -230,13 +230,14 @@ Se nenhuma: pool desabilitada → single-key mode.
 
 ### 6.1 Quando dispara
 
-- **Threshold**: `contextWindowTokens * 0.65` (ex: 256k × 0.65 = 166,400 tokens).
+- **Threshold**: `contextWindowTokens * 0.70` (ex: 256k × 0.70 = 179,200 tokens).
 - Roda no **início de cada turno** em `runPreTurnMaintenance()`.
 - **ASYNC e BLOCKING** — agent pausa até completar (previne OOM de compactar + chat paralelo).
+- **LLM compaction é PRIORIDADE** — roda PRIMEIRO quando threshold é atingido (não mais em 1.2× threshold). Heurística é fallback.
 
-### 6.2 Estratégias (em ordem)
+### 6.2 Estratégias (em ordem de prioridade)
 
-1. **LLM-based compaction** (se `effortLevel ≠ "low"` E tokens > 1.2× threshold):
+1. **LLM-based compaction** (PRIORIDADE — se `effortLevel ≠ "low"`):
    - Resume os 70% mais antigos via IA.
    - **9 seções preservadas** (Gap 8):
      1. User's Original Intent (quote verbatim)
@@ -406,7 +407,7 @@ Bug fix (Gap 3): `"[PLAN]"` (com closing bracket) → `"[PLAN"` (sem bracket) pa
 - **Barra de contexto**: **10 segmentos**, escala LINEAR (não log).
   - Cada traço = 10%. `Math.floor(pct * 10)` filled, resto empty.
   - Fill: `#`, Empty: `-`.
-  - Cores: verde (<60%), amarelo (≥60%), vermelho (≥65%).
+  - Cores: verde (<65%), amarelo (≥65%), vermelho (≥70%).
 - **Porcentagem**: precisa (1% increments), `Math.round(pct * 100)`.
 - **Activity indicator** (leftmost):
   - `▶` (verde) quando idle
@@ -586,7 +587,7 @@ GOOD: "Let me check... Line 42 already handles X. But there IS an edge case with
 ### 10.2 Pre-turn maintenance
 
 Roda no início de CADA `sendAndProcess` (toda recursão):
-1. `smartCompact(compactionThreshold)` — async blocking se > 65%.
+1. `smartCompact(compactionThreshold)` — async blocking se > 70%.
 2. `maybeWriteCheckpoint()` — em 20%, 45%, 70% do MAX_CONTEXT_TOKENS.
 3. `history.optimizeContext()` — stripa `[IMPACT]` hints de tool results antigos.
 4. `pushActivity("api_call", model)` — TUI mostra "waiting for LLM".
@@ -678,7 +679,7 @@ think → pensar
 |-----------|---------|---------|-------|
 | `SMALL_TASK_ENABLED` | `SMALL_TASK_ENABLED` | `1` (on) | `0` para desativar |
 | `SMALL_TASK_MODEL` | `SMALL_TASK_MODEL` | `google/gemma-4-31b-it` | Modelo menor (256k ctx, 16k output, thinking off) |
-| `SMALL_TASK_MAX_TOOL_CALLS` | `SMALL_TASK_MAX_TOOL_CALLS` | `10` | Max tool calls por task (cap 20) |
+| `SMALL_TASK_MAX_TOOL_CALLS` | `SMALL_TASK_MAX_TOOL_CALLS` | `30` | Max tool calls por task (cap 50) — usuário monitora loops via chat |
 | `SMALL_TASK_TIMEOUT_MS` | `SMALL_TASK_TIMEOUT_MS` | `60000` (60s) | Timeout global |
 
 **Segurança**:
@@ -694,7 +695,7 @@ think → pensar
 2. CLI mostra `⚡ small task: <tarefa>` no chat
 3. Small model executa com tool set limitado
 4. Tool calls aparecem no chat com prefixo `small:` (ex: `small:executar_comando`)
-5. Small model produz resumo objetivo (máx 5 linhas)
+5. Small model produz resumo objetivo (sem limite de linhas — instruções de concisão no system prompt)
 6. CLI mostra `⚡ small result: <resumo>` no chat
 7. Resumo é armazenado em `pendingSummaries`
 8. No próximo prompt do usuário, o agent loop injeta `[SMALL TASK RESULTS] <resumo>` como system message
@@ -966,7 +967,7 @@ Adicional: `~/.claude-killer/modes/<mode>/mcps/*.json` (mode-specific).
 
 ### 17.2 Configuração
 
-5. **`contextCompactThreshold = 0.65`** — não aumentar (causa OOM).
+5. **`contextCompactThreshold = 0.70`** — LLM compaction é prioridade, roda primeiro.
 6. **`STREAM_FLUSH_INTERVAL = 80ms`** — não reduzir (rouba scroll), não aumentar (streaming choppy).
 7. **`MIN_LIVE_MESSAGES = 4`** — não reduzir (input some em conversas longas).
 8. **Barra de contexto = 10 segmentos LINEAR** — não voltar pra log scale (enganosa).
