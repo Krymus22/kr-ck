@@ -135,6 +135,22 @@ export async function handleAskUser(args: Record<string, unknown>): Promise<{ re
     return { resultStr: "[ERROR] alternativas must have at most 6 items", usedHeal: false };
   }
 
+  // BUG FIX (FIX-MISC HIGH 1): Powerful sub-agents (effort=max) bypass
+  // runAgentLoop, call chat() directly, and perguntar_usuario would route
+  // to this same handleAskUser with allowUserQuestions=true (inherited from
+  // the main agent's context). Multiple parallel sub-agents calling
+  // perguntar_usuario overwrite the single global pendingQuestion slot,
+  // causing a deadlock. Guard by checking CLAUDE_KILLER_AGENT_ID — when set,
+  // we're inside a sub-agent and must refuse WITHOUT invoking the callback.
+  if (process.env.CLAUDE_KILLER_AGENT_ID) {
+    return {
+      resultStr:
+        "[ERROR] perguntar_usuario is not available in sub-agent context. " +
+        "Use your best judgment and continue without asking.",
+      usedHeal: false,
+    };
+  }
+
   // Check permission
   if (!currentOnAskUser || !allowUserQuestions) {
     return {

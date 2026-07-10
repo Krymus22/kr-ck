@@ -618,12 +618,22 @@ function loadMCPsFromConfigFiles(): Record<string, MCPConfig> {
     if (!servers || typeof servers !== "object") return;
     for (const [name, cfg] of Object.entries(servers)) {
       if (result[name]) continue; // first wins
-      const c = cfg as { command?: string; args?: string[]; env?: Record<string, string>; cwd?: string };
+      const c = cfg as {
+        command?: string;
+        args?: string[];
+        env?: Record<string, string>;
+        cwd?: string;
+        platformOverrides?: MCPConfig["platformOverrides"];
+      };
       if (!c.command) continue; // skip invalid entries
       result[name] = {
         command: c.command,
         args: c.args ?? [],
         env: c.env ?? {},
+        // BUG FIX (FIX-MISC HIGH 2): previously platformOverrides was silently
+        // dropped when loading MCP configs from files. A user who set
+        // platformOverrides in .mcp.json had it ignored. Preserve it here.
+        platformOverrides: c.platformOverrides,
       };
       console.log(`[MCP] Loaded "${name}" from ${source}`);
     }
@@ -653,12 +663,21 @@ function loadMCPsFromConfigFiles(): Record<string, MCPConfig> {
     if (dotfileCfg.mcpServers) {
       for (const [name, cfg] of Object.entries(dotfileCfg.mcpServers)) {
         if (result[name]) continue;
-        const c = cfg as { command: string; args?: string[]; env?: Record<string, string>; cwd?: string };
+        const c = cfg as {
+          command: string;
+          args?: string[];
+          env?: Record<string, string>;
+          cwd?: string;
+          platformOverrides?: MCPConfig["platformOverrides"];
+        };
         if (!c.command) continue;
         result[name] = {
           command: c.command,
           args: c.args ?? [],
           env: c.env ?? {},
+          // BUG FIX (FIX-MISC HIGH 2): preserve platformOverrides from
+          // ~/.claude-killer/config.json (previously silently dropped).
+          platformOverrides: c.platformOverrides,
         };
         console.log(`[MCP] Loaded "${name}" from ~/.claude-killer/config.json`);
       }

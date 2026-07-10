@@ -30,6 +30,7 @@ import { loadAllExtensions, shutdownMCPServers } from "./extensions.js";
 import { seedUserConfig } from "./configSeeder.js";
 import { performUpdateCheck } from "./toolUpdater.js";
 import { registerShutdownHandlers, onShutdown } from "./gracefulShutdown.js";
+import { killAllBackgroundProcesses } from "./backgroundProcesses.js";
 
 // --- Force UTF-8 everywhere (must run before any console output) ----------
 // Without this, terminals display accented chars (á, é, í, õ, ç, ê) as
@@ -79,6 +80,26 @@ async function main(): Promise<void> {
   // onShutdown, once via cleanup) is safe because activeMCPServers.clear()
   // makes the second call a no-op.
   onShutdown(() => shutdownMCPServers());
+
+  // BUG FIX (FIX-CACHE-BG): register killAllBackgroundProcesses as an
+  // onShutdown handler so background processes spawned by
+  // executar_comando { background: true } (e.g. `rojo serve`) are killed
+  // for ALL signals — including SIGHUP (terminal close) and
+  // uncaughtException (crash). Previously killAllBackgroundProcesses was
+  // only wired into the `cleanup` function below, which is registered for
+  // SIGINT/SIGTERM only. SIGHUP and uncaughtException go through the
+  // `shutdown()` chain in gracefulShutdown.ts which runs the onShutdown
+  // handlers — so they would leak `rojo serve` and other long-running
+  // children as orphans. killAllBackgroundProcesses is idempotent (the
+  // internal `processes` Map is cleared after killing), so calling it
+  // twice (once via onShutdown, once via cleanup) is a safe no-op.
+  onShutdown(() => {
+    try {
+      killAllBackgroundProcesses();
+    } catch {
+      // best-effort — never block shutdown on a kill failure
+    }
+  });
 
   // Seed bundled defaults (Roblox CLI tools, library skills, modes) on first run.
   seedUserConfig();
@@ -206,8 +227,11 @@ async function main(): Promise<void> {
     autoStopSearx();
     setTuiMode(false);
     shutdownMCPServers();
-    // Kill any background processes spawned by executar_comando { background: true }
-    try { import("./backgroundProcesses.js").then(m => m.killAllBackgroundProcesses()); } catch { /* ignore */ }
+    // Kill any background processes spawned by executar_comando { background: true }.
+    // (Also registered via onShutdown above for SIGHUP/uncaughtException coverage,
+    // but called here directly for the SIGINT/SIGTERM path so kills happen BEFORE
+    // unmount/exit — the dynamic-import version was a race that could exit first.)
+    try { killAllBackgroundProcesses(); } catch { /* ignore */ }
     unmount();
     process.exit(0);
   };

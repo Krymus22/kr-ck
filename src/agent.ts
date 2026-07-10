@@ -36,6 +36,11 @@ import { config } from "./config.js";
 import { editFile, type EditOperation } from "./fileEdit.js";
 import { globSearch } from "./fileSearch.js";
 import { grepSearch, formatGrepResults } from "./contentSearch.js";
+// FIX-SEARCH: shared path-traversal defense. buscar_arquivos must validate
+// its `cwd` and buscar_texto must validate its `path` against the project
+// root, otherwise a prompt-injected model could enumerate /etc or read
+// ~/.ssh/id_rsa. Same boundary already used by scoutAgent/subAgents (§10.7).
+import { validateCwd, resolveAndCheckPath } from "./pathSecurity.js";
 import { multiFileEditWithLocks, type FileEditRequest } from "./multiFileEdit.js";
 import { parseFile } from "./lspAst.js";
 import { withRetry, isRetryableError } from "./retry.js";
@@ -520,16 +525,35 @@ const toolHandlers: Record<string, ToolHandler> = {
     // Antes, desfazer_edicao não encontrava backup porque editar_arquivo nunca
     // chamava saveBackup — só fazia .bak file se options.backup=true (que não
     // era passado). Agora salva no rollbackStore automaticamente.
+    const resolvedEditPath = nodePath.resolve(filePath);
     try {
       const { saveBackup } = await import("./rollbackStore.js");
-      const resolved = await import("node:path").then((p) => p.resolve(filePath));
-      if (await import("node:fs").then((fs) => fs.existsSync(resolved))) {
-        const content = await import("node:fs").then((fs) => fs.readFileSync(resolved, "utf8"));
-        saveBackup(resolved, content, "editar_arquivo");
+      if (await import("node:fs").then((fs) => fs.existsSync(resolvedEditPath))) {
+        const content = await import("node:fs").then((fs) => fs.readFileSync(resolvedEditPath, "utf8"));
+        saveBackup(resolvedEditPath, content, "editar_arquivo");
       }
     } catch {
       // rollbackStore não disponível — não bloqueia o edit
     }
+
+    // BUG FIX (FIX-CACHE-BG): invalidate the ler_arquivo cache for the file
+    // we're about to modify. The cache key is built from the exact args
+    // object (see toolCache.makeKey → "ler_arquivo:path=\"/x\"" OR
+    // "ler_arquivo:caminho=\"/x\""). The previous invalidation only matched
+    // the `caminho` key variant, and the single-edit path below didn't
+    // invalidate at all — so cached file contents survived for up to 30s
+    // after an edit, and the model would re-read stale text. We invalidate
+    // BOTH key variants, using both the resolved absolute path (common case
+    // for ler_arquivo calls) and the raw input string (covers relative paths
+    // the LLM might have used).
+    const invalidateLerArquivoForThisFile = () => {
+      readOnlyCache.invalidate("ler_arquivo", { path: resolvedEditPath });
+      readOnlyCache.invalidate("ler_arquivo", { caminho: resolvedEditPath });
+      if (filePath !== resolvedEditPath) {
+        readOnlyCache.invalidate("ler_arquivo", { path: filePath });
+        readOnlyCache.invalidate("ler_arquivo", { caminho: filePath });
+      }
+    };
 
     // Sprint C bug fix (BUG-T): algumas IAs (especialmente Llama) passam
     // 'edits' como string JSON em vez de array nativo. Auto-parse se string.
@@ -547,7 +571,7 @@ const toolHandlers: Record<string, ToolHandler> = {
         edits,
         { createIfMissing: args.createIfMissing === true || args.createIfMissing === "true" }
       );
-      readOnlyCache.invalidate("ler_arquivo", { caminho: args.path ?? args.caminho });
+      invalidateLerArquivoForThisFile();
       return { resultStr: result, usedHeal: false };
     }
     const edit: EditOperation = {
@@ -560,6 +584,7 @@ const toolHandlers: Record<string, ToolHandler> = {
       [edit],
       { createIfMissing: args.createIfMissing === true || args.createIfMissing === "true" }
     );
+    invalidateLerArquivoForThisFile();
     return { resultStr: result, usedHeal: false };
   },
 
@@ -606,9 +631,21 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   "buscar_arquivos": async (args) => {
+    // FIX-SEARCH: validate caller-supplied cwd. Without this, a
+    // prompt-injected model could call buscar_arquivos({cwd:"/etc"}) and
+    // enumerate /etc (or any other absolute path). validateCwd ensures
+    // cwd stays within process.cwd() (the project root). §10.7.
+    const cwdValidation = validateCwd(
+      args.cwd as string | undefined,
+      process.cwd(),
+    );
+    if (!cwdValidation.ok) {
+      log.warn(`[buscar_arquivos] ${cwdValidation.error} — blocking`);
+      return { resultStr: `[ERROR] ${cwdValidation.error}`, usedHeal: false };
+    }
     const results = globSearch({
       pattern: asString(args.pattern ?? args.glob, "**/*"),
-      cwd: args.cwd as string | undefined,
+      cwd: cwdValidation.cwd,
       maxDepth: args.maxDepth as number | undefined,
       ignore: args.ignore as string[] | undefined,
     });
@@ -617,9 +654,27 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 
   "buscar_texto": async (args) => {
+    // FIX-SEARCH: resolve and validate args.path against the project root.
+    // Without this, a prompt-injected model could call buscar_texto with
+    // path="/etc/passwd" or path="../../etc" to read sensitive files.
+    // resolveAndCheckPath also follows symlinks via realpathSync and
+    // blocks escapes where a symlink inside the project points outside
+    // (e.g. ./evil -> /etc). §10.7. Mirrors the boundary already used by
+    // executeSubAgentTool's buscar_texto case in subAgents.ts.
+    const rawPath = args.path as string | undefined;
+    let searchPath: string | undefined;
+    if (rawPath !== undefined) {
+      try {
+        searchPath = resolveAndCheckPath(rawPath, process.cwd());
+      } catch (err) {
+        const msg = (err as Error).message;
+        log.warn(`[buscar_texto] ${msg} — blocking`);
+        return { resultStr: `[ERROR] ${msg}`, usedHeal: false };
+      }
+    }
     const matches = grepSearch({
       pattern: asString(args.pattern),
-      path: args.path as string | undefined,
+      path: searchPath,
       include: args.include as string | undefined,
       ignore: args.ignore as string[] | undefined,
       maxResults: args.maxResults as number | undefined,
@@ -642,6 +697,21 @@ const toolHandlers: Record<string, ToolHandler> = {
     // already locks via fileLock.ts; this extends the same protection to
     // multi-file edits. See multiFileEditWithLocks docstring for rationale.
     const result = await multiFileEditWithLocks(requests);
+    // BUG FIX (FIX-CACHE-BG): invalidate ler_arquivo cache for every file
+    // that was successfully edited. Without this, the model would re-read
+    // stale (pre-edit) file contents from the 30s TTL cache after a
+    // multi-file edit batch — see toolCache.makeKey for key format. We
+    // invalidate both `path` and `caminho` key variants, for both the
+    // resolved absolute path and the raw input string.
+    for (const editedFile of result.filesEdited) {
+      const resolvedMulti = nodePath.resolve(editedFile);
+      readOnlyCache.invalidate("ler_arquivo", { path: resolvedMulti });
+      readOnlyCache.invalidate("ler_arquivo", { caminho: resolvedMulti });
+      if (editedFile !== resolvedMulti) {
+        readOnlyCache.invalidate("ler_arquivo", { path: editedFile });
+        readOnlyCache.invalidate("ler_arquivo", { caminho: editedFile });
+      }
+    }
     const errorList = result.errors.map((e) => `${e.file}: ${e.error}`).join("; ");
     const output = result.success
       ? t("tool.edited_files", result.filesEdited.join(", "))
@@ -795,7 +865,22 @@ const toolHandlers: Record<string, ToolHandler> = {
 
   // --- Rollback Tools (3.3) ------------------------------------------------
   "desfazer_edicao": async (args) => {
-    const result = desfazerEdicao({ caminho: asString(args.caminho ?? args.path) });
+    const caminho = asString(args.caminho ?? args.path);
+    const result = desfazerEdicao({ caminho });
+    // BUG FIX (FIX-CACHE-BG): desfazer_edicao restores a previous backup,
+    // so any cached ler_arquivo entry for this file now reflects stale
+    // (post-edit) content. Invalidate both `path` and `caminho` key variants
+    // (see toolCache.makeKey) for both the resolved absolute path and the
+    // raw input string — same strategy as editar_arquivo above.
+    if (caminho) {
+      const resolvedUndo = nodePath.resolve(caminho);
+      readOnlyCache.invalidate("ler_arquivo", { path: resolvedUndo });
+      readOnlyCache.invalidate("ler_arquivo", { caminho: resolvedUndo });
+      if (caminho !== resolvedUndo) {
+        readOnlyCache.invalidate("ler_arquivo", { path: caminho });
+        readOnlyCache.invalidate("ler_arquivo", { caminho: caminho });
+      }
+    }
     return { resultStr: result, usedHeal: false };
   },
 

@@ -71,6 +71,17 @@ export function markStep(index: number, done: boolean): boolean {
     log.info(`[PLAN] All steps completed!`);
   }
 
+  // BUG FIX (FIX-MISC HIGH 3): completedAt is set when all steps are done
+  // but was NEVER reset when a step was unmarked via markStep(i, false).
+  // The short-circuit `if (currentPlan.completedAt !== null) return false;`
+  // in hasIncompletePlan suppressed incomplete detection, allowing
+  // finish_reason to fire on a plan with un-done steps. Reset it here so
+  // un-marking a step correctly re-opens the plan.
+  if (!allDone && currentPlan.completedAt !== null) {
+    currentPlan.completedAt = null;
+    log.info(`[PLAN] Step ${index + 1} un-marked; plan re-opened.`);
+  }
+
   return true;
 }
 
