@@ -333,29 +333,19 @@ describe("Bug Hunter #8b — planExecutor.markStep NaN index (REPORTED, not fixe
     clearPlan();
   });
 
-  it("CURRENT BEHAVIOR: markStep(NaN) throws TypeError (bounds check uses < and >=, both false for NaN)", async () => {
+  it("FIXED: markStep(NaN) returns false (Number.isInteger guard, BH15 HIGH 1)", async () => {
     const { createPlan, markStep } = await import("./../planExecutor.js");
     createPlan(["step 1", "step 2"]);
-
-    // BEFORE any future fix: markStep(NaN, true) throws because
-    //   - NaN < 0 is false
-    //   - NaN >= length is false
-    //   - so the bounds check passes
-    //   - currentPlan.steps[NaN] is undefined
-    //   - undefined.done = true throws TypeError
-    //
-    // EXPECTED FUTURE BEHAVIOR: markStep(NaN, true) returns false
-    // (invalid index). When that fix lands, change `toThrow()` to
-    // `toBe(false)`.
-    expect(() => markStep(NaN, true)).toThrow(TypeError);
+    // FIXED (BH15 HIGH 1): markStep now checks Number.isInteger(index)
+    // before accessing steps[index]. NaN returns false instead of throwing.
+    expect(markStep(NaN, true)).toBe(false);
   });
 
-  it("CURRENT BEHAVIOR: markStep(1.5) also throws (non-integer index accesses undefined slot)", async () => {
+  it("FIXED: markStep(1.5) returns false (Number.isInteger guard, BH15 HIGH 1)", async () => {
     const { createPlan, markStep } = await import("./../planExecutor.js");
     createPlan(["a", "b"]);
-    // 1.5 < 0 is false, 1.5 >= 2 is false → bounds check passes →
-    // steps[1.5] is undefined → throws.
-    expect(() => markStep(1.5, true)).toThrow(TypeError);
+    // FIXED: non-integer index returns false instead of throwing.
+    expect(markStep(1.5, true)).toBe(false);
   });
 
   it("valid integer indices still work (regression: don't break the happy path)", async () => {

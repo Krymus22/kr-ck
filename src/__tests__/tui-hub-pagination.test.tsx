@@ -417,7 +417,7 @@ describe("ExtensionHub — via App Ctrl+E with 30 extensions", () => {
     out = stripAnsi(lastFrame() ?? "");
     expect(out).not.toContain("EXTENSION HUB");
     // Should be back to normal chat input
-    expect(out).toContain("Claude-Killer");
+    expect(out).toContain("Digite"); // input placeholder visible when Hub closed
   });
 
   it("input field shows '[ Hub aberto ]' message when Hub is open", async () => {
@@ -426,7 +426,7 @@ describe("ExtensionHub — via App Ctrl+E with 30 extensions", () => {
     await delay(200);
     const out = stripAnsi(lastFrame() ?? "");
     // When Hub is open, the input field is replaced with a message
-    expect(out).toContain("Hub");
+    expect(out).toContain("EXTENSION HUB"); // Hub content visible
   });
 });
 
