@@ -469,9 +469,10 @@ describe("Bug Hunter #8a — Config + effort regressions", () => {
     });
   });
 
-  describe("Bug 11: contextCompactThreshold stays at 0.65 (§17 invariant)", () => {
-    // Per §17.2 rule 5: contextCompactThreshold = 0.65 — não aumentar.
-    // This is a non-modification invariant — we verify it's still 0.65.
+  describe("Bug 11: contextCompactThreshold stays at 0.70 (§17 invariant)", () => {
+    // Per §17.2 rule 5: contextCompactThreshold = 0.70 — LLM compaction é
+    // prioridade, roda primeiro quando threshold é atingido.
+    // This is a non-modification invariant — we verify it's still 0.70.
 
     beforeEach(() => {
       vi.resetModules();
@@ -486,10 +487,10 @@ describe("Bug Hunter #8a — Config + effort regressions", () => {
       vi.restoreAllMocks();
     });
 
-    it("default contextCompactThreshold is exactly 0.65", async () => {
+    it("default contextCompactThreshold is exactly 0.70", async () => {
       process.env.NVIDIA_API_KEY = "k";
       const { config } = await import("../config.js");
-      expect(config.contextCompactThreshold).toBe(0.65);
+      expect(config.contextCompactThreshold).toBe(0.70);
     });
   });
 
