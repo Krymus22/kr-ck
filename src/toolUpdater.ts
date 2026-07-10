@@ -103,13 +103,28 @@ function loadState(): UpdaterState {
 
 function saveState(state: UpdaterState): void {
   try {
-    const dir = path.dirname(getStatePath());
+    const filePath = getStatePath();
+    const dir = path.dirname(filePath);
     // SECURITY: mode 0o700 — restrictive perms on parent dir (CWE-377).
     // The path may fall back to os.tmpdir() when HOME is unset (see
     // getStatePath), so we apply restrictive permissions.
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     // SECURITY: mode 0o600 — restrictive perms on state file (CWE-377).
-    fs.writeFileSync(getStatePath(), JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+    // NOTE (BH28 MEDIUM 13): Node's `writeFileSync({mode})` only applies
+    // the mode on file CREATION — existing files keep their old mode. If
+    // the state file was previously created with a more permissive mode
+    // (e.g. 0o644 from an older version, or a custom umask leaked
+    // through), the restrictive 0o600 silently does nothing on every
+    // subsequent save. Explicitly chmod after the write so the mode is
+    // always enforced regardless of whether the file pre-existed.
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+    try {
+      fs.chmodSync(filePath, 0o600);
+    } catch {
+      // chmod can fail on platforms that don't support POSIX modes
+      // (Windows). The mode option on writeFileSync is a best-effort
+      // signal there; ignore the failure.
+    }
   } catch (err) {
     log.warn(`toolUpdater: failed to save state: ${(err as Error).message}`);
   }
@@ -268,19 +283,38 @@ export async function runRokitUpdate(): Promise<boolean> {
 /**
  * Run update for a single tool using rokit.
  * Returns true if successful.
+ *
+ * NOTE (BH28 MEDIUM 14): previously, ANY non-rokit tool triggered
+ * `rokit install`, which syncs ALL tools declared in rokit.toml to
+ * their pinned versions. So calling `updateSingleTool("darklua")` (a
+ * tool not managed by rokit) silently updated every other tool too —
+ * a surprising side effect. Now we only run `rokit install` if the
+ * tool is actually rokit-managed (i.e. present in TOOL_REPOS); for
+ * unknown tools we log a warning and return false so callers know
+ * nothing was updated.
  */
 export async function updateSingleTool(tool: string): Promise<boolean> {
-  // Most Roblox tools are managed by rokit. Run `rokit install` which
-  // updates all tools declared in rokit.toml to their pinned versions.
-  // For unpinned tools, you'd need `rokit add <repo>@<version>`.
+  // Rokit updates itself
   if (tool === "rokit") {
-    // Rokit updates itself
     log.info("toolUpdater: rokit self-update");
     const result = await runCommand("rokit", ["self-update"], 30_000);
     return result.ok;
   }
 
-  // For other tools, just run `rokit install` which syncs everything
+  // Only run `rokit install` for tools that are actually rokit-managed.
+  // Tools not in TOOL_REPOS are not rokit tools and would be silently
+  // ignored by `rokit install` — but the side effect of syncing ALL
+  // declared tools would still happen, which is undesirable when the
+  // caller asked to update a single specific (non-rokit) tool.
+  if (!Object.prototype.hasOwnProperty.call(TOOL_REPOS, tool)) {
+    log.warn(
+      `toolUpdater: updateSingleTool('${tool}') — not a rokit-managed tool; skipping (would otherwise update ALL rokit tools)`
+    );
+    return false;
+  }
+
+  // For known rokit-managed tools, run `rokit install` which syncs
+  // everything declared in rokit.toml to their pinned versions.
   return runRokitUpdate();
 }
 

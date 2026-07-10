@@ -110,14 +110,16 @@ export interface HeartbeatStats {
  * Start the background heartbeat. Sends a tiny request every
  * HEARTBEAT_INTERVAL_MS (default 5 min) to keep the model warm.
  *
- * Uses the provided OpenAI client (typically the first key in the pool).
+ * Uses the provided OpenAI client. Per §4 / §17.4 rule 18, this should be
+ * the LAST key of the pool (the reserve key) so that the low-priority
+ * heartbeat does not contend with real user requests on the primary keys.
  * The heartbeat is fire-and-forget — it doesn't block or interfere with
  * real user requests.
  *
  * Idempotent: calling startHeartbeat() multiple times is safe (only starts
  * one timer).
  *
- * @param client  The OpenAI client to use for heartbeats (first pool key).
+ * @param client  The OpenAI client to use for heartbeats (last key of pool — reserve).
  */
 export function startHeartbeat(client: OpenAI): void {
   if (!HEARTBEAT_ENABLED) {
@@ -147,6 +149,16 @@ export function startHeartbeat(client: OpenAI): void {
 
 /**
  * Stop the background heartbeat. Safe to call even if not running.
+ *
+ * BH3 MEDIUM 2 FIX: reset lastModelState to "unknown" so that when the
+ * heartbeat is later restarted (e.g., after an auto-stop due to 5
+ * consecutive failures), the next successful heartbeat emits a
+ * first_success event again instead of a state_change event. Previously,
+ * lastModelState retained its last value (e.g. "warm") across the
+ * stop/restart boundary, so on restart the condition
+ * `lastModelState === "unknown"` was false and first_success never fired
+ * — the TUI would show a stale state indicator until the next warm→cold
+ * or cold→warm transition.
  */
 export function stopHeartbeat(): void {
   if (heartbeatTimer) {
@@ -154,6 +166,8 @@ export function stopHeartbeat(): void {
     heartbeatTimer = null;
     log.info("[HEARTBEAT] Stopped");
   }
+  // BH3 MEDIUM 2: reset so first_success re-fires on restart.
+  lastModelState = "unknown";
 }
 
 /**

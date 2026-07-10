@@ -6,7 +6,7 @@
  * Aberto via tecla 'C' no Hub ou comando /configurar.
  */
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors } from "./theme.js";
 import { configureTool, detectToolsWithoutManifest, type ConfiguratorResult } from "../toolConfigurator.js";
@@ -36,6 +36,24 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
   // because the closure still sees the stale `running = false` from the
   // previous render — firing `configureTool` twice (FIX-TUI Bug 2).
   const runningRef = useRef(false);
+
+  // BUG FIX (BH25 MEDIUM 2): configureTool returns a Promise whose .then /
+  // .catch callbacks call setMessages / setRunning / setFinished. If the
+  // user closes the chat (Esc) while a configure is in flight, the
+  // component unmounts, but the Promise callbacks still fire later and
+  // call setState on an unmounted component — which React warns about
+  // ("Can't perform a React state update on an unmounted component") and,
+  // worse, can cause subtle bugs in concurrent mode.
+  //
+  // mountedRef is set to true on mount and false on unmount; the promise
+  // callbacks guard their setState calls with `if (mountedRef.current)`.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const mode = getActiveMode();
   const modeName = mode?.name ?? null;
@@ -67,11 +85,27 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
       // second Enter pressed before the next paint is also rejected.
       runningRef.current = true;
       setRunning(true);
+      // BUG FIX (BH25 MEDIUM 1): reset `finished` when starting a NEW
+      // configuration. Without this, after the first configure completes
+      // (finished=true → input field hidden, "Done" shown), the user
+      // could still type a new tool name and press Enter — but the input
+      // was hidden by the `finished` branch of the ternary, so the user
+      // had to close + reopen the chat to configure another tool.
+      // Resetting here re-shows the input field and clears the "Done"
+      // status while the new configure is running.
+      setFinished(false);
 
       configureTool(userMsg, modeName, undefined, (msg) => {
+        // BH25 MEDIUM 2: guard setState — the configurator emits these
+        // messages synchronously during its work; if the user has closed
+        // the chat in the meantime, the component is unmounted and we
+        // must skip the update.
+        if (!mountedRef.current) return;
         setMessages((prev) => [...prev, { role: msg.includes("[Tool:") ? "system" : "configurator", content: msg }]);
       })
         .then((result: ConfiguratorResult) => {
+          // BH25 MEDIUM 2: promise may resolve after unmount — guard.
+          if (!mountedRef.current) return;
           setMessages((prev) => [
             ...prev,
             { role: "system", content: result.message },
@@ -82,6 +116,8 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
           onMessage?.(result.message);
         })
         .catch((err) => {
+          // BH25 MEDIUM 2: promise may reject after unmount — guard.
+          if (!mountedRef.current) return;
           setMessages((prev) => [
             ...prev,
             { role: "system", content: `Error: ${(err as Error).message}` },
@@ -109,10 +145,16 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
       setMessages([{ role: "system", content: `Configurando "${toolName}"...` }]);
       runningRef.current = true;
       setRunning(true);
+      // BH25 MEDIUM 1: reset finished in case the component is re-used.
+      setFinished(false);
       configureTool(toolName, modeName, undefined, (msg) => {
+        // BH25 MEDIUM 2: guard setState against post-unmount calls.
+        if (!mountedRef.current) return;
         setMessages((prev) => [...prev, { role: msg.includes("[Tool:") ? "system" : "configurator", content: msg }]);
       })
         .then((result) => {
+          // BH25 MEDIUM 2: promise may resolve after unmount — guard.
+          if (!mountedRef.current) return;
           setMessages((prev) => [...prev, { role: "system", content: result.message }]);
           runningRef.current = false;
           setRunning(false);
@@ -120,6 +162,8 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
           onMessage?.(result.message);
         })
         .catch((err) => {
+          // BH25 MEDIUM 2: promise may reject after unmount — guard.
+          if (!mountedRef.current) return;
           setMessages((prev) => [...prev, { role: "system", content: `Error: ${(err as Error).message}` }]);
           runningRef.current = false;
           setRunning(false);

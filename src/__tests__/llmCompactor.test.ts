@@ -101,8 +101,11 @@ describe("llmCompactor", () => {
       const result = await llmCompact(msgs);
 
       expect(result).not.toBeNull();
-      expect(result).toContain("CONVERSATION MEMORY");
-      expect(result).toContain("LLM-generated summary");
+      // BH7 MEDIUM 5 FIX: prefix is now `[AI CONTEXT COMPACTED - N old
+      // messages summarized...]` per §6.2.1 (was `[CONVERSATION MEMORY -
+      // LLM-generated summary...]`).
+      expect(result).toContain("AI CONTEXT COMPACTED");
+      expect(result).toContain("old messages summarized");
       expect(result).toContain("Resumo da conversa");
       expect(chatMock).toHaveBeenCalledTimes(1);
     });

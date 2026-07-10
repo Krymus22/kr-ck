@@ -219,9 +219,22 @@ let activeManifests: ToolManifest[] = [];
 import { getProviderMaxSubAgents } from "./apiProvider.js";
 import { t } from "./i18n.js";
 import { normalizeArgs } from "./argsNormalizer.js";
-const MAX_CONCURRENT_SUB_AGENTS = parseInt(
-  process.env.MAX_CONCURRENT_SUB_AGENTS ?? String(getProviderMaxSubAgents()),
-  10
+// BH4 MEDIUM 10 fix: guard against NaN from non-numeric env vars.
+// If MAX_CONCURRENT_SUB_AGENTS is set to "" / "abc" / etc., parseInt returns
+// NaN. With NaN, `activeSubAgents < MAX_CONCURRENT_SUB_AGENTS` is ALWAYS false
+// (NaN comparisons return false), so acquireSubAgentSlot() falls through to
+// the wait queue — but no slot was ever acquired, so nothing ever releases
+// one. ALL sub-agent calls hang forever (deadlock).
+//
+// Fix: `parsed || getProviderMaxSubAgents()` coerces NaN (and 0, also unsafe)
+// back to the provider default. `Math.max(1, …)` then clamps the lower bound
+// so even a malicious "-1" can't disable sub-agents entirely.
+const MAX_CONCURRENT_SUB_AGENTS = Math.max(
+  1,
+  parseInt(
+    process.env.MAX_CONCURRENT_SUB_AGENTS ?? String(getProviderMaxSubAgents()),
+    10
+  ) || getProviderMaxSubAgents()
 );
 let activeSubAgents = 0;
 const subAgentWaitQueue: Array<() => void> = [];
@@ -1764,6 +1777,28 @@ async function sendAndProcess(
   // IDEIA 27+#28: Checkpoint writer - proactive state extraction.
   // Runs BEFORE optimizeContext per §10.2 (checkpoint step precedes
   // optimizeContext in the mandated pre-turn maintenance order).
+  //
+  // BH4 MEDIUM 5 NOTE: This block (checkpointWriter.ts) and maybeWriteCheckpoint()
+  // below (memory.ts) are TWO INTENTIONALLY DIFFERENT checkpoint systems — they
+  // are NOT duplicates. Both fire at 20%/45%/70% but produce different artifacts:
+  //
+  //   - checkpointWriter.ts (this block): RICH LLM-based extraction. Calls the
+  //     model with a focused prompt to extract 11 structured fields (intention,
+  //     nextAction, constraints, taskTree, currentWork, filesInvolved,
+  //     crossTaskDiscoveries, errorsAndCorrections, runtimeState, designDecisions,
+  //     miscNotes). Writes a structured state file AND injects formatCheckpoint()
+  //     as a system message into live history so the IA sees what it was doing.
+  //
+  //   - memory.ts maybeWriteCheckpoint (called inside runPreTurnMaintenance):
+  //     SIMPLE snapshot. No LLM call — just records messages[], fileChanges[],
+  //     activeTools[] into a SessionCheckpoint file. Used by session reload to
+  //     restore state without re-reading the whole transcript.
+  //
+  // Removing either would regress: removing checkpointWriter loses the
+  // proactive LLM summary (MiMo Code evidence: extracting at 20% beats 95%);
+  // removing maybeWriteCheckpoint loses the cheap snapshot used at reload time.
+  // The thresholds are kept in sync (see line ~2009 comment) so the user
+  // doesn't see two "Salvando checkpoint…" messages at conflicting percentages.
   try {
     const { shouldCheckpoint, writeCheckpoint, formatCheckpoint } = await import("./checkpointWriter.js");
     // BUG FIX: shouldCheckpoint expects TOKENS (it divides by MAX_CONTEXT_TOKENS
@@ -1821,11 +1856,16 @@ async function sendAndProcess(
         onRetry: (attempt, err, delay) => log.warn(`Retry ${attempt} after ${delay}ms: ${(err as Error).message}`),
       }
     );
-    apiActivityDone();
+    // BH4 MEDIUM 6 fix: do NOT call apiActivityDone() before the return — if
+    // handleChatResponse throws, the catch block would call it a SECOND time
+    // (double-pop). popActivity() is currently a no-op when the entry is
+    // already gone (idx === -1 early return), but relying on that is fragile:
+    // any future change to popActivity (e.g., popping the latest entry
+    // unconditionally) would corrupt the activity stack. Use `finally` so
+    // apiActivityDone is invoked exactly once on both success and error paths.
     return await handleChatResponse(response, depth, onStreamStart, onToken, onThinking, onUsage);
-  } catch (err) {
+  } finally {
     apiActivityDone();
-    throw err;
   }
 }
 

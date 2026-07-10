@@ -1086,13 +1086,32 @@ export async function compactHistoryAsync(customInstruction?: string): Promise<C
   // Without this, IA may ask "what would you like me to do next?" after
   // compaction, losing the thread of work it was doing.
   // (Inspired by Claude Code's continuation message.)
-  const continuationMsg: Message = {
+  //
+  // BH6 MEDIUM 1 fix: previously this block UNCONDITIONALLY injected a NEW
+  // [SESSION CONTINUATION] message, but preservedSystem (built above) ALREADY
+  // contains the existing [SESSION CONTINUATION] message if one was carried
+  // over from a previous compaction (per PRESERVE_PREFIXES + §6.5
+  // REPLACEABLE_PREFIXES). After N compactions there were N stacked
+  // [SESSION CONTINUATION] messages — pure bloat, and §6.5 mandates REPLACE
+  // (not APPEND) for REPLACEABLE_PREFIXES.
+  //
+  // Fix: mirror contextCompaction.ts:injectPostCompactionMessages (lines
+  // 335-343) — only inject if NO [SESSION CONTINUATION message already exists
+  // in preservedSystem. Since the continuation message is a static string,
+  // "skip if present" is equivalent to "replace" (the carried-over instance
+  // is identical to what we would inject).
+  const hasContinuation = preservedSystem.some(
+    (m) => typeof m.content === "string" && m.content.startsWith("[SESSION CONTINUATION")
+  );
+  const continuationMsg: Message | null = hasContinuation ? null : {
     role: "system",
     content: "[SESSION CONTINUATION] This session was continued from a previous conversation that ran out of context. The summary above covers the earlier portion. Continue working on the last task you were doing — do NOT ask the user what to do next. Pick up where you left off and keep working until the task is complete or you need user input.",
   };
 
-  // Reconstruct: [system_prompt, preserved_critical_context, compaction_summary, continuation, ...recent]
-  history = [system, ...preservedSystem, summary, continuationMsg, ...recent];
+  // Reconstruct: [system_prompt, preserved_critical_context, compaction_summary, continuation?, ...recent]
+  history = continuationMsg
+    ? [system, ...preservedSystem, summary, continuationMsg, ...recent]
+    : [system, ...preservedSystem, summary, ...recent];
 
   // ── Gap 1: Re-hydrate recently edited files ─────────────────────────────
   // After compaction, the IA loses access to file contents it had read.

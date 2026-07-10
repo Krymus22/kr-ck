@@ -132,11 +132,34 @@ export function extractToolName(prefixedName: string): string {
  * Check if a prefixed tool name belongs to the Roblox Studio MCP server.
  * "Roblox_Studio__multi_edit" → true
  * "other_server__tool" → false
+ *
+ * BH11 MEDIUM 1 FIX: previously this only matched 3 hardcoded prefixes
+ * (`Roblox_Studio__`, `roblox_studio__`, `RobloxStudio__`). Real-world MCP
+ * server names can also use spaces or hyphens (e.g., `Roblox Studio__`,
+ * `roblox-studio__`, `Roblox_Studio MCP__`), which bypassed the guard
+ * entirely — write tools slipped past the safety pipeline. Now we
+ * normalize by stripping non-alphanumerics from the server portion and
+ * comparing case-insensitively to "robloxstudio".
  */
 export function isRobloxStudioMcpTool(prefixedName: string): boolean {
-  return prefixedName.startsWith("Roblox_Studio__") ||
-         prefixedName.startsWith("roblox_studio__") ||
-         prefixedName.startsWith("RobloxStudio__");
+  // Fast path: keep the original exact-match checks for the 3 most common
+  // forms (cheap and avoids regex on the hot path).
+  if (
+    prefixedName.startsWith("Roblox_Studio__") ||
+    prefixedName.startsWith("roblox_studio__") ||
+    prefixedName.startsWith("RobloxStudio__")
+  ) {
+    return true;
+  }
+
+  // Slow path: handle spaces, hyphens, mixed casing, etc.
+  // Extract the server portion (everything before the first "__").
+  const idx = prefixedName.indexOf("__");
+  if (idx === -1) return false;
+  const serverName = prefixedName.slice(0, idx);
+  // Strip everything that isn't a letter or digit, lowercase, and compare.
+  const normalized = serverName.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+  return normalized === "robloxstudio";
 }
 
 // ─── Guard Logic ────────────────────────────────────────────────────────────

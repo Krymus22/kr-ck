@@ -555,7 +555,16 @@ export async function analyzeImpact(
   // Check cache (mtime-based) — ASYNC to avoid blocking event loop
   try {
     const stat = await fs.promises.stat(targetFile);
-    const cacheKey = targetFile;
+    // BH28 MEDIUM 18: cache key was just `targetFile`, which is usually a
+    // RELATIVE path resolved against process.cwd(). When the agent
+    // switches projects (different cwd), the same relative path
+    // (e.g. "src/index.ts") maps to DIFFERENT files in different
+    // projects — but they all shared one cache slot. The first project's
+    // analysis bled into the second project (wrong usages, wrong symbols),
+    // and the mtime check only protected against in-place edits, not
+    // project switches. Include process.cwd() in the key so each
+    // project gets its own slot.
+    const cacheKey = `${process.cwd()}::${targetFile}`;
     // Opportunistic cleanup: drop TTL-expired entries and enforce cap so
     // the cache doesn't accumulate dead entries between calls.
     maintainCache();
@@ -613,7 +622,10 @@ export async function analyzeImpact(
   // Save to cache
   try {
     const stat = fs.statSync(targetFile);
-    cache.set(targetFile, {
+    // BH28 MEDIUM 18: use the same cwd-qualified key here as on read so
+    // the entry is actually found on the next call from the same project.
+    const cacheKey = `${process.cwd()}::${targetFile}`;
+    cache.set(cacheKey, {
       report,
       fileMtime: stat.mtimeMs,
       cachedAt: Date.now(),

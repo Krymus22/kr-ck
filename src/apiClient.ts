@@ -949,7 +949,15 @@ function processStreamChunk(
   }
 
   const reasoning = delta.reasoning_content ?? ("reasoning" in delta ? delta.reasoning : undefined);
-  if (reasoning) {
+  // BH1 MEDIUM 7 FIX: use `!= null` instead of truthy check so that empty
+  // string reasoning chunks ("reasoning_content": "") still call
+  // processReasoningChunk → onThinking → resetHangTimer. Reasoning models
+  // (GLM-4.5, Kimi K2, DeepSeek R1, Qwen3) frequently emit empty reasoning
+  // chunks as transition/keepalive markers between thinking and content; if
+  // these don't reset the hang timer, a slow-stream hang (model thinking
+  // silently, sending only empty reasoning deltas) would falsely trigger
+  // HANG_TIMEOUT_MS and abort legitimate reasoning.
+  if (reasoning != null) {
     processReasoningChunk(state, onThinking);
     // BUG FIX (BUG 1 from /home/z/my-project session): NÃO fazer `return` aqui.
     // Modelos de reasoning (GLM-4.5, Kimi K2, DeepSeek R1, Qwen3) frequentemente
@@ -1241,7 +1249,7 @@ async function retryWithDelay(retryAfterS: number, attempt: number): Promise<{ r
 }
 
 // BUG FIX (BUG 1): handler de retry for 502/503 (transientes). Usa o mesmo
-// limite e backoff de erros de rede (MAX_NETWORK_RETRIES = 8, 500ms..3000ms),
+// limite e backoff de erros de rede (MAX_NETWORK_RETRIES = 15, 500ms..3000ms),
 // porque 5xx transiente tem perfil de recuperação similar a um erro de rede.
 async function handle5xxRetryableError(
   err: unknown,

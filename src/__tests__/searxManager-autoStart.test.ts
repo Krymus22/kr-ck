@@ -68,8 +68,14 @@ describe("searxManager — autoStartSearx", () => {
     });
 
     it("inicia Docker container quando existe mas está parado", async () => {
-      // fetch falha (Searx não rodando)
-      (global.fetch as any).mockRejectedValue(new Error("ECONNREFUSED"));
+      // BH28 MEDIUM 17: autoStartSearx now polls the health endpoint
+      // after starting the container. First fetch (isSearxRunning at
+      // the top) returns failure → not running yet. Subsequent fetches
+      // (health-check loop) return success → Searx is now healthy.
+      (global.fetch as any).mockReset();
+      (global.fetch as any)
+        .mockResolvedValueOnce({ ok: false, json: async () => ({}) }) // isSearxRunning: not yet
+        .mockResolvedValue({ ok: true, json: async () => ({ results: [{ title: "ok" }] }) }); // health-check: ready
 
       // docker --version funciona (Docker disponível)
       spawnSyncMock.mockImplementation((cmd: string, args: any[]) => {

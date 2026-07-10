@@ -2,9 +2,16 @@
  * failureMemory.ts - Learn from recent edit failures.
  *
  * When aplicar_diff or editar_arquivo fails, the error is saved to a
- * short-term memory (last 5 errors, max 2 lines each). Before the next
- * edit attempt, these errors are injected into the AI's context so it
- * doesn't repeat the same mistake.
+ * short-term memory (last 5 errors, each truncated to 200 chars). Before
+ * the next edit attempt, these errors are injected into the AI's context
+ * so it doesn't repeat the same mistake.
+ *
+ * BH15 MEDIUM 3 FIX: this docstring previously claimed "max 2 lines each",
+ * but recordFailure() only truncates by character count (200 chars via
+ * MAX_ERROR_LENGTH) — there is no line-aware logic. The formatted output
+ * (getRecentFailures) does take only the first line of the stored error
+ * and slice it to 80 chars per entry, but the STORAGE layer is char-only.
+ * Updated the docstring to match the actual behavior.
  *
  * Storage: in-memory (resets on restart). Persistent storage would add
  * complexity for little gain - the AI only needs to remember errors from
@@ -26,7 +33,13 @@ export interface FailureEntry {
   tool: string;
   /** File path that was being edited (if applicable) */
   filePath?: string;
-  /** Error message (truncated to 2 lines / 200 chars) */
+  /**
+   * Error message, truncated to MAX_ERROR_LENGTH (200) chars. NOTE: no
+   * line-aware truncation — the original docstring's "2 lines / 200 chars"
+   * was inaccurate (BH15 MEDIUM 3). The FORMATTED output
+   * (getRecentFailures) further slices to the first line and 80 chars
+   * per entry, but the stored value is char-truncated only.
+   */
   error: string;
   /** Timestamp of the failure */
   timestamp: number;
@@ -66,9 +79,14 @@ export function recordFailure(tool: string, error: string, filePath?: string): v
  * Returns empty string if no failures recorded.
  *
  * Format (compact, max ~10 lines):
- *   [FAILURES] Avoid these mistakes:
- *   - aplicar_diff: SEARCH not found in file.ts (2 min ago)
- *   - editar_arquivo: File not found: /path/to/file.luau (5 min ago)
+ *   [FAILURES] Avoid these recent mistakes:
+ *   - aplicar_diff: SEARCH not found in file.ts (2min ago)
+ *   - editar_arquivo: File not found: /path/to/file.luau (5min ago)
+ *
+ * BH15 MEDIUM 4 FIX: the docstring previously showed "2 min ago" with a
+ * space, but the code produces "2min ago" (no space) via the template
+ * literal ``${ageMin}min ago``. Updated the example to match the actual
+ * output so callers/documentation are not misled.
  */
 export function getRecentFailures(): string {
   if (failures.length === 0) return "";

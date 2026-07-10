@@ -67,7 +67,16 @@ export async function llmCompact(
       return null;
     }
 
-    return `[CONVERSATION MEMORY - LLM-generated summary of ${messages.length} messages]\n\n${summary.trim()}`;
+    // BH7 MEDIUM 5 FIX: §6.2.1 mandates the prefix
+    // `[AI CONTEXT COMPACTED - N old messages summarized...]` for LLM-generated
+    // compaction summaries (mirrors contextCompaction.ts:modelBasedCompactionAsync
+    // line 483). Previously this used `[CONVERSATION MEMORY - LLM-generated
+    // summary...]` which (a) violated the spec and (b) collided with the
+    // PRESERVE_PREFIXES entry for `[CONVERSATION MEMORY` (history.ts), causing
+    // these summaries to be incorrectly preserved across subsequent compactions
+    // and pile up. The `[AI CONTEXT COMPACTED` prefix is intentionally NOT in
+    // PRESERVE_PREFIXES, so each new compaction cleanly replaces the prior one.
+    return `[AI CONTEXT COMPACTED - ${messages.length} old messages summarized preserving architectural decisions, unresolved bugs and next steps]\n\n${summary.trim()}`;
   } catch (err) {
     console.error(`[LLM_COMPACT] Failed: ${(err as Error).message}`);
     return null;
@@ -148,7 +157,15 @@ function buildSummarizationPrompt(conversationText: string, customInstruction?: 
     : "";
 
   // ── Gap 5: Anti-drift — quote verbatim, don't paraphrase ───────────────
-  // ── Gap 8: Expand to 9 sections (was 6) ────────────────────────────────
+  // ── Gap 8: Expand to 10 sections (was 6) ───────────────────────────────
+  // BH7 MEDIUM 6 FIX: previously this prompt had only 9 sections while
+  // contextCompaction.ts:buildSummaryPrompt had 10. §6.2 mandates 10 sections
+  // (the "9 seções preservadas" comment in BUSINESS_RULES.md is followed by a
+  // 10-item list — Critical Technical Context is the 10th). Without it, the
+  // two LLM compaction paths produced structurally different summaries, which
+  // could cause information loss when /compact (which uses this function via
+  // history.ts) was followed by auto-compaction (which uses buildSummaryPrompt).
+  // Now both paths preserve the same 10 sections.
   const systemPrompt = `You are a conversation summarizer for an AI coding assistant (Claude-Killer).
 Your job is to create a CONCISE but COMPLETE summary of the conversation that will
 allow the AI to continue working after context compaction.
@@ -163,6 +180,7 @@ The summary must preserve:
 7. **Current state**: What was being done EXACTLY before this compaction — the immediate task in progress
 8. **Next steps**: What was planned to do next
 9. **User preferences/constraints**: QUOTE exact words like "never", "always", "must" — don't paraphrase
+10. **Critical Technical Context**: Any technical detail (function names, API names, file paths, error messages, environment specifics) that would be lost without this summary
 
 CRITICAL RULES (anti-drift):
 - DIRECTLY QUOTE key phrases from the user rather than paraphrasing.

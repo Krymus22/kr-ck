@@ -403,6 +403,25 @@ function injectPostCompactionMessages(): void {
  * memory pressure. Now the agent PAUSES while compaction runs.
  */
 async function modelBasedCompactionAsync(): Promise<{ compacted: boolean; savedTokens: number }> {
+  // BH7 MEDIUM 8 FIX: §6.6 — "effortLevel = 'low' desabilita LLM compaction".
+  // The smartCompact wrapper already gates on shouldUseIntelligentCompaction(),
+  // but this function is also reachable directly and could fire a doomed API
+  // call in keyless environments (CI, fresh clones without NVIDIA_API_KEY),
+  // wasting 5-30s before timing out. Bail out early if LLM compaction isn't
+  // available so the caller falls through to heuristic/mechanical compaction
+  // immediately.
+  try {
+    const { isLlmCompactionAvailable } = await import("./llmCompactor.js");
+    if (!(await isLlmCompactionAvailable())) {
+      log.debug("[COMPACTION] Model-based skipped — LLM compaction not available (no API key)");
+      return { compacted: false, savedTokens: 0 };
+    }
+  } catch {
+    // If the import itself fails (shouldn't happen in normal flow), don't
+    // block compaction — let the chat() call below fail naturally.
+    log.debug("[COMPACTION] Could not check isLlmCompactionAvailable — proceeding");
+  }
+
   const allMessages = history.getHistory();
   if (allMessages.length < 10) return { compacted: false, savedTokens: 0 };
 
@@ -500,16 +519,21 @@ async function modelBasedCompactionAsync(): Promise<{ compacted: boolean; savedT
       // compactHistoryAsync exactly: save the snapshot right here, tagged
       // method="llm". smartCompact skips its own snapshot call when
       // method === "llm" to avoid double-writing.
-      try {
-        const { appendCompactionSnapshot } = await import("./session.js");
-        appendCompactionSnapshot(history.getHistory(), "llm");
-      } catch (err) {
-        log.debug(`[COMPACTION] Failed to save compaction snapshot: ${(err as Error).message}`);
-      }
-
       const afterTokens = history.estimateTokens();
       const savedTokens = beforeTokens - afterTokens;
       log.debug(`[COMPACTION] Model-based: ${toSummarize.length} msgs -> 1 summary (${savedTokens} tokens saved)`);
+
+      // Only save snapshot if LLM compaction actually saved tokens.
+      // If savedTokens <= 0, we return compacted:false and let the fallback
+      // path save its own snapshot (avoids double-save).
+      if (savedTokens > 0) {
+        try {
+          const { appendCompactionSnapshot } = await import("./session.js");
+          appendCompactionSnapshot(history.getHistory(), "llm");
+        } catch (err) {
+          log.debug(`[COMPACTION] Failed to save compaction snapshot: ${(err as Error).message}`);
+        }
+      }
       // HIGH 5 fix (BH7 BUG 7): only return compacted:true if the LLM summary
       // actually SAVED tokens. If the summary is LARGER than the dropped
       // toSummarize slice (savedTokens <= 0), returning compacted:true would

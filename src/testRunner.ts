@@ -421,8 +421,22 @@ function parseVitestText(output: string, exitCode: number, duration: number): Te
   const failMatch = /(\d+) failed/.exec(output);
   const skipMatch = /(\d+) skipped/.exec(output);
 
-  // Parse individual failures
-  const failBlocks = output.split(/(?:FAIL|X|X)\s+/);
+  // Parse individual failures.
+  //
+  // BH28 MEDIUM 19: previously `output.split(/(?:FAIL|X|X)\s+/)`. Two
+  // bugs there:
+  //   1. `X|X` is redundant — it's the same alternative twice.
+  //   2. The unanchored single-char `X` matched ANY "X " in the output
+  //      (error messages like "expect X to be defined", "X is not a
+  //      function", stack traces, etc.), causing the parser to
+  //      false-split in the middle of unrelated lines and produce
+  //      phantom failure entries. Real vitest/jest text output marks
+  //      failed test files with `FAIL` at the START of a line, so we
+  //      anchor with `^FAIL` in multiline mode and also accept the
+  //      Unicode "✕" / "×" symbols that vitest's TTY reporter uses to
+  //      prefix failed test names — but ONLY when followed by whitespace
+  //      and at line start, not anywhere in the text.
+  const failBlocks = output.split(/^(?:FAIL|✕|×)\s+/m);
   for (let i = 1; i < failBlocks.length; i++) {
     const block = failBlocks[i] ?? "";
     const fileMatch = /^([^\n]+)/.exec(block);

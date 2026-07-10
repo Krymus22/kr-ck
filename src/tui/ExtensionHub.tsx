@@ -25,7 +25,7 @@
  * filesystem for binaries.
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors } from "./theme.js";
 import { useTerminalWidth, calculateCardWidth } from "./useTerminal.js";
@@ -105,6 +105,25 @@ export function ExtensionHub({ onClose, onMessage, onConfigure }: Readonly<Exten
   const [cursorIndex, setCursorIndex] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [modeFilter, setModeFilter] = useState(false);
+
+  // BUG FIX (BH25 MEDIUM 5): guard against multiple simultaneous 'I' installs.
+  // installTool() is async and can take several seconds (network download,
+  // file extraction, etc.). Without this guard, pressing 'I' repeatedly —
+  // or even pressing it once and pressing again before the first install
+  // completes — would fire multiple installTool() calls for the same tool.
+  // Each call would then trigger syncExtensions() on success, causing
+  // redundant store updates and potentially corrupting installation state
+  // (e.g., two concurrent installs racing to write the same files).
+  //
+  // We use a ref (not state) because:
+  //   1. We need a SYNCHRONOUS check in the useInput callback — useState's
+  //      value is captured at the closure's creation, so a rapid double-'I'
+  //      press would see the stale `installing=false` from the previous
+  //      render and both presses would pass the guard.
+  //   2. We don't need to re-render the UI based on this — the existing
+  //      "[FALTA]" / "[OK]" card label already reflects install state via
+  //      the extensionCenter store, which is updated by syncExtensions().
+  const installingRef = useRef(false);
 
   // Replaces the old setRenderKey hack. The component now subscribes to both
   // stores (extensionCenter + modes) via useSyncExternalStore and re-renders
@@ -269,12 +288,20 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
 
     // 'I' installs the selected tool if it's missing
     if (inputChar === "i" || inputChar === "I") {
+      // BH25 MEDIUM 5: prevent multiple simultaneous installs.
+      if (installingRef.current) return;
       const item = visibleItems[cursorIndex];
       if (item && item.category === "tool" && !item.installed) {
         // Extract tool name from the extension id (e.g., "tool:rojo_build" → "rojo")
         const toolName = item.id.replace("tool:", "").replace(/_\w+$/, "");
-        import("../toolInstaller.js").then(({ installTool }) => {
-          installTool(toolName).then((result) => {
+        // Set the ref SYNCHRONOUSLY before any await/re-render so a second
+        // 'I' press before the next paint is also rejected.
+        installingRef.current = true;
+        // Flatten the previously-nested promise chain so a single .finally()
+        // reliably resets the guard whether the import or the install fails.
+        import("../toolInstaller.js")
+          .then(({ installTool }) => installTool(toolName))
+          .then((result) => {
             if (result.success) {
               // BUG FIX: após installTool success, re-sincroniza o hub para
               // marcar a tool como `installed=true`. Antes o bloco era vazio e
@@ -292,12 +319,15 @@ function handleActions(key: { return?: boolean }, inputChar: string) {
               }));
               syncExtensions(entries);
             }
-          }).catch(() => {
-            // ignore — logged by installer
+          })
+          .catch(() => {
+            // ignore — logged by installer, or toolInstaller module not available
+          })
+          .finally(() => {
+            // BH25 MEDIUM 5: release the guard so the user can install
+            // another tool (or retry the same one) after this one finishes.
+            installingRef.current = false;
           });
-        }).catch(() => {
-          // toolInstaller not available
-        });
       }
       return;
     }

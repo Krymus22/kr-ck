@@ -26,6 +26,9 @@ vi.mock("../activityTracker.js", () => ({
 
 vi.mock("../apiClient.js", () => ({
   chatWithModel: vi.fn(),
+  // BH9 MEDIUM 1 FIX: scout's finally block now calls clearModelOverride as
+  // a safety net (mirrors smallTaskAgent). Mock it so the import resolves.
+  clearModelOverride: vi.fn(),
 }));
 
 vi.mock("../tools.js", () => ({

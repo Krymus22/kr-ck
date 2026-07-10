@@ -236,7 +236,15 @@ function renderMessage(msg: ChatMessage, keyPrefix: string, prevMsg: ChatMessage
   // or another assistant message, we're in the MIDDLE of a turn (the assistant
   // made tool calls and is now continuing), so we skip the header to avoid
   // visual pollution (multiple "Claude-Killer:" lines in a single turn).
-  const showAssistantHeader = !prevMsg || prevMsg.role === "user";
+  //
+  // BUG FIX (BH22 MEDIUM 1): system messages (e.g., "⚡ small task: ...",
+  // "Contexto compactado!", restored-usage notices, etc.) are inserted
+  // between the user's input and the assistant's reply. The previous check
+  // only allowed `role === "user"`, so a `[user, system, assistant]` flow
+  // suppressed the header — making it look as if the assistant turn had
+  // started earlier. Treat system messages like user messages for the
+  // purpose of header dedup: they don't break the "start of turn" boundary.
+  const showAssistantHeader = !prevMsg || prevMsg.role === "user" || prevMsg.role === "system";
   return (
     <Box key={keyPrefix} flexDirection="column">
       {showAssistantHeader && <Text color={colors.secondary} bold> Claude-Killer:</Text>}

@@ -496,6 +496,22 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
       callNum++;
       log.debug(`[SCOUT] Tool call round ${callNum}/${maxCalls}`);
 
+      // TODO(BH9 MEDIUM 2): The timeout check above only fires BETWEEN
+      // iterations — a single hung `chatWithScoutModel` call (e.g., the
+      // OpenAI client's 5-min timeout, a stalled TCP connection, or a
+      // model that streams tokens but never finishes) will block this
+      // `await` until the SDK's own timeout fires, ignoring
+      // SCOUT_MAX_DURATION_MS entirely. The proper fix mirrors
+      // smallTaskAgent.ts:raceWithTimeout (~line 588) — wrap the call in
+      // Promise.race against an AbortController-driven timeout promise so
+      // the scout terminates promptly on timeout (the underlying call
+      // continues in the background but the user sees the error and the
+      // `finally` block runs `clearModelOverride`). Deferred because the
+      // fix requires threading an AbortController through chatWithModel
+      // → chat() → createStreamRequest, which is a larger change. Until
+      // then, the per-iteration check at the top of the loop is the best
+      // we can do, and the OpenAI client's own timeout (5 min) is the
+      // hard ceiling.
       const response = await chatWithScoutModel(history, SCOUT_TOOLS);
 
       // BUG FIX (false-positive): if finish_reason is "error" (no choice),
@@ -653,6 +669,22 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
       error: errMsg,
     };
   } finally {
+    // BH9 MEDIUM 1 FIX: clear the model override as a safety net. The scout
+    // calls chatWithModel (via chatWithScoutModel) which sets modelOverride
+    // and clears it in its own `finally` block. But if chatWithModel is
+    // still running when this function returns (e.g., the global timeout
+    // fires between iterations and we exit early, or a tool-execution error
+    // throws while a chat call is in flight), the override could leak into
+    // subsequent main-agent chat() calls — silently routing them through
+    // the scout's smaller model. Mirrors smallTaskAgent.ts:776.
+    // Safe no-op when chatWithModel's own finally has already cleared it.
+    try {
+      const { clearModelOverride } = await import("./apiClient.js");
+      clearModelOverride();
+    } catch {
+      // Dynamic import failed (test environment without apiClient mock) —
+      // ignore; the override is module-level state that resets on reload.
+    }
     scoutActivityDone();
   }
 }

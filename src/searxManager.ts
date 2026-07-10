@@ -353,6 +353,46 @@ function getDockerSetupScriptPath(): string | null {
 }
 
 /**
+ * Poll the Searx `/search?q=test&format=json` endpoint until it returns
+ * a valid JSON response (Searx is fully ready to serve queries), or
+ * until the timeout expires.
+ *
+ * (BH28 MEDIUM 17): `docker start` and `python -m searx.webapp` return
+ * as soon as the process is launched — but Searx itself takes 1-5s
+ * (Docker) or 2-5s (Python) before it actually binds to the port and
+ * responds to HTTP. Callers that immediately hit `SEARX_URL` after
+ * `autoStartSearx` returned `true` got `ECONNREFUSED`. This helper
+ * bridges that gap by blocking until Searx is actually ready.
+ *
+ * @returns true if Searx responded with valid JSON within the timeout,
+ *          false otherwise.
+ */
+async function waitForSearxHealthy(): Promise<boolean> {
+  // Configurable via env vars so tests can shorten the timeout (the
+  // default 30s would make unit tests unnecessarily slow).
+  const timeoutMs = Number.parseInt(
+    process.env.SEARX_HEALTHCHECK_TIMEOUT_MS ?? "30000",
+    10
+  );
+  const intervalMs = Number.parseInt(
+    process.env.SEARX_HEALTHCHECK_INTERVAL_MS ?? "500",
+    10
+  );
+  const deadline = Date.now() + (Number.isFinite(timeoutMs) ? timeoutMs : 30000);
+  const interval = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 500;
+
+  while (Date.now() < deadline) {
+    if (await isSearxRunning()) {
+      return true;
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise((r) => setTimeout(r, Math.min(interval, remaining)));
+  }
+  return false;
+}
+
+/**
  * Start Searx in background if it's installed but not running.
  * Non-blocking — returns immediately. The actual startup takes 2-5
  * seconds, but the TUI doesn't wait.
@@ -397,9 +437,12 @@ export async function autoStartSearx(): Promise<boolean> {
             }
           );
           if (result.status === 0) {
-            console.log("[claude-killer] Searx Docker container started via setup script.");
+            console.log("[claude-killer] Searx Docker container started via setup script. Waiting for health check...");
+            // BH28 MEDIUM 17: setup script returns success as soon as the
+            // container is started — but Searx itself may need a few more
+            // seconds to be ready to serve. Poll before reporting ready.
             searxMethod = "docker";
-            return true;
+            return waitForSearxHealthy();
           }
           console.error(`[claude-killer] Setup script failed (exit ${result.status}): ${result.stderr?.slice(0, 200)}`);
         } catch (err) {
@@ -429,15 +472,26 @@ export async function autoStartSearx(): Promise<boolean> {
       if (started) {
         weStartedSearx = false; // Docker manages itself (--restart unless-stopped)
         searxMethod = "docker";
-        console.log(`[claude-killer] Searx Docker container started.`);
-        return true;
+        console.log(`[claude-killer] Searx Docker container started. Waiting for health check...`);
+        // BH28 MEDIUM 17: previously returned true immediately after
+        // `docker start`, but a freshly-started container takes 1-5s
+        // before Searx is actually ready to serve queries. Callers that
+        // immediately hit SEARX_URL got ECONNREFUSED. Now poll the
+        // health endpoint until it responds (up to 30s by default,
+        // configurable via SEARX_HEALTHCHECK_TIMEOUT_MS for tests).
+        const healthy = await waitForSearxHealthy();
+        if (!healthy) {
+          console.error(`[claude-killer] Searx container started but did not become healthy within timeout.`);
+        }
+        return healthy;
       }
       console.error(`[claude-killer] Failed to start Searx Docker container.`);
       return false;
     }
     // Container is running but Searx isn't responding yet — wait
+    // BH28 MEDIUM 17: same health-check requirement applies here.
     searxMethod = "docker";
-    return true;
+    return waitForSearxHealthy();
   }
 
   // Method 2: Python venv
@@ -486,8 +540,11 @@ export async function autoStartSearx(): Promise<boolean> {
     searxMethod = "python";
     proc.unref();
 
-    console.log(`[claude-killer] Searx starting via Python (PID: ${proc.pid})...`);
-    return true;
+    console.log(`[claude-killer] Searx starting via Python (PID: ${proc.pid}). Waiting for health check...`);
+    // BH28 MEDIUM 17: Python-started Searx also takes 2-5s to bind to
+    // the port. Poll before reporting ready so callers don't get
+    // ECONNREFUSED on the immediate next request.
+    return waitForSearxHealthy();
   } catch (err) {
     console.error(`[claude-killer] Searx auto-start failed: ${(err as Error).message}`);
     return false;

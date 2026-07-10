@@ -94,7 +94,23 @@ export function loadConfig(): DotfileConfig {
 export function saveConfig(config: DotfileConfig): void {
   try {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+    // SECURITY (BH28 MEDIUM 16): config.json may contain API keys, MCP
+    // server env vars (tokens), telemetry endpoints with auth, etc. The
+    // previous call used the default mode (0o644 on most systems → world
+    // readable). Use 0o600 (owner read/write only). Also chmod after the
+    // write, because Node's `writeFileSync({mode})` only applies the mode
+    // on file CREATION — existing files keep their old mode, so a config
+    // file previously created with 0o644 would stay world-readable on
+    // every subsequent save.
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    try {
+      fs.chmodSync(CONFIG_FILE, 0o600);
+    } catch {
+      // chmod unsupported on some platforms (Windows) — ignore.
+    }
     cachedConfig = config;
     log.success(`Config saved to ${CONFIG_FILE}`);
   } catch (err) {
@@ -102,9 +118,56 @@ export function saveConfig(config: DotfileConfig): void {
   }
 }
 
+/**
+ * Deep-merge `partial` into `current` for the nested object keys defined
+ * in DotfileConfig (mcpServers, theme, telemetry, shortcuts). Top-level
+ * scalar/array keys are replaced as before.
+ *
+ * (BH28 MEDIUM 15): previously `updateConfig({ theme: { primary: "red" } })`
+ * on a config `{ theme: { primary: "blue", accent: "gray" } }` produced
+ * `{ theme: { primary: "red" } }` — silently dropping `accent`. Same for
+ * mcpServers (one new server wiped all existing servers), telemetry, and
+ * shortcuts. Now we merge nested objects key-by-key.
+ */
+function deepMergeConfig(
+  current: DotfileConfig,
+  partial: Partial<DotfileConfig>
+): DotfileConfig {
+  const merged: DotfileConfig = { ...current };
+  const nestedKeys: Array<keyof DotfileConfig> = [
+    "mcpServers",
+    "theme",
+    "telemetry",
+    "shortcuts",
+  ];
+  for (const key of nestedKeys) {
+    const curVal = current[key] as Record<string, unknown> | undefined;
+    const partVal = partial[key] as Record<string, unknown> | undefined;
+    if (partVal === undefined) {
+      // No update for this key — leave merged[key] as-is (already copied).
+      continue;
+    }
+    if (curVal && typeof curVal === "object" && !Array.isArray(curVal) &&
+        partVal && typeof partVal === "object" && !Array.isArray(partVal)) {
+      // Merge nested object key-by-key.
+      (merged as Record<string, unknown>)[key as string] = { ...curVal, ...partVal };
+    } else {
+      // Either side is missing/non-object — replace.
+      (merged as Record<string, unknown>)[key as string] = partVal;
+    }
+  }
+  // Apply all OTHER keys (scalars, arrays, and any non-nested-object keys)
+  // with plain overwrite semantics.
+  for (const key of Object.keys(partial) as Array<keyof DotfileConfig>) {
+    if (nestedKeys.includes(key)) continue;
+    (merged as Record<string, unknown>)[key as string] = partial[key] as unknown;
+  }
+  return merged;
+}
+
 export function updateConfig(partial: Partial<DotfileConfig>): DotfileConfig {
   const current = loadConfig();
-  const updated = { ...current, ...partial };
+  const updated = deepMergeConfig(current, partial);
   saveConfig(updated);
   return updated;
 }

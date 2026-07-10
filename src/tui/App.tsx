@@ -2356,7 +2356,19 @@ export function App() {
     // ── /small <task> — special async handling ────────────────────────────
     // handleSmallCommand returns { handled: false } when there's an argument,
     // signaling that the task should be run asynchronously here.
-    if (trimmed.startsWith("/small ") || trimmed === "/small") {
+    //
+    // BUG FIX (BH21 MEDIUM 3): the prefix check was case-SENSITIVE, so
+    // "/SMALL task" (or "/Small", "/sMaLl", etc.) failed to match this
+    // branch and fell through to handleSlashCommand, which DOES lowercase
+    // the cmd token. handleSmallCommand then returned { handled: false }
+    // (because arg is non-empty), so handleSlashCommandFlow returned false,
+    // and handleSubmit sent the raw "/SMALL task" string to the IA as a
+    // normal user message. Fix: lowercase the comparison so /SMALL, /Small,
+    // /small all route to the async small-task path. The slice() uses the
+    // numeric length of "/small" (6) — it doesn't care about the case of
+    // the actual input, only its character count.
+    const trimmedLower = trimmed.toLowerCase();
+    if (trimmedLower.startsWith("/small ") || trimmedLower === "/small") {
       const arg = trimmed.slice("/small".length).trim();
       const smallResult = handleSlashCommand(trimmed);
       if (smallResult.handled) {

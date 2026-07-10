@@ -50,9 +50,12 @@ vi.mock("../logger.js", () => ({
   success: vi.fn(),
 }));
 
-// Mock fetch so isSearxRunning() returns false (forces autoStartSearx down
-// the Python path).
-global.fetch = vi.fn().mockRejectedValue(new Error("ECONNREFUSED")) as any;
+// Mock fetch so isSearxRunning() returns false on the first call (forces
+// autoStartSearx down the Python path instead of short-circuiting at
+// "already running"), and then resolves OK on subsequent calls so the
+// health-check loop (added in BH28 MEDIUM 17) exits quickly without
+// waiting the full 30s timeout.
+global.fetch = vi.fn() as any;
 
 // ─── Import module UNDER TEST after mocks are in place ──────────────────────
 
@@ -61,8 +64,14 @@ import { autoStartSearx } from "../searxManager.js";
 describe("Bug Hunter #8d — searxManager.ts closes logFd in parent (no fd leak)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Searx NOT already running (fetch rejects).
-    (global.fetch as any).mockRejectedValue(new Error("ECONNREFUSED"));
+    // Searx NOT already running on the first isSearxRunning() call
+    // (top of autoStartSearx). Subsequent calls (inside
+    // waitForSearxHealthy) resolve OK so the health-check loop exits
+    // immediately. BH28 MEDIUM 17.
+    (global.fetch as any).mockReset();
+    (global.fetch as any)
+      .mockResolvedValueOnce({ ok: false, json: async () => ({}) })
+      .mockResolvedValue({ ok: true, json: async () => ({ results: [{ title: "ok" }] }) });
     // Docker NOT available (docker --version fails).
     spawnSyncMock.mockReturnValue({ status: 1, stdout: "", stderr: "" });
     // Python venv EXISTS (so autoStartSearx takes the Python path).
