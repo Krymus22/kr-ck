@@ -437,8 +437,11 @@ describe("TUI interactions — error handling", () => {
     const { lastFrame } = render(<App />);
     await delay(100);
     const out = stripAnsi(lastFrame() ?? "");
-    // App should still render the banner
-    expect(out).toContain("Claude-Killer");
+    // FIX-TUI Bug 1: the banner is no longer rendered in the live view
+    // (it's pre-printed via process.stdout.write in index.ts). So we check
+    // for the input prompt placeholder instead, which proves the App
+    // rendered its main shell without crashing.
+    expect(out).toMatch(/Digite sua mensagem/i);
   });
 
   it("does not crash when typing very long input", async () => {
@@ -448,8 +451,12 @@ describe("TUI interactions — error handling", () => {
     await delay(50);
     const out = stripAnsi(lastFrame() ?? "");
     expect(typeof out).toBe("string");
-    // App should still be alive
-    expect(out).toContain("Claude-Killer");
+    // App should still be alive — verify by checking that the previously
+    // auto-loaded user message is still rendered (proves the chat history
+    // didn't get wiped by the long input).
+    // (FIX-TUI Bug 1: banner no longer in live view, so we can't use
+    // "Claude-Killer" as the liveness signal here.)
+    expect(out).toContain("dummy-previous-message");
   });
 
   it("does not crash when typing accented chars", async () => {

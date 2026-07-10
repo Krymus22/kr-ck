@@ -641,8 +641,9 @@ describe("Estado de erro/recuperação", () => {
     const out = stripAnsi(lastFrame() ?? "");
     // App continua renderizando — o erro é capturado pelo try/catch do
     // handleSubmit e vira systemMessage "Erro: ..."
-    expect(out).toContain("Claude-Killer");
-    // Mensagem de erro aparece no output
+    // FIX-TUI Bug 1: banner is no longer in the live view (it's pre-printed
+    // via process.stdout.write in index.ts). Use the error systemMessage +
+    // idle placeholder as the liveness signal instead of "Claude-Killer".
     expect(out).toContain("Erro");
     // Status volta para idle — input placeholder aparece
     expect(out).toMatch(/Digite sua mensagem/i);

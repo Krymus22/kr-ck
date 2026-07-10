@@ -581,13 +581,24 @@ describe("ExtensionHub — render snapshots", () => {
 // ─── Full App integration tests ───────────────────────────────────────────
 
 describe("App — full TUI integration", () => {
-  it("renders banner with 'Claude-Killer' brand", () => {
+  // FIX-TUI Bug 1: the banner is NO LONGER rendered in the live view. It is
+  // printed ONCE via process.stdout.write BEFORE Ink renders (see index.ts),
+  // so it lives in the terminal scrollback and never re-renders. These tests
+  // were updated to verify the new behavior (banner is NOT in the live view)
+  // rather than asserting on banner content that is no longer rendered.
+
+  it("does NOT render banner in live view (FIX-TUI Bug 1)", () => {
     // App needs more mocks — let's import it
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      expect(out).toContain("Claude-Killer");
+      // The banner brand "Claude-Killer . Ink TUI" must NOT appear in the
+      // live view — only in the pre-printed scrollback. The assistant header
+      // "Claude-Killer:" only renders when there are assistant messages,
+      // which the initial render doesn't have, so the brand string is
+      // entirely absent.
+      expect(out).not.toContain("Claude-Killer . Ink TUI");
     })();
   });
 
@@ -600,22 +611,25 @@ describe("App — full TUI integration", () => {
     })();
   });
 
-  it("renders '/help for commands' hint", () => {
+  it("does NOT render '/help for commands' banner hint in live view", () => {
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      expect(out).toContain("/help");
+      // The banner hint "Type /help for commands ..." is no longer in the
+      // live view. (The "/help" command itself still appears in the
+      // autocomplete dropdown when the user types "/", but not on idle.)
+      expect(out).not.toContain("/help for commands");
     })();
   });
 
-  it("renders 'Ctrl+E for Hub' hint", () => {
+  it("does NOT render 'Ctrl+E for Hub' banner hint in live view", () => {
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      expect(out).toContain("Ctrl+E");
-      expect(out).toContain("Hub");
+      // The banner hint "Ctrl+E for Hub" is no longer in the live view.
+      expect(out).not.toContain("Ctrl+E for Hub");
     })();
   });
 
@@ -628,26 +642,26 @@ describe("App — full TUI integration", () => {
     })();
   });
 
-  it("renders Model name in banner", () => {
+  it("does NOT render 'Model:' banner line in live view", () => {
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      expect(out).toContain("Model:");
+      // The banner "Model: <name>" line is no longer in the live view.
+      expect(out).not.toContain("Model:");
     })();
   });
 
-  it("renders banner with '=' dividers (now width-adaptive, not fixed 50)", () => {
+  it("does NOT render banner '=' dividers in live view", () => {
     return (async () => {
       const { App } = await import("../tui/App.js");
       const { lastFrame } = render(<App />);
       const out = stripAnsi(lastFrame() ?? "");
-      // Banner now adapts width to terminal size via useTerminalWidth().
-      // In test environments (no TTY), the width defaults to 100 cols, so the
-      // banner dividers will be ~80 chars. We just verify that AT LEAST 2
-      // divider lines of "=" * N exist (top + bottom of banner).
+      // The banner's two "=".repeat(N) divider lines (top + bottom) must
+      // NOT appear in the live view. They live only in the pre-printed
+      // scrollback (index.ts).
       const dividers = out.split("\n").filter((l) => l.trim().match(/^=+$/) && l.trim().length >= 30);
-      expect(dividers.length).toBeGreaterThanOrEqual(2);
+      expect(dividers.length).toBe(0);
     })();
   });
 

@@ -25,15 +25,25 @@ vi.mock("../logger.js", () => ({
 }));
 
 // Mock node:child_process para controlar PATH search (which/where)
-const cpMock = vi.hoisted(() => ({
-  execSync: vi.fn(() => {
+// FIX-SEC Bug #4: the production code now uses execFileSync (shell:false)
+// instead of execSync with a shell-quoted string. We expose a single shared
+// mock function under both names so legacy tests that set
+// `cpMock.execSync.mockReturnValue(...)` still control the PATH search.
+const cpMock = vi.hoisted(() => {
+  const shared = vi.fn(() => {
     // Default: comando falha (tool não está no PATH)
     throw new Error("mocked: not found in PATH");
-  }),
-}));
+  });
+  return {
+    execSync: shared,
+    execFileSync: shared,
+    spawn: vi.fn(),
+  };
+});
 vi.mock("node:child_process", () => ({
   execSync: cpMock.execSync,
-  spawn: vi.fn(),
+  execFileSync: cpMock.execFileSync,
+  spawn: cpMock.spawn,
 }));
 
 import {

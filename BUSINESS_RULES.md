@@ -1010,6 +1010,41 @@ Adicional: `~/.claude-killer/modes/<mode>/mcps/*.json` (mode-specific).
 29. **Max 8 blocks** — após isso, deixa finishar.
 30. **Blocking por default** — mas non-blocking após 8.
 
+### 17.8 Bug Hunt Massivo (Julho 2026) — Regras novas
+
+> Regras descobertas durante a caçada massiva de bugs (28 bug hunters, 3 batches).
+> Estas regras NÃO podem ser violadas em futuras mudanças.
+
+31. **Path traversal em TODAS as tools** — `buscar_arquivos`, `buscar_texto`, `ler_arquivo`, `parse_ast` (main agent E sub-agents) DEVEM usar `resolveAndCheckPath` / `validateCwd` de `src/pathSecurity.ts`. Nenhuma tool pode aceitar paths absolutos fora do projeto sem validação.
+
+32. **Retry counters SEPARADOS por tipo** — `apiClient.ts` deve usar `RetryCounters` (`{n429, n403, n5xx, network}`) separados, NÃO um contador compartilhado. 4 erros de rede NÃO devem consumir o budget de 429.
+
+33. **Cache invalidation em TODAS as write tools** — `editar_arquivo`, `editar_multi_arquivos`, `desfazer_edicao` DEVEM invalidar `readOnlyCache` para os variants `path` E `caminho` do arquivo editado. Sem isso, `ler_arquivo` retorna conteúdo stale.
+
+34. **Background processes em TODOS os shutdown paths** — `killAllBackgroundProcesses` deve ser registrado via `onShutdown` (não apenas SIGINT/SIGTERM). SIGHUP (terminal close) e uncaughtException (crash) também devem matar processos background.
+
+35. **Anti-recursion em TODOS os sub-agentes** — `usar_scout`, `explorar_subagente`, `runSubAgent` DEVEM checar `CLAUDE_KILLER_AGENT_ID` (ou AsyncLocalStorage) no início. Sub-agentes powerful NÃO podem chamar `explorar_subagente` recursivamente.
+
+36. **askUser bloqueado em sub-agentes** — `handleAskUser` deve checar `CLAUDE_KILLER_AGENT_ID`. Se setado (sub-agent context), retornar erro sem invocar callback. Previne deadlock com `pendingQuestion` compartilhado.
+
+37. **Banner SEMPRE fora da live view** — NUNCA renderizar banner dentro do Ink live view. Se `CLAUDE_KILLER_BANNER_PRINTED != "1"`, simplesmente pular (não renderizar fallback). Banner é printado via `process.stdout.write` antes de `render()`.
+
+38. **markStep deve validar NaN** — `planExecutor.markStep` deve checar `Number.isInteger(index)` antes de acessar `steps[index]`. NaN bypassa bounds check e causa TypeError.
+
+39. **isSafeFileName / isSafeModeName ALLOWLIST** — usar `/^[A-Za-z0-9._-]+$/` (allowlist), NÃO blocklist. Blocklist perde chars como `%`, `"`, `*`, `?`, `[`, `]` (Windows %VAR%, glob leaks).
+
+40. **testRunner HONESTY** — `runTestEZ` deve retornar `success:false, ran:false` quando lune não encontrado (NÃO `success:true`). `runGoTest` deve passar diretório do pacote (NÃO file path). `runCargoTest` não deve passar file path como filter. `parseGoTestOutput` deve contar `--- PASS:` lines.
+
+41. **findMatchingSkills direction** — `contextLower.includes(skill.trigger)` (context contains trigger), NÃO `skill.trigger.includes(contextLower)`. Um trigger de 10 chars nunca contém um context de 500 chars.
+
+42. **MCP platformOverrides preservados** — `mergeFromJson` e dotfile loader DEVEM incluir `platformOverrides` ao construir MCPConfig. Não dropping silenciosamente.
+
+43. **modelBasedCompactionAsync snapshot** — deve chamar `appendCompactionSnapshot` após `replaceHistory` (§6.6). Não apenas o path manual `/compact`.
+
+44. **hasIncompletePlan reset** — `markStep(i, false)` deve resetar `completedAt = null`. Sem isso, plan re-aberto não é detectado.
+
+45. **suggestMode sem false positives** — regex de keywords NÃO deve incluir bare words comuns como "studio" (false positive para "Visual Studio"). Usar compound phrases como "roblox studio".
+
 ---
 
 ## COMO USAR ESTE DOCUMENTO

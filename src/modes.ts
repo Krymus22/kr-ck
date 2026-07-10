@@ -30,6 +30,7 @@ import path from "node:path";
 import os from "node:os";
 import * as log from "./logger.js";
 import { fileURLToPath } from "node:url";
+import { isSafeModeName } from "./fileFinder.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -449,6 +450,13 @@ function ensureModesDir(): void {
 /** Save a user mode to ~/.claude-killer/modes/<name>.json */
 export function saveUserMode(mode: ModeDefinition): void {
   if (!mode.name) throw new Error("Mode name is required");
+  // FIX-SEC Bug #2: mode.name is user/AI-controlled and ends up as a path
+  // component in getModeFile(). Without validation, a name like
+  // "../../etc/evil" would write outside the modes/ directory
+  // (verified: ~/etc/evil.json was reachable). Reject unsafe names.
+  if (!isSafeModeName(mode.name)) {
+    throw new Error(`Invalid mode name (forbidden characters): ${mode.name}`);
+  }
   ensureModesDir();
   mode.builtIn = false;
   if (!mode.createdAt) mode.createdAt = new Date().toISOString();
@@ -460,6 +468,12 @@ export function saveUserMode(mode: ModeDefinition): void {
 
 /** Delete a user mode. Returns true if deleted, false if not found. */
 export function deleteUserMode(name: string): boolean {
+  // FIX-SEC Bug #2: same path-traversal hardening as saveUserMode — reject
+  // names that would escape the modes/ directory before unlinking.
+  if (!isSafeModeName(name)) {
+    log.error(`modes: rejected unsafe mode name for deletion: "${name}"`);
+    return false;
+  }
   const filePath = getModeFile(name);
   if (!fs.existsSync(filePath)) return false;
   try {

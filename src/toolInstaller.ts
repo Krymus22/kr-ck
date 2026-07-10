@@ -13,7 +13,7 @@
  * auto-installed without the user's consent.
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -232,7 +232,20 @@ function extractArchive(archivePath: string, destDir: string, binaryName: string
     // Try Python's zipfile as fallback for zip
     if (isZip) {
       try {
-        execSync(`python3 -c "import zipfile; zipfile.ZipFile('${archivePath}').extractall('${destDir}')"`, { stdio: "pipe", timeout: 30000 });
+        // FIX-SEC Bug #1: previously this used execSync with a string command
+        // that interpolated `archivePath` and `destDir` directly into a
+        // single-quoted Python string literal. If archivePath contained a
+        // single quote (or a shell metacharacter), this was command injection.
+        // Now we use execFileSync with shell:false and pass the paths as argv
+        // elements (sys.argv[1], sys.argv[2]) so the OS hands them to Python
+        // verbatim — no shell, no quoting, no injection.
+        const pyCode =
+          "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])";
+        execFileSync("python3", ["-c", pyCode, archivePath, destDir], {
+          stdio: "pipe",
+          timeout: 30000,
+          shell: false,
+        });
       } catch {
         return null;
       }

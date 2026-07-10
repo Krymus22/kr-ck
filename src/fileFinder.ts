@@ -12,7 +12,7 @@
  *   - Future: inbox organizer can suggest copying found files
  */
 
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -45,17 +45,20 @@ export interface SearchProgress {
  * interpolated directly into the `which` shell command, allowing arbitrary
  * command execution. A fileName like `../../etc/passwd` would let
  * path.join() escape the target directory. Now we reject these.
+ *
+ * FIX-SEC Bug #3: the previous blocklist regex missed several dangerous
+ * characters: `%` (Windows %VAR% expansion), `"`, `*`, `?`, `[`, `]`, `{`,
+ * `}`, `~`, `^`, `=`, and whitespace. Each can either expand into something
+ * dangerous (env vars, find globs) or break out of quoting. Switching to a
+ * strict allowlist closes all known gaps. Allowed: letters, digits, dot,
+ * underscore, hyphen — covers all legitimate tool/file names
+ * ("selene", "rojo.exe", "wally-package-types", "my_file.lua").
  */
-function isSafeFileName(name: string): boolean {
+export function isSafeFileName(name: string): boolean {
   if (typeof name !== "string" || name.length === 0) return false;
-  // Reject path separators, NUL, and any control chars.
-  if (/[\/\\\u0000-\u001f]/.test(name)) return false;
-  // Reject path traversal.
-  if (name === ".." || name === "." || name.includes("..")) return false;
-  // Reject shell metacharacters that could allow command injection when
-  // interpolated into `which ${fileName}` (we use shell: true there).
-  if (/[;&|`$()<>!\n\r]/.test(name)) return false;
-  return true;
+  if (name === "." || name === "..") return false;
+  // Allowlist: A-Z, a-z, 0-9, dot, underscore, hyphen only.
+  return /^[A-Za-z0-9._-]+$/.test(name);
 }
 
 /**
@@ -63,12 +66,15 @@ function isSafeFileName(name: string): boolean {
  * Bug Hunter #9: previously, a modeName like `../../etc` would let
  * path.join(home, ".claude-killer", "modes", modeName, "tools") escape the
  * intended tools/ directory (resolving to home/.claude-killer/etc/tools).
+ *
+ * FIX-SEC Bug #2: exported so toolConfigurator.ts and modes.ts can reuse the
+ * same strict allowlist before writing mode/manifest files. Allowlist mirrors
+ * isSafeFileName (letters, digits, dot, underscore, hyphen).
  */
-function isSafeModeName(name: string): boolean {
+export function isSafeModeName(name: string): boolean {
   if (typeof name !== "string" || name.length === 0) return false;
-  if (/[\/\\\u0000-\u001f]/.test(name)) return false;
-  if (name === ".." || name === "." || name.includes("..")) return false;
-  return true;
+  if (name === "." || name === "..") return false;
+  return /^[A-Za-z0-9._-]+$/.test(name);
 }
 
 /**
@@ -137,20 +143,23 @@ export function searchInDefinedFolders(
     }
   }
 
-  // Search PATH (which/where). Use execSync with shell:false and pass the
+  // Search PATH (which/where). Use execFileSync with shell:false and pass
   // fileName as a separate argv element to avoid command injection when
   // fileName contains shell metacharacters. Bug Hunter #9.
+  //
+  // FIX-SEC Bug #4: previously this used execSync with a STRING command (which
+  // forces shell:true) and POSIX-style backslash escaping of `"`. On Windows
+  // cmd.exe that escaping doesn't work — `\"` is treated literally and a
+  // fileName containing `"` could break out of the quote. execFileSync with
+  // shell:false bypasses the shell entirely and passes argv directly to the
+  // OS, which matches the original comment's intent and is correct on both
+  // Windows and POSIX.
   try {
     const cmd = platform === "win32" ? "where" : "which";
-    // Even though isSafeFileName already rejected dangerous chars, we
-    // additionally quote the fileName AND escape both `"` and `\` so any
-    // future relaxations of the allowlist can't introduce an injection.
-    // (CodeQL: js/incomplete-sanitization — must escape backslash too,
-    // otherwise `file\` would escape the closing quote in shell.)
-    const quoted = `"${fileName.replace(/["\\]/g, '\\$&')}"`;
-    const result = execSync(`${cmd} ${quoted}`, {
+    const result = execFileSync(cmd, [fileName], {
       encoding: "utf8",
       timeout: 5000,
+      shell: false,
       stdio: ["pipe", "pipe", "ignore"],
     });
     const lines = result.trim().split("\n").map((l) => l.trim()).filter(Boolean);

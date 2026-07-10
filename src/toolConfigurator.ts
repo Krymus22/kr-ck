@@ -21,7 +21,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import * as log from "./logger.js";
 import { chat } from "./apiClient.js";
-import { searchInDefinedFolders, copyToModeTools } from "./fileFinder.js";
+import { searchInDefinedFolders, copyToModeTools, isSafeModeName, isSafeFileName } from "./fileFinder.js";
 import type { AskUserCallback } from "./askUser.js";
 
 // --- Types -------------------------------------------------------------------
@@ -211,6 +211,20 @@ async function handleConfiguratorTool(
       const manifest = args.manifest;
       if (!toolName || !manifest) return "[ERROR] toolName e manifest são obrigatórios";
       if (!modeName) return "[ERROR] nenhum modo ativo";
+
+      // FIX-SEC Bug #2: toolName and modeName come from the AI configurator
+      // (untrusted) and end up as path components in path.join. Without
+      // validation, toolName = "../../etc/evil" or modeName = "../.."
+      // would write the manifest outside the mode's manifests/ directory
+      // (verified: ~/etc/evil.json was reachable). Reject unsafe names.
+      if (!isSafeFileName(toolName)) {
+        log.error(`[CONFIGURATOR] criar_manifest: rejected unsafe toolName "${toolName}"`);
+        return `[ERROR] toolName inválido (caracteres proibidos): ${toolName}`;
+      }
+      if (!isSafeModeName(modeName)) {
+        log.error(`[CONFIGURATOR] criar_manifest: rejected unsafe modeName "${modeName}"`);
+        return `[ERROR] modeName inválido (caracteres proibidos): ${modeName}`;
+      }
 
       const home = process.env.HOME ?? process.env.USERPROFILE ?? os.homedir();
       const manifestsDir = path.join(home, ".claude-killer", "modes", modeName, "manifests");

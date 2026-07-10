@@ -6,7 +6,7 @@
  * Aberto via tecla 'C' no Hub ou comando /configurar.
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import { colors } from "./theme.js";
 import { configureTool, detectToolsWithoutManifest, type ConfiguratorResult } from "../toolConfigurator.js";
@@ -30,6 +30,13 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
 
+  // Ref mirror of `running` so the useInput callback (which closes over state
+  // at registration time) can read the LATEST value synchronously. Without
+  // this, a rapid double-Enter can pass the `if (running) return` guard
+  // because the closure still sees the stale `running = false` from the
+  // previous render — firing `configureTool` twice (FIX-TUI Bug 2).
+  const runningRef = useRef(false);
+
   const mode = getActiveMode();
   const modeName = mode?.name ?? null;
 
@@ -39,7 +46,10 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
       return;
     }
 
-    if (running) return; // don't accept input while running
+    // Guard: ignore ALL input while a configureTool call is in flight.
+    // Uses the ref (not the state) so the check always sees the latest
+    // value, even when the useInput closure is stale.
+    if (runningRef.current) return;
 
     if (key.return && input.trim()) {
       const userMsg = input.trim();
@@ -53,6 +63,9 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
 
       // If user typed a tool name, configure it
       setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+      // Set the ref SYNCHRONOUSLY (before any await / re-render) so a
+      // second Enter pressed before the next paint is also rejected.
+      runningRef.current = true;
       setRunning(true);
 
       configureTool(userMsg, modeName, undefined, (msg) => {
@@ -63,6 +76,7 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
             ...prev,
             { role: "system", content: result.message },
           ]);
+          runningRef.current = false;
           setRunning(false);
           setFinished(true);
           onMessage?.(result.message);
@@ -72,6 +86,7 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
             ...prev,
             { role: "system", content: `Error: ${(err as Error).message}` },
           ]);
+          runningRef.current = false;
           setRunning(false);
         });
       return;
@@ -92,18 +107,21 @@ export function ConfiguratorChat({ onClose, onMessage, toolName }: Readonly<Conf
   React.useEffect(() => {
     if (toolName && !running && messages.length === 0) {
       setMessages([{ role: "system", content: `Configurando "${toolName}"...` }]);
+      runningRef.current = true;
       setRunning(true);
       configureTool(toolName, modeName, undefined, (msg) => {
         setMessages((prev) => [...prev, { role: msg.includes("[Tool:") ? "system" : "configurator", content: msg }]);
       })
         .then((result) => {
           setMessages((prev) => [...prev, { role: "system", content: result.message }]);
+          runningRef.current = false;
           setRunning(false);
           setFinished(true);
           onMessage?.(result.message);
         })
         .catch((err) => {
           setMessages((prev) => [...prev, { role: "system", content: `Error: ${(err as Error).message}` }]);
+          runningRef.current = false;
           setRunning(false);
         });
     }

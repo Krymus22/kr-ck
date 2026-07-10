@@ -60,6 +60,14 @@ export function createPlan(steps: string[]): Plan {
  */
 export function markStep(index: number, done: boolean): boolean {
   if (!currentPlan) return false;
+  // BUG FIX (FIX-CORE Bug 2): NaN bypasses the `< 0 || >= length` bounds check
+  // (all NaN comparisons are false), so `steps[NaN].done = done` would throw
+  // TypeError. Guard with Number.isInteger so any non-integer (NaN, Infinity,
+  // floats, strings coerced by callers) returns false instead of throwing.
+  if (!Number.isInteger(index)) {
+    log.warn(`[PLAN] markStep received non-integer index: ${String(index)} — ignoring.`);
+    return false;
+  }
   if (index < 0 || index >= currentPlan.steps.length) return false;
 
   currentPlan.steps[index]!.done = done;

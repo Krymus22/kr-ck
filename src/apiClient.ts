@@ -1147,23 +1147,59 @@ function is5xxRetryableError(err: unknown): boolean {
   return typeof status === "number" && RETRIABLE_5XX_STATUSES.has(status);
 }
 
+// BUG FIX (FIX-CORE Bug 1): per-type retry counters. §3.1 specifies separate
+// budgets: MAX_429_RETRIES=4, MAX_403_RETRIES=3, MAX_NETWORK_RETRIES=15 (used
+// by both 5xx and network errors). Previously, a single shared `attempt`
+// counter was incremented by EVERY retry type — so 4 transient network errors
+// would silently exhaust the 429 budget (the next 429 would throw "quota
+// exhausted" immediately). This interface holds one counter per error type so
+// each budget is enforced independently.
+export interface RetryCounters {
+  n429: number;
+  n403: number;
+  n5xx: number;
+  network: number;
+}
+
+export type RetryErrorType = "429" | "403" | "5xx" | "network";
+
+export interface RetryResult {
+  retried: boolean;
+  newAttempt: number;
+  // Which counter `newAttempt` applies to. Callers use this to update the
+  // correct field of `RetryCounters`.
+  type: RetryErrorType;
+}
+
 function handleStreamError(
   err: unknown,
-  attempt: number,
-): Promise<{ retried: boolean; newAttempt: number }> | null {
+  counters: RetryCounters,
+): Promise<RetryResult | null> {
   if (is429Error(err)) {
-    return handle429Error(err, attempt);
+    return handle429Error(err, counters.n429).then((r) => ({ ...r, type: "429" as const }));
   }
   if (is403Error(err)) {
-    return handle403Error(err, attempt);
+    return handle403Error(err, counters.n403).then((r) => ({ ...r, type: "403" as const }));
   }
   if (is5xxRetryableError(err)) {
-    return handle5xxRetryableError(err, attempt);
+    return handle5xxRetryableError(err, counters.n5xx).then((r) => ({ ...r, type: "5xx" as const }));
   }
   if (isTransientNetworkError(err)) {
-    return handleTransientNetworkError(err, attempt);
+    return handleTransientNetworkError(err, counters.network).then((r) => ({ ...r, type: "network" as const }));
   }
-  return null;
+  return Promise.resolve(null);
+}
+
+// Update a RetryCounters in place based on a RetryResult. Returns the total
+// attempts across all types (for log/debug display).
+function applyRetryResult(counters: RetryCounters, result: RetryResult): number {
+  switch (result.type) {
+    case "429": counters.n429 = result.newAttempt; break;
+    case "403": counters.n403 = result.newAttempt; break;
+    case "5xx": counters.n5xx = result.newAttempt; break;
+    case "network": counters.network = result.newAttempt; break;
+  }
+  return counters.n429 + counters.n403 + counters.n5xx + counters.network;
 }
 
 function isTransientNetworkError(err: unknown): boolean {
@@ -1617,15 +1653,20 @@ async function chatWithPool(
   // Optional for backwards-compat with any callers that don't have a timer.
   resetHangTimer?: () => void
 ): Promise<ChatResponse> {
-  let attempt = 0;
+  // BUG FIX (FIX-CORE Bug 1): separate per-type retry counters. Previously a
+  // single shared `attempt` was incremented by every retry type, so 4 network
+  // retries would silently exhaust the 429 budget. Each type now has its own
+  // counter, enforced independently inside its handler.
+  const counters: RetryCounters = { n429: 0, n403: 0, n5xx: 0, network: 0 };
   for (;;) {
     const poolHandle = await acquireKeyForStreaming();
     const start = Date.now();
     let httpStatus: number | null = null;
     let releaseSuccess!: boolean;
     try {
+      const totalAttempts = counters.n429 + counters.n403 + counters.n5xx + counters.network;
       log.debug(`Sending ${messages.length} messages to ${config.model} (pool mode)` +
-        (attempt > 0 ? ` (retry ${attempt}/${MAX_429_RETRIES})` : ""));
+        (totalAttempts > 0 ? ` (retry #${totalAttempts})` : ""));
 
       // ─── Delayed Hedging ────────────────────────────────────────────
       // If there are 2+ free keys in the pool, send a backup request on
@@ -1959,10 +2000,11 @@ async function chatWithPool(
     } catch (err: unknown) {
       releaseSuccess = false;
       httpStatus = (err as any)?.status ?? null;
-      logApiDiagnostics(err, attempt);
-      const retryResult = await handleStreamError(err, attempt);
-      if (retryResult?.retried && attempt < MAX_429_RETRIES + MAX_NETWORK_RETRIES) {
-        attempt = retryResult.newAttempt;
+      const totalAttempts = counters.n429 + counters.n403 + counters.n5xx + counters.network;
+      logApiDiagnostics(err, totalAttempts);
+      const retryResult = await handleStreamError(err, counters);
+      if (retryResult?.retried) {
+        applyRetryResult(counters, retryResult);
         continue;
       }
       throw err;
@@ -1980,13 +2022,15 @@ async function chatSingleKey(
   onToken: ((token: string) => void) | undefined,
   onThinking: (() => void) | undefined
 ): Promise<ChatResponse> {
-  let attempt = 0;
+  // BUG FIX (FIX-CORE Bug 1): per-type retry counters — see chatWithPool.
+  const counters: RetryCounters = { n429: 0, n403: 0, n5xx: 0, network: 0 };
   for (;;) {
     await mutex.lock();
     try {
       await rateLimiter.acquire();
+      const totalAttempts = counters.n429 + counters.n403 + counters.n5xx + counters.network;
       log.debug(`Sending ${messages.length} messages to ${config.model}` +
-        (attempt > 0 ? ` (retry ${attempt}/${MAX_429_RETRIES})` : ""));
+        (totalAttempts > 0 ? ` (retry #${totalAttempts})` : ""));
       const rawStream = await createStreamRequest(messages, tools);
       const state = createStreamState();
       await consumeStream(rawStream, state, onStreamStart, onToken, onThinking);
@@ -1997,10 +2041,11 @@ async function chatSingleKey(
       );
       return response;
     } catch (err: unknown) {
-      logApiDiagnostics(err, attempt);
-      const retryResult = await handleStreamError(err, attempt);
+      const totalAttempts = counters.n429 + counters.n403 + counters.n5xx + counters.network;
+      logApiDiagnostics(err, totalAttempts);
+      const retryResult = await handleStreamError(err, counters);
       if (retryResult?.retried) {
-        attempt = retryResult.newAttempt;
+        applyRetryResult(counters, retryResult);
         continue;
       }
       throw err;

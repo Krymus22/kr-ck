@@ -147,13 +147,19 @@ function findInPath(toolName: string): string | null {
     if (process.platform === "win32") {
       // Use PowerShell — same as executar_comando does.
       // This ensures we get the same PATH the IA sees.
+      //
+      // IMPORTANT: do NOT set `shell: "powershell.exe"`. Node.js appends
+      // cmd.exe-style `/d /s /c` flags to ANY custom shell on Windows, which
+      // PowerShell rejects (it interprets `/d` as a path and aborts). Instead
+      // we let Node use its default Windows shell (cmd.exe), which hosts the
+      // explicit `powershell -NoProfile -Command "..."` invocation correctly.
+      // See BH28 (FIX-WINDOWS Bug 1).
       const result = execSync(
         `powershell -NoProfile -Command "(Get-Command ${toolName} -ErrorAction SilentlyContinue).Source"`,
         {
           encoding: "utf8",
           timeout: 5000,
           stdio: ["pipe", "pipe", "ignore"],
-          shell: "powershell.exe",
         }
       );
       const found = result.trim();
@@ -194,11 +200,15 @@ function isExecutable(filePath: string): boolean {
  */
 function getVersion(binaryPath: string): string | null {
   try {
+    // On Windows we deliberately do NOT set `shell: "powershell.exe"`.
+    // Node.js appends cmd.exe-style `/d /s /c` flags to any custom shell on
+    // Windows, which PowerShell rejects. Node's default Windows shell
+    // (cmd.exe) handles `"<path>" --version` correctly and inherits the same
+    // PATH. See BH28 (FIX-WINDOWS Bug 2).
     const result = execSync(`"${binaryPath}" --version`, {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["pipe", "pipe", "ignore"],
-      shell: process.platform === "win32" ? "powershell.exe" : undefined,
     });
     // Extract version number from output (e.g., "rojo 7.6.1" → "7.6.1")
     const match = result.match(/(\d+\.\d+\.\d+)/);
@@ -506,7 +516,8 @@ export function isAutoDetectEnabled(): boolean {
 export function extractToolBinaryName(toolId: string): string {
   return toolId
     .replace(/^tool:/, "")
-    .replace(/_(build|serve|sourcemap|install|search|publish|lint|format|run|process|add)$/, "");
+    .replace(/_(build|serve|sourcemap|install|search|publish|lint|format|run|process|add)$/, "")
+    .replace(/_/g, "-"); // underscores → dashes (e.g. wally_package_types → wally-package-types). See BH28 (FIX-WINDOWS Bug 3).
 }
 
 /**

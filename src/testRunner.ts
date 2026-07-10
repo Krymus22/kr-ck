@@ -32,6 +32,10 @@ export interface TestResult {
   output: string;
   success: boolean;
   exitCode?: number;
+  /** True if the underlying runner actually executed (false = skipped / not installed). */
+  ran?: boolean;
+  /** Human-readable reason the run was skipped or did not execute. */
+  skipReason?: string;
 }
 
 export interface FixSuggestion {
@@ -208,9 +212,22 @@ function runPytest(dir: string, fileFilter?: string): TestResult {
 }
 
 function runCargoTest(dir: string, fileFilter?: string): TestResult {
-  const cmd = fileFilter
-    ? `cargo test "${fileFilter}" 2>&1`
-    : "cargo test 2>&1";
+  // BUG FIX: `cargo test` does NOT accept file paths as filters — passing a
+  // path like `src/foo.rs` silently matches zero tests and cargo reports
+  // `0 passed; 0 failed` with exit 0 (false success). Only forward filters
+  // that look like a test-name substring (no path separators, no .rs ext);
+  // otherwise drop the filter entirely and run the whole crate.
+  let cmd = "cargo test 2>&1";
+  if (fileFilter) {
+    const looksLikeTestName =
+      !fileFilter.includes("/") &&
+      !fileFilter.includes("\\") &&
+      !fileFilter.endsWith(".rs") &&
+      !fileFilter.endsWith(".toml");
+    if (looksLikeTestName) {
+      cmd = `cargo test "${fileFilter}" 2>&1`;
+    }
+  }
   const start = Date.now();
   const { stdout, stderr, exitCode } = runCommand(cmd, dir, 180_000);
   const duration = Date.now() - start;
@@ -220,9 +237,19 @@ function runCargoTest(dir: string, fileFilter?: string): TestResult {
 }
 
 function runGoTest(dir: string, fileFilter?: string): TestResult {
-  const cmd = fileFilter
-    ? `go test -v "${fileFilter}" 2>&1`
-    : "go test -v ./... 2>&1";
+  // BUG FIX: `go test` only accepts package paths (or `./...`), NOT file
+  // paths. Passing `foo_test.go` made `go test` fail with a confusing
+  // "no Go files" / "expected package" error and silently report 0 tests.
+  // Derive the package directory from the file path with path.dirname().
+  let cmd: string;
+  if (fileFilter) {
+    const pkgPath = fileFilter.endsWith(".go")
+      ? path.dirname(fileFilter)
+      : fileFilter;
+    cmd = `go test -v "${pkgPath}" 2>&1`;
+  } else {
+    cmd = "go test -v ./... 2>&1";
+  }
   const start = Date.now();
   const { stdout, stderr, exitCode } = runCommand(cmd, dir, 180_000);
   const duration = Date.now() - start;
@@ -239,6 +266,28 @@ function runGoTest(dir: string, fileFilter?: string): TestResult {
 function runTestEZ(dir: string, fileFilter?: string): TestResult {
   const start = Date.now();
   const testDir = path.join(dir, "tests");
+
+  // BUG FIX (Bug 3): previously this fell through to fs.readdirSync(testDir)
+  // which throws ENOENT (synchronous throw, surfaces as an unhandled
+  // rejection in async callers) when the tests/ directory is missing.
+  // Detect the missing directory up-front and return a clear, non-success
+  // result instead of crashing.
+  if (!fs.existsSync(testDir) || !fs.statSync(testDir).isDirectory()) {
+    const duration = Date.now() - start;
+    return {
+      framework: "testez",
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      duration,
+      failures: [],
+      output: "tests/ directory not found",
+      success: false,
+      exitCode: 1,
+      ran: false,
+      skipReason: "tests/ directory not found",
+    };
+  }
 
   // Try lune first (runs .luau files directly)
   const luneBinary = findBinary("lune");
@@ -279,7 +328,10 @@ function runTestEZ(dir: string, fileFilter?: string): TestResult {
     };
   }
 
-  // No lune — return info that TestEZ was detected but can't run
+  // BUG FIX (Bug 4): TestEZ was detected but the `lune` binary is missing,
+  // so tests never actually ran. The previous implementation returned
+  // `success: true`, falsely reporting a green run — an honesty violation.
+  // Report a non-success result with a clear skipReason instead.
   const duration = Date.now() - start;
   return {
     framework: "testez",
@@ -289,8 +341,10 @@ function runTestEZ(dir: string, fileFilter?: string): TestResult {
     duration,
     failures: [],
     output: "TestEZ detected but 'lune' binary not found. Install lune to run Luau tests: https://lune-org.github.io/docs",
-    success: true,
-    exitCode: 0,
+    success: false,
+    exitCode: 1,
+    ran: false,
+    skipReason: "lune binary not found",
   };
 }
 
@@ -506,8 +560,14 @@ function parseCargoOutput(output: string, exitCode: number, duration: number): T
 
 function parseGoTestOutput(output: string, exitCode: number, duration: number): TestResult {
   const failures: TestFailure[] = [];
-  const passRegex = /ok\s+.*?(\d+)\.\d+s/;
-  const passMatch = passRegex.exec(output);
+
+  // BUG FIX (Bug 5): the previous regex `/ok\s+.*?(\d+)\.\d+s/` only matched
+  // the per-package `ok <pkg> X.XXs` summary line, so `passed` was always 0
+  // (no match) or 1 (match) regardless of how many tests actually passed.
+  // In `go test -v` output every individual test emits a `--- PASS:` or
+  // `--- SKIP:` line; count those for an accurate tally.
+  const passCount = (output.match(/^--- PASS:/gm) ?? []).length;
+  const skipCount = (output.match(/^--- SKIP:/gm) ?? []).length;
 
   // Parse "--- FAIL: TestName (X.XXs)" blocks
   const failBlocks = output.split(/--- FAIL: (\w+)/);
@@ -523,9 +583,9 @@ function parseGoTestOutput(output: string, exitCode: number, duration: number): 
 
   return {
     framework: "go",
-    passed: passMatch ? 1 : 0,
+    passed: passCount,
     failed: failures.length,
-    skipped: 0,
+    skipped: skipCount,
     duration,
     failures,
     output,
