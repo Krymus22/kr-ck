@@ -133,8 +133,16 @@ function formatToolResult(resultStr: string): string {
  *
  * Extracted into a standalone function so the rendering logic is identical
  * in both contexts — no drift between static and live message appearance.
+ *
+ * @param prevMsg  The message before this one in the array (or null if first).
+ *                 Used to decide whether to show the "Claude-Killer:" header:
+ *                 only shown at the START of an assistant turn (i.e., when the
+ *                 previous message was from the user, or there is no previous
+ *                 message). This prevents the header from appearing multiple
+ *                 times in a single turn where the assistant makes tool calls
+ *                 and then responds with text.
  */
-function renderMessage(msg: ChatMessage, keyPrefix: string): React.ReactElement | null {
+function renderMessage(msg: ChatMessage, keyPrefix: string, prevMsg: ChatMessage | null = null): React.ReactElement | null {
   if (msg.role === "system") return null;
 
   // Tool messages: render with icon, indented, grey
@@ -221,9 +229,17 @@ function renderMessage(msg: ChatMessage, keyPrefix: string): React.ReactElement 
 
   // Normal assistant message — render through MarkdownRenderer (bold,
   // tables, code, headers, lists, etc.).
+  //
+  // HEADER DEDUP: only show the "Claude-Killer:" header at the START of an
+  // assistant turn — i.e., when the previous message was a user message (or
+  // there is no previous message). If the previous message was a tool result
+  // or another assistant message, we're in the MIDDLE of a turn (the assistant
+  // made tool calls and is now continuing), so we skip the header to avoid
+  // visual pollution (multiple "Claude-Killer:" lines in a single turn).
+  const showAssistantHeader = !prevMsg || prevMsg.role === "user";
   return (
     <Box key={keyPrefix} flexDirection="column">
-      <Text color={colors.secondary} bold> Claude-Killer:</Text>
+      {showAssistantHeader && <Text color={colors.secondary} bold> Claude-Killer:</Text>}
       <Box marginLeft={1}>
         <MarkdownRenderer text={msg.content} />
       </Box>
@@ -324,7 +340,14 @@ export const ChatDisplay = React.memo(function ChatDisplay({ messages, maxVisibl
       <Static items={staticMsgs}>
         {(_, i) => {
           const key = `msg-${staticKeyBase + i}`;
-          return renderMessage(staticMsgs[i]!, key);
+          // Compute previous message for header-dedup logic:
+          // - If i > 0, previous is staticMsgs[i-1]
+          // - If i === 0, previous is candidateMsgs[staticKeyBase-1] (could
+          //   be undefined if staticKeyBase === 0, i.e., first message overall)
+          const prevMsg = i > 0
+            ? staticMsgs[i - 1] ?? null
+            : (staticKeyBase > 0 ? candidateMsgs[staticKeyBase - 1] ?? null : null);
+          return renderMessage(staticMsgs[i]!, key, prevMsg);
         }}
       </Static>
 
@@ -334,7 +357,13 @@ export const ChatDisplay = React.memo(function ChatDisplay({ messages, maxVisibl
           the frame never exceeds the terminal viewport. */}
       {liveMsgs.map((msg, i) => {
         const key = `msg-${liveKeyBase + i}`;
-        return renderMessage(msg, key);
+        // Compute previous message for header-dedup logic:
+        // - If i > 0, previous is liveMsgs[i-1]
+        // - If i === 0, previous is the last static message (if any)
+        const prevMsg = i > 0
+          ? liveMsgs[i - 1] ?? null
+          : (staticMsgs.length > 0 ? staticMsgs[staticMsgs.length - 1] ?? null : null);
+        return renderMessage(msg, key, prevMsg);
       })}
     </Box>
   );
