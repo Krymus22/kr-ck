@@ -101,9 +101,9 @@ export function isScoutEnabled(): boolean {
   return process.env.SCOUT_ENABLED === "1" || process.env.SCOUT_ENABLED === "true";
 }
 
-/** Get the model ID to use for the scout (default: mistral-medium-3.5). */
+/** Get the model ID to use for the scout (default: diffusiongemma-26b-a4b-it). */
 export function getScoutModel(): string {
-  return process.env.SCOUT_MODEL ?? "mistralai/mistral-medium-3.5-128b";
+  return process.env.SCOUT_MODEL ?? "google/diffusiongemma-26b-a4b-it";
 }
 
 /**

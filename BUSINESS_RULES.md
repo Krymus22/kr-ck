@@ -639,7 +639,7 @@ think → pensar
 | Parâmetro | Env Var | Default | Regra |
 |-----------|---------|---------|-------|
 | `SCOUT_ENABLED` | `SCOUT_ENABLED` | `0` (off) | `1` ou `true` para ativar |
-| `SCOUT_MODEL` | `SCOUT_MODEL` | `mistralai/mistral-medium-3.5-128b` | Modelo menor (deve suportar tools) |
+| `SCOUT_MODEL` | `SCOUT_MODEL` | `google/diffusiongemma-26b-a4b-it` | Modelo menor (deve suportar tools) |
 | `SCOUT_MAX_DURATION_MS` | `SCOUT_MAX_DURATION_MS` | `120000` (2min) | Timeout global do scout |
 | Max tool calls | — | `12` (clamp `[1, 50]`) | Limite de rounds de tool calls |
 | Max tool result bytes | — | `8192` | Truncamento para evitar context overflow |

@@ -47,6 +47,15 @@ vi.mock("../lspAst.js", () => ({
 
 vi.mock("../modelRegistry.js", () => ({
   getModelInfo: vi.fn((id: string) => {
+    if (id === "google/diffusiongemma-26b-a4b-it") {
+      return {
+        id, name: "DiffusionGemma 26B",
+        contextWindow: 256000, maxOutputTokens: 4096,
+        costPer1MPrompt: 0, costPer1MCompletion: 0,
+        supportsTools: true, supportsParallelTools: true,
+        hasThinking: true, provider: "nvidia",
+      };
+    }
     if (id === "mistralai/mistral-medium-3.5-128b") {
       return {
         id, name: "Mistral Medium 3.5",
@@ -112,9 +121,9 @@ describe("scoutAgent — model config", () => {
     delete process.env.SCOUT_MODEL;
   });
 
-  it("getScoutModel returns default mistral-medium-3.5", () => {
+  it("getScoutModel returns default diffusiongemma-26b", () => {
     delete process.env.SCOUT_MODEL;
-    expect(getScoutModel()).toBe("mistralai/mistral-medium-3.5-128b");
+    expect(getScoutModel()).toBe("google/diffusiongemma-26b-a4b-it");
   });
 
   it("getScoutModel returns custom model from env", () => {
@@ -185,7 +194,7 @@ describe("scoutAgent — runScout", () => {
     expect(result).not.toBeNull();
     expect(result!.completed).toBe(true);
     expect(result!.toolResults).toHaveLength(0);
-    expect(result!.modelUsed).toBe("mistralai/mistral-medium-3.5-128b");
+    expect(result!.modelUsed).toBe("google/diffusiongemma-26b-a4b-it");
   });
 
   it("executes tool calls and returns raw results (not summary)", async () => {
@@ -291,12 +300,12 @@ describe("scoutAgent — formatScoutResult", () => {
       ],
       filesInspected: ["/project/a.ts"],
       completed: true,
-      modelUsed: "mistralai/mistral-medium-3.5-128b",
+      modelUsed: "google/diffusiongemma-26b-a4b-it",
       toolCallCount: 2,
     };
     const formatted = formatScoutResult(result as any);
     expect(formatted).toContain("[SCOUT RESULTS");
-    expect(formatted).toContain("mistralai/mistral-medium-3.5-128b");
+    expect(formatted).toContain("google/diffusiongemma-26b-a4b-it");
     expect(formatted).toContain("2 successful calls");
     // Raw results should be present, not a summary
     expect(formatted).toContain("content of a.ts");
@@ -312,7 +321,7 @@ describe("scoutAgent — formatScoutResult", () => {
       toolResults: [],
       filesInspected: [],
       completed: false,
-      modelUsed: "mistralai/mistral-medium-3.5-128b",
+      modelUsed: "google/diffusiongemma-26b-a4b-it",
       toolCallCount: 0,
       error: "API_TIMEOUT",
     };
