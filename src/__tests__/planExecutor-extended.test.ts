@@ -101,21 +101,18 @@ describe("planExecutor-extended: updatePlan (manipulação de estado)", () => {
     expect(getPlan()!.steps[0]!.description).toBe("y");
   });
 
-  it("marcar etapa como pendente APÓS todas concluídas NÃO desfaz completedAt", async () => {
+  it("marcar etapa como pendente APÓS todas concluídas DESFAZ completedAt (FIX-MISC BH15 HIGH 2)", async () => {
     const { createPlan, markStep, getPlan } = await import("./../planExecutor.js");
     createPlan(["a"]);
     markStep(0, true);
-    const completedAtBefore = getPlan()!.completedAt;
-    expect(completedAtBefore).not.toBeNull();
+    expect(getPlan()!.completedAt).not.toBeNull();
 
-    // Desmarca
+    // Desmarca — completedAt deve ser resetado (FIX-MISC)
     markStep(0, false);
-    // completedAt continua setado (o código só setta, nunca reseta)
-    expect(getPlan()!.completedAt).toBe(completedAtBefore);
-    // Mas hasIncompletePlan volta a ser true
+    expect(getPlan()!.completedAt).toBeNull();
+    // hasIncompletePlan volta a ser true (plan re-aberto)
     const { hasIncompletePlan } = await import("./../planExecutor.js");
-    // Como completedAt !== null, hasIncompletePlan retorna false
-    expect(hasIncompletePlan()).toBe(false);
+    expect(hasIncompletePlan()).toBe(true);
   });
 });
 

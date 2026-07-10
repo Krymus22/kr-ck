@@ -172,8 +172,8 @@ zzz
       mockSpawn.mockImplementation(() => child);
 
       const r = await executarComando({ comando: "sleep 30", timeoutMs: 50 });
-      expect(r).toContain("timeout");
-      expect(r).toContain("[ERROR]");
+      expect(r).toContain("TIMEOUT");
+      expect(r).toContain("[TIMEOUT after 50ms]");
     });
 
     it("envia stdout + stderr combinados quando há ambos", async () => {
