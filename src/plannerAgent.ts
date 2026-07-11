@@ -37,8 +37,9 @@ import * as log from "./logger.js";
 import { pushActivity } from "./activityTracker.js";
 import { think, THINK_TOOL_DEFINITION } from "./thinkTool.js";
 import { isScoutEnabled, runScout, formatScoutResult, type ScoutArgs, type ScoutTask } from "./scoutAgent.js";
-import { resolveAndCheckPath } from "./pathSecurity.js";
-import { executarComando } from "./tools.js";
+// FIX-MED-PC (LOW 10): removed dead imports `resolveAndCheckPath` and
+// `executarComando` — the planner is read-only (no executarComando) and
+// pathSecurity's resolveAndCheckPath is not used anywhere in this module.
 
 // --- Config -----------------------------------------------------------------
 
@@ -50,7 +51,13 @@ function getHeavyModel(): string {
 /** Max planner iterations (tool-call rounds). Prevents runaway loops. */
 const PLANNER_MAX_ITERATIONS = parseInt(process.env.PLANNER_MAX_ITERATIONS ?? "20", 10);
 
-/** Per-iteration global timeout (ms). Default 5 min — heavy model is slow. */
+/**
+ * Total deadline (ms). Default 5 min — heavy model is slow.
+ *
+ * FIX-MED-PC (MED 4): previous comment said "per-iteration" but this is the
+ * TOTAL deadline checked via `Date.now() > deadline` at the top of each
+ * iteration — not a per-call timeout.
+ */
 const PLANNER_TIMEOUT_MS = parseInt(process.env.PLANNER_TIMEOUT_MS ?? "300000", 10);
 
 // --- Anti-recursion ---------------------------------------------------------
@@ -232,7 +239,11 @@ async function executePlannerTool(
       case "buscar_web": {
         const query = asString(args.query);
         if (!query) return { result: "[ERROR] query vazia", ok: false };
-        const maxResults = typeof args.maxResults === "number" ? args.maxResults : 5;
+        // FIX-LOW-ALL (S2-2 LOW 9): range-validate maxResults to [1, 20] —
+        // defends against absurd model-supplied values (0, -5, 1000) that
+        // would either return nothing or hammer the search API.
+        const rawMax = typeof args.maxResults === "number" ? args.maxResults : 5;
+        const maxResults = Math.max(1, Math.min(20, rawMax));
         const { webSearch } = await import("./apiResearcher.js");
         const results = await webSearch(query, maxResults);
         if (results.length === 0) return { result: "Nenhum resultado encontrado.", ok: true };
@@ -244,11 +255,23 @@ async function executePlannerTool(
       case "ler_url": {
         const url = asString(args.url);
         if (!url) return { result: "[ERROR] url vazia", ok: false };
-        const maxLength = typeof args.maxLength === "number" ? args.maxLength : 10000;
+        // FIX-MED-PC (MED 5): respect user's maxLength first; apply 32K only
+        // as an ABSOLUTE CAP. Previously the loop's 32K middle-cut truncation
+        // (runPlanner) silently overrode a user-chosen maxLength > 32K,
+        // discarding the user's "first N chars" intent. Now ler_url handles
+        // its own truncation here (min(userMaxLength, 32K)) and the loop
+        // skips 32K truncation for ler_url results.
+        // FIX-LOW-ALL (S2-2 LOW 9): range-validate maxLength to [100, 50000]
+        // BEFORE applying the 32K cap — defends against absurd model-supplied
+        // values (0, -5, 10_000_000) that would either return nothing or
+        // overflow the model's context window. Default 10000 stays in range.
+        const rawUserMax = typeof args.maxLength === "number" ? args.maxLength : 10000;
+        const userMaxLength = Math.max(100, Math.min(50000, rawUserMax));
+        const effectiveMax = Math.min(userMaxLength, 32_000);
         const { webRead } = await import("./apiResearcher.js");
         const content = await webRead(url);
-        const truncated = content.length > maxLength
-          ? content.slice(0, maxLength) + "\n[TRUNCATED]"
+        const truncated = content.length > effectiveMax
+          ? content.slice(0, effectiveMax) + "\n[TRUNCATED]"
           : content;
         return { result: truncated || "[ERROR] Conteúdo vazio", ok: !!content };
       }
@@ -275,7 +298,12 @@ async function executePlannerTool(
         if (tasks.length === 0) {
           return { result: "[ERROR] Nenhuma tarefa válida.", ok: false };
         }
-        const maxCalls = typeof args.max_tool_calls === "number" ? args.max_tool_calls : undefined;
+        // FIX-LOW-ALL (S2-2 LOW 8): clamp max_tool_calls to [1, 100] —
+        // values >100 would let the scout run unbounded (its own loop cap is
+        // 100), and values <=0 would be nonsensical. The tool schema says
+        // "max 100" but the schema is advisory — enforce programmatically.
+        const rawCalls = typeof args.max_tool_calls === "number" ? args.max_tool_calls : 50;
+        const maxCalls = Math.max(1, Math.min(100, rawCalls));
         const scoutArgs: ScoutArgs = {
           objective,
           tasks,
@@ -341,6 +369,19 @@ async function executePlannerTool(
 // --- Public API ------------------------------------------------------------
 
 export interface PlannerCallbacks {
+  /** Called when the model starts streaming a response. */
+  onStreamStart?: () => void;
+  /** Called for each token streamed (for TUI rendering). */
+  onToken?: (token: string) => void;
+  /** Called when the model is "thinking" (reasoning tokens). */
+  onThinking?: () => void;
+  /**
+   * Called with token usage stats after each model call.
+   * FIX-MED-ORCH (S2-8 HIGH / S1-8 HIGH): planner usage was never reported,
+   * making token-cost attribution impossible. The orchestrator forwards this
+   * callback through so the TUI / telemetry sees heavy-model token usage.
+   */
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
   /** Called before each tool call (for TUI display). */
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   /** Called after each tool call completes. */
@@ -380,11 +421,14 @@ export async function runPlanner(
   const heavyModel = getHeavyModel();
 
   if (typeof task !== "string" || task.length === 0) {
+    // FIX-LOW-ALL (S2-2 LOW 11): report actual elapsed time, not 0 — the
+    // `start` was captured at function entry, so even an immediate early
+    // return took some nanoseconds. Reporting 0 misled callers/tests.
     return {
       plan: "",
       success: false,
       error: "Invalid task (must be non-empty string)",
-      elapsedMs: 0,
+      elapsedMs: Date.now() - start,
       toolCallsMade: 0,
     };
   }
@@ -392,11 +436,12 @@ export async function runPlanner(
   // Anti-recursion guard: planner can't be called from inside another planner
   // (would deadlock via shared modelOverride state).
   if (process.env.CLAUDE_KILLER_AGENT_ID === PLANNER_AGENT_ID) {
+    // FIX-LOW-ALL (S2-2 LOW 11): report actual elapsed time (see above).
     return {
       plan: "",
       success: false,
       error: "Planner não pode ser chamado de dentro de outro planner (recursão)",
-      elapsedMs: 0,
+      elapsedMs: Date.now() - start,
       toolCallsMade: 0,
     };
   }
@@ -412,6 +457,27 @@ export async function runPlanner(
   let toolCallsMade = 0;
 
   try {
+    // FIX-MED-SEC (S3-6 HIGH 7): The planner's internal conversation is
+    // EPHEMERAL BY DESIGN. The `messages` array below is a LOCAL variable —
+    // it is NOT appended to the shared `history` module (which the main
+    // agent / orchestrator uses) and is NOT persisted to the session file.
+    // When runPlanner returns, `messages` goes out of scope and is GC'd.
+    // This is intentional:
+    //   1. The planner's system prompt + scratch reasoning (tool calls,
+    //      intermediate thoughts) are an internal implementation detail of
+    //      planning — they should NOT pollute the orchestrator's context
+    //      (the orchestrator only needs the final PLAN, which is returned
+    //      as a string).
+    //   2. Persisting them would balloon the session file (a planner turn
+    //      can do 10+ tool calls reading files via scout) and confuse the
+    //      user when they resume the session (they'd see planner-internal
+    //      tool calls mixed with the orchestrator's tool calls).
+    //   3. The orchestrator stores the FINAL plan in `planStore` and passes
+    //      it verbatim to chamar_programador — that's the only artifact the
+    //      orchestrator needs to remember.
+    // If a future feature needs to expose planner internals (e.g. for
+    // debugging), it should write them to a separate log file, NOT to the
+    // shared history.
     const messages: Message[] = [
       { role: "system", content: PLANNER_SYSTEM_PROMPT },
       {
@@ -438,12 +504,29 @@ export async function runPlanner(
         PLANNER_TOOLS,
         heavyModel,
         false, // thinking ENABLED — planner needs reasoning
+        // FIX-MED-ORCH (S1-1 MED 9 / S2-6): forward streaming callbacks so
+        // the TUI isn't silent during heavy-model work. Without these, the
+        // user sees no token streaming while the planner is thinking.
+        callbacks?.onStreamStart,
+        callbacks?.onToken,
+        callbacks?.onThinking,
       );
+
+      // FIX-MED-ORCH (S2-8 HIGH / S1-8 HIGH): report planner token usage.
+      if (response.usage && callbacks?.onUsage) {
+        callbacks.onUsage(response.usage);
+      }
 
       const choice = response.choices?.[0];
       if (!choice) {
         throw new Error("Resposta vazia do modelo");
       }
+
+      // FIX-MED-PC (LOW 12): null-check choice.message before accessing
+      // content/tool_calls. Some API responses return a choice without a
+      // `message` field (malformed/empty); without this guard the next
+      // line would throw TypeError on `msg.content`.
+      if (!choice?.message) break;
 
       const msg = choice.message;
 
@@ -460,7 +543,10 @@ export async function runPlanner(
         for (const tc of msg.tool_calls) {
           toolCallsMade++;
           const toolName = tc.function?.name ?? "unknown";
-          const tcId = tc.id ?? `planner-tc-${iter}-${toolCallsMade}-${Date.now()}`;
+          // FIX-MED-PC (LOW 7): use || instead of ?? so an EMPTY-STRING tc.id
+          // (some APIs return "") also falls back to the generated id. An
+          // empty tool_call_id can confuse the API on the next turn.
+          const tcId = tc.id || `planner-tc-${iter}-${toolCallsMade}-${Date.now()}`;
 
           // Parse args (handle malformed JSON gracefully — mirrors scout pattern).
           let parsedArgs: Record<string, unknown> = {};
@@ -494,7 +580,10 @@ export async function runPlanner(
           // Truncate very large results to prevent context overflow.
           // (Planner is a heavy model with a large context window, but
           // unbounded file reads can still OOM it.)
-          const forModel = result.length > 32_000
+          // FIX-MED-PC (MED 5): EXEMPT ler_url — it already truncates to
+          // min(userMaxLength, 32K) in its own case handler. Re-applying
+          // the middle-cut here would override the user's maxLength.
+          const forModel = (toolName !== "ler_url" && result.length > 32_000)
             ? result.slice(0, 16_000) + "\n[TRUNCATED]\n" + result.slice(-16_000)
             : result;
           const forTui = result.length > 4000
@@ -516,6 +605,21 @@ export async function runPlanner(
       const plan = (msg.content ?? "").trim();
       if (!plan) {
         throw new Error("Planner não retornou um plano");
+      }
+
+      // FIX-MED-PC (HIGH 3 / S2-2): warn (but do NOT block) if the plan
+      // doesn't look like a structured plan. We check for the `[PLAN` marker
+      // OR numbered steps (regex /\d+\./). A malformed plan is still returned
+      // — the coder may still extract value, and blocking would force a retry
+      // that costs another heavy-model round-trip. Just log a warning.
+      const hasPlanMarker = plan.includes("[PLAN");
+      const hasNumberedSteps = /\d+\./.test(plan);
+      if (!hasPlanMarker && !hasNumberedSteps) {
+        log.warn(
+          `[PLANNER] Plan output failed format validation (no "[PLAN" marker ` +
+          `and no numbered steps /\\d+\\./). Returning anyway — coder may ` +
+          `still extract value. First 80 chars: ${plan.slice(0, 80)}`,
+        );
       }
 
       const result: PlannerResult = {
@@ -565,9 +669,3 @@ export async function runPlanner(
 export function _resetPlannerForTests(): void {
   // No-op — no module-level state to reset.
 }
-
-// Suppress unused-import warnings for utilities imported for type-safety /
-// future use (resolveAndCheckPath, executarComando) — they're available to
-// the planner's tool executor if needed in the future without re-importing.
-void resolveAndCheckPath;
-void executarComando;

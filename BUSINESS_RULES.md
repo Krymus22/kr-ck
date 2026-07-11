@@ -731,10 +731,10 @@ These tasks are ALREADY DONE — do not redo them. Use this context to continue:
 ```
 Usuário → Orchestrator (Gemma 4 31B)
   ├── chamar_planejador → Planner (GLM 5.2) — system prompt de planejamento
-  │   Tools: pensar, buscar_web, ler_url, usar_scout
+  │   Tools: pensar, buscar_web, ler_url, usar_scout, pesquisar_api
   ├── chamar_programador → Coder (GLM 5.2) — system prompt de código
   │   Tools: editar_arquivo, aplicar_diff, editar_multi_arquivos,
-  │          desfazer_edicao, usar_scout, pensar, executar_comando
+  │          desfazer_edicao, usar_scout, pensar, executar_comando, pesquisar_api
   ├── executar_comando_readonly — allowlist de comandos seguros
   ├── usar_scout — delega leituras para DiffusionGemma 26B
   ├── buscar_web, ler_url — web

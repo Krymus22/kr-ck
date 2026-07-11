@@ -103,6 +103,14 @@ export interface ScoutResult {
 
 // --- Config -----------------------------------------------------------------
 
+/**
+ * Agent ID used for anti-recursion (CLAUDE_KILLER_AGENT_ID env var).
+ * Set at the top of runScout and cleared in the finally block — same pattern
+ * as smallTaskAgent.ts (SMALL_TASK_AGENT_ID) and orchestratorAgent.ts
+ * (ORCHESTRATOR_AGENT_ID). §10.7 / §10.9.
+ */
+const SCOUT_AGENT_ID = "scout";
+
 /** Whether the scout feature is enabled. */
 export function isScoutEnabled(): boolean {
   return process.env.SCOUT_ENABLED === "1" || process.env.SCOUT_ENABLED === "true";
@@ -202,11 +210,20 @@ const SCOUT_TOOLS = [
       },
     },
   },
+  // FIX-MED-SCOUT-APP (S1-4 MED 4): §10.7 lists only "ler_arquivo, buscar_arquivos,
+  // buscar_texto, parse_ast" for the scout. executar_comando_readonly added per
+  // user request — read-only commands complement the read tools (ls, git status,
+  // git log, wc, etc) and are constrained by the same allowlist used by the
+  // orchestrator. Do NOT remove without confirming §10.7 is updated.
   {
     type: "function" as const,
     function: {
       name: "executar_comando_readonly",
-      description: "Execute a READ-ONLY shell command (ls, cat, git status, git log, grep, find, wc, pwd, etc). NÃO pode executar comandos que modificam arquivos (rm, mv, cp, echo >, etc).",
+      // FIX-MED-SCOUT-APP (S1-4 MED 5, S1-4 LOW 6): "find" was removed from the
+      // allowlist (FIX-ORCH-CRIT CRITICAL 1 — find has -delete/-exec) but was
+      // still listed here, misleading the model into calling it and getting
+      // rejected. The list now matches READONLY_COMMAND_PREFIXES exactly.
+      description: "Execute a READ-ONLY shell command (ls, cat, git status, git log, grep, wc, pwd, etc). NÃO pode executar comandos que modificam arquivos (rm, mv, cp, echo >, find, etc).",
       parameters: {
         type: "object",
         properties: {
@@ -342,7 +359,18 @@ function truncateResult(result: string): string {
  * Execute a read-only tool call for the scout.
  * Returns the result string.
  */
-async function executeScoutTool(toolName: string, args: Record<string, unknown>, cwd: string): Promise<string> {
+async function executeScoutTool(
+  toolName: string,
+  args: Record<string, unknown>,
+  cwd: string,
+  // FIX-MED-SCOUT-APP (S1-4 LOW 7): pass the active tool set so the MCP
+  // dispatch can verify the model isn't hallucinating a tool name. The
+  // previous `toolName.includes("__")` check would happily dispatch ANY
+  // string containing "__" to callMCPTool — including hallucinated names
+  // that aren't actually registered on any MCP server (e.g. "foo__bar").
+  // See the default-case comment below for the new logic.
+  allTools: OpenAI.Chat.Completions.ChatCompletionTool[] = [],
+): Promise<string> {
   try {
     // Lazy import to avoid circular deps at module load
     const { lerArquivo } = await import("./tools.js");
@@ -400,7 +428,10 @@ async function executeScoutTool(toolName: string, args: Record<string, unknown>,
         const comando = String(args.comando ?? "");
         if (!comando) return "[ERROR] No command provided";
         if (!isReadOnlyCommand(comando)) {
-          return `[ERROR] Command not in read-only allowlist: "${comando.slice(0, 50)}". Only read-only commands are allowed (ls, cat, git status, grep, find, wc, pwd, etc).`;
+          // FIX-MED-SCOUT-APP (S1-4 MED 5, S1-4 LOW 6): "find" is no longer in
+          // the allowlist (FIX-ORCH-CRIT CRITICAL 1 — find has -delete/-exec).
+          // Don't list it as an example here or the model will keep trying.
+          return `[ERROR] Command not in read-only allowlist: "${comando.slice(0, 50)}". Only read-only commands are allowed (ls, cat, git status, grep, wc, pwd, etc).`;
         }
         const { executarComando } = await import("./tools.js");
         const result = await executarComando({
@@ -418,7 +449,18 @@ async function executeScoutTool(toolName: string, args: Record<string, unknown>,
         // "Roblox_Studio__script_read". If the tool name matches this pattern,
         // delegate to callMCPTool — the actual tool execution happens in the
         // MCP server process (e.g. the Roblox Studio plugin).
-        if (toolName.includes("__")) {
+        //
+        // FIX-MED-SCOUT-APP (S1-4 LOW 7): the previous check was a fragile
+        // `toolName.includes("__")`. ANY string containing "__" was dispatched
+        // to callMCPTool — including hallucinated names that aren't registered
+        // on any MCP server (e.g. "foo__bar", "evil__exfil"). The new logic
+        // first verifies the tool is actually in the active tool set (which is
+        // SCOUT_TOOLS + getMCPReadTools(), computed once at the top of runScout
+        // and passed in as `allTools`). Only if it's a known tool AND contains
+        // "__" do we treat it as an MCP dispatch. This closes the hallucination
+        // gap without breaking legitimate MCP calls.
+        const isKnownTool = allTools.some(t => t.function.name === toolName);
+        if (toolName.includes("__") && isKnownTool) {
           // FIX-ORCH-CRIT (CRITICAL 2): Re-classify MCP tool — only "read"
           // tools are allowed in the scout. getMCPReadTools() filters the tool
           // LIST shown to the model, but the model can still HALLUCINATE a
@@ -490,17 +532,30 @@ async function chatWithScoutModel(
     const toolCalls = choice.message?.tool_calls as unknown[] | undefined;
     const reasoning = (choice.message as any)?.reasoning_content ?? "";
 
-    // BUG FIX (scout-no-results): Some reasoning models (DiffusionGemma 26B)
-    // return ONLY reasoning_content with no content and no tool_calls on the
-    // first call. The scout then sees empty content + no tool_calls → treats
-    // it as "no useful response" → returns completed=false → "no results".
-    // Fix: log the situation so we can diagnose, and treat reasoning-only
-    // responses as "model is thinking, continue the loop" instead of error.
+    // FIX-MED-SEC (S1-7 MED): Previously, when a reasoning model returned
+    // ONLY reasoning_content (no content, no tool_calls), we MASKED the
+    // empty response as content="DONE" so the scout loop would "break and
+    // return what we have". That was buggy: when there were no prior tool
+    // results, the loop nudged the model maxCalls times, then broke and
+    // returned `completed: true` with `toolResults: []` — a SILENT FAILURE.
+    // The orchestrator/main agent then treated the scout as "succeeded with
+    // no data" and had no signal to fall back to direct tool calls.
+    //
+    // Now we return the empty response as-is. The false-positive check in
+    // runScout (just below the chatWithScoutModel call) catches this case
+    // and returns `completed: false` with a clear error, so the caller can
+    // fall back to direct ler_arquivo/buscar_texto calls. This matches the
+    // behavior the bug report requests: "if the model responds with no
+    // tool calls AND no content, return completed:false with an error
+    // instead of completed:true". The "DONE" sentinel is still honored
+    // when the model itself emits content="DONE" (it's truthy, so the
+    // false-positive check doesn't trigger).
     if (!content && (!toolCalls || toolCalls.length === 0)) {
-      log.warn(`[SCOUT] Model ${scoutModel} returned no content and no tool_calls. finish_reason=${choice.finish_reason}. reasoning_content=${reasoning.length} chars. Treating as 'thinking' — will retry.`);
-      // Return with content="DONE" so the loop breaks and we return what we have
-      // (which may be nothing — but at least we don't show "no results" error)
-      return { content: "DONE", tool_calls: undefined, finish_reason: choice.finish_reason ?? "stop" };
+      log.warn(
+        `[SCOUT] Model ${scoutModel} returned no content and no tool_calls. ` +
+          `finish_reason=${choice.finish_reason}. reasoning_content=${reasoning.length} chars. ` +
+          `Returning empty response — runScout will treat as no useful response.`,
+      );
     }
 
     return {
@@ -609,6 +664,22 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
   // to prevent it from running for hours in pathological cases (slow model +
   // max calls). Default 120s (2 min) — override via SCOUT_MAX_DURATION_MS.
   const SCOUT_MAX_DURATION_MS = parseInt(process.env.SCOUT_MAX_DURATION_MS ?? "120000", 10);
+
+  // FIX-MED-SCOUT-APP (S1-4 HIGH 1): Anti-recursion guard. Set
+  // CLAUDE_KILLER_AGENT_ID = "scout" so that any nested sub-agent (small task,
+  // planner, coder, orchestrator) that checks this env var sees we're already
+  // inside a scout run and refuses to recurse. Mirrors smallTaskAgent.ts:611-612.
+  //
+  // The ID is set AFTER the feature-gate / model / cwd / input validations
+  // above (so a skipped scout doesn't pollute the env var) but BEFORE the tool
+  // loop (so any tool call that triggers a nested agent is blocked). Cleared in
+  // the `finally` below — same pattern as smallTaskAgent.ts:808-816.
+  //
+  // §10.7 "Anti-recursão": scout não pode ser chamado de dentro de sub-agentes.
+  // §10.9 "Anti-recursão ajustada": scout blocks "scout", "sub-agent",
+  // "small-task-agent" — permits "planner", "coder", "orchestrator".
+  const prevAgentId = process.env.CLAUDE_KILLER_AGENT_ID;
+  process.env.CLAUDE_KILLER_AGENT_ID = SCOUT_AGENT_ID;
 
   try {
     // Build initial history with objective + tasks
@@ -775,7 +846,7 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
         let result: string;
         let success = false;
         try {
-          result = await executeScoutTool(toolName, parsedArgs, cwd);
+          result = await executeScoutTool(toolName, parsedArgs, cwd, allTools);
           success = !result.startsWith("[ERROR]");
         } catch (toolErr) {
           const errMsg = toolErr instanceof Error ? toolErr.message : String(toolErr);
@@ -840,6 +911,16 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
       error: errMsg,
     };
   } finally {
+    // FIX-MED-SCOUT-APP (S1-4 HIGH 1): Restore the previous agent ID. If it
+    // was undefined, DELETE the env var (setting process.env.X = undefined
+    // sets the STRING "undefined", which is truthy and would trigger the
+    // anti-recursion guard on the next call). Mirrors smallTaskAgent.ts:808-816.
+    if (prevAgentId === undefined) {
+      delete process.env.CLAUDE_KILLER_AGENT_ID;
+    } else {
+      process.env.CLAUDE_KILLER_AGENT_ID = prevAgentId;
+    }
+
     // BH9 MEDIUM 1 FIX: clear the model override as a safety net. The scout
     // calls chatWithModel (via chatWithScoutModel) which sets modelOverride
     // and clears it in its own `finally` block. But if chatWithModel is

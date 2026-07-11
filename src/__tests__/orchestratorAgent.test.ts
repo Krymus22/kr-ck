@@ -327,7 +327,7 @@ describe("orchestratorAgent — runOrchestratorLoop", () => {
 
   it("calls chamar_programador when model requests it", async () => {
     // 1. Orchestrator → tool_call(chamar_programador)
-    // 2. runCoder → short summary (< 500 chars → no compaction)
+    // 2. runCoder → short summary (< 1000 chars → no compaction)
     // 3. Orchestrator → final answer
     mockChatWithModel
       .mockResolvedValueOnce(
@@ -440,10 +440,12 @@ describe("orchestratorAgent — runOrchestratorLoop", () => {
     expect(toolMsg!.content).not.toContain("[COMPACTED");
   });
 
-  it("coder results >500 chars are compacted", async () => {
-    // Coder returns a long summary (>500 chars) → orchestrator compacts it
-    // via a separate chatWithModel call before adding to context.
-    const longCoderResult = "Editei vários arquivos. " + "Detalhe. ".repeat(100);
+  it("coder results >1000 chars are compacted", async () => {
+    // Coder returns a long summary (>1000 chars — raised from 500 per
+    // FIX-MED-ORCH S3-3 MED 13 to avoid the perverse case where compaction
+    // markers made the output LARGER than the original) → orchestrator
+    // compacts it via a separate chatWithModel call before adding to context.
+    const longCoderResult = "Editei vários arquivos. " + "Detalhe. ".repeat(150);
 
     mockChatWithModel
       // 1. Orchestrator → tool_call(chamar_programador)

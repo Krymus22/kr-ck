@@ -31,7 +31,7 @@ import { pushActivity } from "./activityTracker.js";
 import { think, THINK_TOOL_DEFINITION } from "./thinkTool.js";
 import { isScoutEnabled, runScout, formatScoutResult, type ScoutArgs, type ScoutTask } from "./scoutAgent.js";
 import { recordRead, checkReadBeforeWrite } from "./readBeforeWrite.js";
-import { resolveAndCheckPath } from "./pathSecurity.js";
+import { resolveAndCheckPath, validateCwd } from "./pathSecurity.js";
 import { editFile, type EditOperation } from "./fileEdit.js";
 import { aplicarDiff, desfazerEdicao, executarComando } from "./tools.js";
 import { multiFileEditWithLocks, type FileEditRequest } from "./multiFileEdit.js";
@@ -44,10 +44,21 @@ function getHeavyModel(): string {
 }
 
 /** Max coder iterations (tool-call rounds). Default 40 — coding is iterative. */
-const CODER_MAX_ITERATIONS = parseInt(process.env.CODER_MAX_ITERATIONS ?? "40", 10);
+// FIX-MED-PC (LOW 4): `|| 15` is a NaN-guard — if CODER_MAX_ITERATIONS is
+// set to a non-numeric string (e.g. "abc"), parseInt returns NaN and we
+// fall back to 15 (a safe minimum) instead of NaN → `NaN < 1` is false →
+// loop never executes → coder returns "excedeu NaN iterações".
+const CODER_MAX_ITERATIONS = parseInt(process.env.CODER_MAX_ITERATIONS ?? "40", 10) || 15;
 
-/** Per-iteration global timeout (ms). Default 10 min — coding takes time. */
-const CODER_TIMEOUT_MS = parseInt(process.env.CODER_TIMEOUT_MS ?? "600000", 10);
+/**
+ * Total deadline (ms). Default 10 min — coding takes time.
+ *
+ * FIX-MED-PC (LOW 5): previous comment said "per-iteration" but this is the
+ * TOTAL deadline checked via `Date.now() > deadline` at the top of each
+ * iteration — not a per-call timeout.
+ * FIX-MED-PC (LOW 4): `|| 300000` is a NaN-guard.
+ */
+const CODER_TIMEOUT_MS = parseInt(process.env.CODER_TIMEOUT_MS ?? "600000", 10) || 300000;
 
 // --- Anti-recursion ---------------------------------------------------------
 
@@ -432,7 +443,13 @@ async function executeCoderTool(
           };
         }
         const result = desfazerEdicao({ caminho });
-        return { result, ok: !result.includes("[ERROR]") && !result.toLowerCase().includes("não") };
+        // FIX-MED-PC (MED 2 / S2-3 MED 2 + S1-3 MED 2): the previous ok-flag
+        // used `!result.toLowerCase().includes("não")` which is fragile —
+        // a successful undo whose PT-BR message contains the word "não"
+        // (e.g. "Não há mais edições para desfazer") would be marked NOT OK,
+        // and conversely a failure message without "não" would be marked OK.
+        // Use the same `[ERROR]` prefix convention as the other tools.
+        return { result, ok: !result.startsWith("[ERROR]") };
       }
 
       case "usar_scout": {
@@ -494,20 +511,39 @@ async function executeCoderTool(
       }
 
       case "executar_comando": {
+        // FIX-MED-PC (S2-7 HIGH): Coder has full executar_comando access —
+        // it's the heavy model (GLM 5.2) and needs to run tests, builds, etc.
+        // Per BUSINESS_RULES.md §10.9, the coder (not the orchestrator) is
+        // trusted with unrestricted shell execution. The orchestrator's
+        // `executar_comando_readonly` is the one with the allowlist; this
+        // tool deliberately has none.
         const comando = asString(args.comando);
         if (!comando) return { result: "[ERROR] comando vazio", ok: false };
-        const effectiveCwd = typeof args.cwd === "string" && args.cwd.trim() !== ""
-          ? args.cwd
-          : cwd;
+        // FIX-MED-PC (S2-3 HIGH): validate the user-supplied cwd BEFORE
+        // executing. Without this, the model could pass `cwd: "/etc"` (or any
+        // absolute path outside the project) and run arbitrary commands in
+        // that directory. validateCwd rejects cwds outside the project root.
+        const cwdCheck = validateCwd(
+          typeof args.cwd === "string" && args.cwd.trim() !== "" ? args.cwd : undefined,
+          process.cwd(),
+        );
+        if (!cwdCheck.ok) {
+          return { result: `[ERROR] ${cwdCheck.error}`, ok: false };
+        }
         const result = await executarComando({
           comando,
-          cwd: effectiveCwd,
+          cwd: cwdCheck.cwd,
           timeoutMs: 60000,
           background: false,
         });
+        // FIX-LOW-ALL (S1-3 LOW 7): guard typeof before startsWith — `result`
+        // is typed as unknown in some overloads of executarComando; calling
+        // .startsWith directly would throw if it isn't a string. Coerce once
+        // and reuse so the ok flag is consistent with the returned result.
+        const resultStr = typeof result === "string" ? result : String(result);
         return {
-          result: typeof result === "string" ? result : String(result),
-          ok: !result.startsWith("[ERROR]"),
+          result: resultStr,
+          ok: typeof resultStr === "string" && !resultStr.startsWith("[ERROR]"),
         };
       }
 
@@ -552,6 +588,19 @@ async function executeCoderTool(
 // --- Public API ------------------------------------------------------------
 
 export interface CoderCallbacks {
+  /** Called when the model starts streaming a response. */
+  onStreamStart?: () => void;
+  /** Called for each token streamed (for TUI rendering). */
+  onToken?: (token: string) => void;
+  /** Called when the model is "thinking" (reasoning tokens). */
+  onThinking?: () => void;
+  /**
+   * Called with token usage stats after each model call.
+   * FIX-MED-ORCH (S2-8 HIGH / S1-8 HIGH): coder usage was never reported.
+   * Forwarded by the orchestrator so the TUI / telemetry sees heavy-model
+   * token usage.
+   */
+  onUsage?: (usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }) => void;
   /** Called before each tool call (for TUI display). */
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   /** Called after each tool call completes. */
@@ -626,6 +675,31 @@ export async function runCoder(
   let toolCallsMade = 0;
 
   try {
+    // FIX-MED-SEC (S3-6 HIGH 7): The coder's internal conversation is
+    // EPHEMERAL BY DESIGN. The `messages` array below is a LOCAL variable —
+    // it is NOT appended to the shared `history` module (which the main
+    // agent / orchestrator uses) and is NOT persisted to the session file.
+    // When runCoder returns, `messages` goes out of scope and is GC'd.
+    // This is intentional:
+    //   1. The coder's system prompt + scratch reasoning (scout calls,
+    //      intermediate file reads, edit attempts, test runs) are an
+    //      internal implementation detail of code generation — they should
+    //      NOT pollute the orchestrator's context (the orchestrator only
+    //      needs the final SUMMARY of what was done, which is returned as
+    //      a string and may be compacted by compactResult before going into
+    //      orchestrator history).
+    //   2. Persisting them would balloon the session file (a coder turn
+    //      can do 20+ tool calls — ler_arquivo, aplicar_diff,
+    //      executar_comando for tests) and confuse the user when they
+    //      resume the session (coder-internal tool calls mixed with the
+    //      orchestrator's tool calls).
+    //   3. The coder's file edits ARE persisted — but via the real file
+    //      system (editar_arquivo / aplicar_diff write to disk), not via
+    //      the conversation history. The orchestrator's context only sees
+    //      the coder's final SUMMARY.
+    // If a future feature needs to expose coder internals (e.g. for
+    // debugging), it should write them to a separate log file, NOT to the
+    // shared history.
     const planSection = plan && plan.length > 0
       ? `\n\n--- PLANO (siga este plano) ---\n${plan}\n--- FIM DO PLANO ---\n`
       : "";
@@ -658,7 +732,17 @@ export async function runCoder(
         CODER_TOOLS,
         heavyModel,
         false, // thinking ENABLED — coder needs reasoning
+        // FIX-MED-ORCH (S1-1 MED 9 / S2-6): forward streaming callbacks so
+        // the TUI isn't silent during heavy-model work.
+        callbacks?.onStreamStart,
+        callbacks?.onToken,
+        callbacks?.onThinking,
       );
+
+      // FIX-MED-ORCH (S2-8 HIGH / S1-8 HIGH): report coder token usage.
+      if (response.usage && callbacks?.onUsage) {
+        callbacks.onUsage(response.usage);
+      }
 
       const choice = response.choices?.[0];
       if (!choice) {
@@ -679,7 +763,7 @@ export async function runCoder(
         for (const tc of msg.tool_calls) {
           toolCallsMade++;
           const toolName = tc.function?.name ?? "unknown";
-          const tcId = tc.id ?? `coder-tc-${iter}-${toolCallsMade}-${Date.now()}`;
+          const tcId = tc.id || `coder-tc-${iter}-${toolCallsMade}-${Date.now()}`;
 
           // Parse args (handle malformed JSON gracefully).
           let parsedArgs: Record<string, unknown> = {};
@@ -711,7 +795,12 @@ export async function runCoder(
           const { result, ok } = await executeCoderTool(toolName, parsedArgs, cwd, callbacks);
 
           // Truncate very large results to prevent context overflow.
-          const forModel = result.length > 32_000
+          // FIX-MED-PC (S1-3 MED 3): EXEMPT usar_scout results from the 32K
+          // truncation — scout results are already truncated by the scout
+          // itself (its own output cap + formatScoutResult). Re-truncating
+          // here would silently discard parts of the scout's report,
+          // potentially hiding files the coder needs to edit.
+          const forModel = (toolName !== "usar_scout" && result.length > 32_000)
             ? result.slice(0, 16_000) + "\n[TRUNCATED]\n" + result.slice(-16_000)
             : result;
           const forTui = result.length > 4000

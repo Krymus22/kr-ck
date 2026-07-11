@@ -38,6 +38,15 @@ import { setEffortLevel, getEffortLabel } from "../effortLevels.js";
 import { getPoolSize, formatPoolStats, setPrewarmListener, type PrewarmEvent } from "../apiKeyPool.js";
 import { setHeartbeatListener, type HeartbeatEvent } from "../heartbeat.js";
 import { runSmallTask, isSmallTaskEnabled, getSmallTaskModel, consumePendingSmallTaskSummaries } from "../smallTaskAgent.js";
+// FIX-MED-SCOUT-APP (S2-5 MED 1, S1-6 MED): /orchestrator toggle previously
+// used `process.env.ORCHESTRATOR_MODE === "1"` which missed the `"true"` value
+// that isOrchestratorMode() also accepts. We now import isOrchestratorMode(),
+// getOrchestratorModel(), and getHeavyModel() so the handler and toggle
+// message reuse the canonical config getters (§10.9). This is a static import
+// — it eagerly loads orchestratorAgent.ts and its deps (plannerAgent,
+// coderAgent, scoutAgent). The dynamic-import cache in getOrchestratorModule()
+// below still prevents RE-IMPORT overhead on every turn.
+import { isOrchestratorMode, getOrchestratorModel, getHeavyModel } from "../orchestratorAgent.js";
 import { getRegistry as getExternalToolRegistry } from "../externalTools.js";
 import {
   getAllModes,
@@ -84,6 +93,31 @@ import { getPlan as getPlanSync, createPlan as createPlanSync, type Plan as Plan
 // --- Types ------------------------------------------------------------------
 
 type AppStatus = "idle" | "thinking" | "streaming" | "compacting";
+
+// FIX-MED-SCOUT-APP (S2-5 LOW 4): cache for the dynamic import of
+// orchestratorAgent.ts. Previously, `await import("../orchestratorAgent.js")`
+// fired on EVERY turn when config.orchestratorMode was true at startup — even
+// after the user toggled orchestrator OFF at runtime via /orchestrator. While
+// the ES module cache makes the repeated import cheap after the first call,
+// the `await` still yields a microtask and the destructuring re-reads the
+// module namespace each turn. More importantly, the import fired even when
+// isOrchestratorMode() would return false (toggled OFF at runtime), which is
+// confusing to read. Now we import ONCE (lazily, on first turn that needs
+// the orchestrator), cache the promise, and check isOrchestratorMode() on
+// the resolved module each turn.
+//
+// Note: isOrchestratorMode / getOrchestratorModel / getHeavyModel are also
+// statically imported at the top of this file (for the /orchestrator handler,
+// which is sync). The static import means orchestratorAgent.ts loads at App
+// module load regardless — but the cache below still documents intent and
+// keeps the runStreaming path self-contained / testable.
+let orchestratorModulePromise: Promise<typeof import("../orchestratorAgent.js")> | null = null;
+function getOrchestratorModule(): Promise<typeof import("../orchestratorAgent.js")> {
+  if (!orchestratorModulePromise) {
+    orchestratorModulePromise = import("../orchestratorAgent.js");
+  }
+  return orchestratorModulePromise;
+}
 
 // --- Slash command definitions ----------------------------------------------
 
@@ -1239,20 +1273,53 @@ function handlePoolCommand(): CommandResult {
  *
  * This handler toggles process.env.ORCHESTRATOR_MODE. Because config.ts reads
  * the env var at module load (frozen into config.orchestratorMode), the TUI
- * advises a restart — the new value takes effect on the next CLI launch.
- * (runOrchestratorLoop's isOrchestratorMode() reads process.env live, but the
- * gate in runStreaming uses the frozen config value, so a restart is the
- * reliable path.)
+ * advises a restart when toggling ON — the new value takes effect on the next
+ * CLI launch. (runOrchestratorLoop's isOrchestratorMode() reads process.env
+ * live, but the gate in runStreaming uses the frozen config value, so a
+ * restart is the reliable path to ENABLE the mode.)
+ *
+ * FIX-MED-SCOUT-APP (S2-5 MED 1, S1-6 MED): the previous `=== "1"` check
+ * missed `ORCHESTRATOR_MODE=true` (which isOrchestratorMode accepts), so a
+ * user who started with `=true` would see `/orchestrator` toggle it OFF→ON
+ * instead of ON→OFF. Now uses isOrchestratorMode() for the current-state read.
+ *
+ * FIX-MED-SCOUT-APP (S2-5 LOW 2): model defaults now use getOrchestratorModel()
+ * / getHeavyModel() (which use `||` so empty-string env vars fall back to the
+ * default) instead of `??` (which would pass through "" as a valid model id).
+ *
+ * FIX-MED-SCOUT-APP (S2-5 LOW 3): the "restart" message only makes sense when
+ * toggling ON (config.orchestratorMode is frozen at load, so the runStreaming
+ * gate won't pick up the new value without a restart). When toggling OFF, the
+ * cached dynamic import + isOrchestratorMode() check in runStreaming takes
+ * effect IMMEDIATELY — no restart needed.
  */
 function handleOrchestratorCommand(): CommandResult {
-  const current = process.env.ORCHESTRATOR_MODE === "1";
+  // FIX-MED-SCOUT-APP (S2-5 MED 1): use isOrchestratorMode() so "true" and "1"
+  // are both treated as ON (matches orchestratorAgent.ts:71-72).
+  const current = isOrchestratorMode();
   process.env.ORCHESTRATOR_MODE = current ? "0" : "1";
+  const nowOn = !current;
+  // FIX-MED-SCOUT-APP (S2-5 LOW 2): use the canonical getters (which use `||`
+  // so "" falls back to the default) instead of `??` (which would emit "" as
+  // the model id if the env var is set but empty).
+  const modelLine = `Model: ${getOrchestratorModel()}\n`;
+  const heavyLine = `Heavy: ${getHeavyModel()}\n`;
+  if (nowOn) {
+    // Toggling ON: config.orchestratorMode is frozen at load (false if the
+    // CLI started with ORCHESTRATOR_MODE=0), so the runStreaming gate won't
+    // route to runOrchestratorLoop until restart.
+    return {
+      handled: true,
+      message: `Orchestrator mode: ON\n` + modelLine + heavyLine +
+        `Restart the CLI for changes to take effect.`,
+    };
+  }
+  // Toggling OFF: the cached orchestrator module's isOrchestratorMode() reads
+  // process.env live, so runStreaming falls back to runAgentLoop immediately.
   return {
     handled: true,
-    message: `Orchestrator mode: ${current ? "OFF" : "ON"}\n` +
-      `Model: ${process.env.ORCHESTRATOR_MODEL ?? "google/gemma-4-31b-it"}\n` +
-      `Heavy: ${process.env.HEAVY_MODEL ?? "z-ai/glm-5.2"}\n` +
-      `Restart the CLI for changes to take effect.`,
+    message: `Orchestrator mode: OFF\n` + modelLine + heavyLine +
+      `Orchestrator mode disabled (takes effect immediately).`,
   };
 }
 
@@ -2390,12 +2457,22 @@ export function App() {
     // restart. The orchestrator uses the SAME callback interface as
     // runAgentLoop, so all TUI wiring (streaming, tool messages, ask-user)
     // is shared between both code paths.
+    //
+    // FIX-MED-SCOUT-APP (S2-5 LOW 4): use the cached dynamic import
+    // (getOrchestratorModule) so the import only fires ONCE per process,
+    // then check isOrchestratorMode() on the cached module each turn. This
+    // means a user who started with ORCHESTRATOR_MODE=1 and toggled OFF via
+    // /orchestrator no longer pays the (microtask) import overhead every
+    // turn, and the code path is clearer: the cached module's
+    // isOrchestratorMode() reads process.env live, so toggling OFF takes
+    // effect immediately here even though config.orchestratorMode is frozen.
     if (config.orchestratorMode) {
-      const { isOrchestratorMode, runOrchestratorLoop } = await import("../orchestratorAgent.js");
+      const orchestratorMod = await getOrchestratorModule();
       // isOrchestratorMode() reads process.env live (defensive — in case
-      // the env var was unset after startup). Falls back to runAgentLoop.
-      if (isOrchestratorMode()) {
-        response = await runOrchestratorLoop(fullInput, {
+      // the env var was unset after startup, or toggled OFF via /orchestrator).
+      // Falls back to runAgentLoop.
+      if (orchestratorMod.isOrchestratorMode()) {
+        response = await orchestratorMod.runOrchestratorLoop(fullInput, {
           onStreamStart, onToken, onThinking, onUsage, onToolCall, onToolResult, onAskUser,
         });
       } else {
