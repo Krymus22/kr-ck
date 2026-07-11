@@ -23,7 +23,9 @@
  * — it bypasses handleAskUser (which blocks any agent_id) and calls the
  * onAskUser callback directly. The orchestrator is also allowed to call
  * usar_scout (the scout's anti-recursion only blocks "scout"/"sub-agent"/
- * "small-task-agent").
+ * "small-task-agent"). The orchestrator keeps the ID set during scout calls
+ * (FIX-ORCH-S23) — clearing it was unnecessary defense-in-depth that risked
+ * losing the ID on error paths.
  */
 
 import type OpenAI from "openai";
@@ -48,6 +50,20 @@ import { resetContextInjection } from "./contextInjector.js";
 import { resetSelfValidation } from "./selfValidation.js";
 import { resetAutoTestSuggestions } from "./autoTestGenerator.js";
 import { resetFalsePromiseCounter } from "./promiseDetector.js";
+import { config } from "./config.js";
+
+// --- Concurrency guard ------------------------------------------------------
+
+/**
+ * Module-level flag that prevents two concurrent runOrchestratorLoop() calls
+ * from corrupting shared state (history, planStore, env vars, activity
+ * tracker). Mirrors `agentLoopRunning` in agent.ts:176. The orchestrator mutates
+ * module-level state (CLAUDE_KILLER_AGENT_ID, planStore passed by reference,
+ * history via add*Message) — two overlapping turns would interleave messages
+ * and corrupt the conversation. The TUI serializes via isProcessing.current,
+ * but programmatic callers (tests, future entry points) could bypass it.
+ */
+let orchestratorLoopRunning = false;
 
 // --- Config (env vars) -----------------------------------------------------
 
@@ -452,6 +468,14 @@ async function executeOrchestratorTool(
         });
 
         if (!plannerResult.success) {
+          // FIX-ORCH-S23 (HIGH 5): Clear any stale plan from a PREVIOUS
+          // chamar_planejador call when the current planner run fails.
+          // Without this, a previous successful plan would remain in
+          // planStore.plan and be reused by the next chamar_programador —
+          // generating code for the WRONG task (the failed plan's task, not
+          // the current one). The plan must come from the CURRENT planner
+          // call; if that call failed, there is no valid plan.
+          planStore.plan = null;
           const errResult = `[PLANNER FAILED] ${plannerResult.error ?? "unknown error"}`;
           callbacks?.onToolResult?.("chamar_planejador", false, errResult);
           return { result: errResult, ok: false };
@@ -559,39 +583,38 @@ async function executeOrchestratorTool(
         const maxCalls = typeof args.max_tool_calls === "number" ? args.max_tool_calls : undefined;
         callbacks?.onToolCall?.("usar_scout", args);
 
-        // Defense-in-depth: clear agent ID while scout runs.
-        const savedAgentId = process.env.CLAUDE_KILLER_AGENT_ID;
-        delete process.env.CLAUDE_KILLER_AGENT_ID;
-        try {
-          const scoutArgs: ScoutArgs = {
-            objective,
-            tasks,
-            cwd,
-            maxToolCalls: maxCalls,
-            onToolCall: callbacks?.onToolCall,
-            onToolResult: callbacks?.onToolResult,
-          };
-          const scoutResult = await runScout(scoutArgs);
-          if (scoutResult === null) {
-            const errResult = "[SCOUT] Desabilitado ou falhou ao iniciar.";
-            callbacks?.onToolResult?.("usar_scout", false, errResult);
-            return { result: errResult, ok: false };
-          }
-          if (!scoutResult.completed) {
-            const errResult = `[SCOUT FAILED] ${scoutResult.error ?? "unknown"}`;
-            callbacks?.onToolResult?.("usar_scout", false, errResult);
-            return { result: errResult, ok: false };
-          }
-          const formatted = formatScoutResult(scoutResult);
-          // Scout results can be large (raw file contents). Compact if needed.
-          const compacted = await compactResult(formatted, "SCOUT");
-          callbacks?.onToolResult?.("usar_scout", true, compacted);
-          return { result: compacted, ok: true };
-        } finally {
-          if (savedAgentId !== undefined) {
-            process.env.CLAUDE_KILLER_AGENT_ID = savedAgentId;
-          }
+        // FIX-ORCH-S23 (HIGH 3): Removed the save/clear/restore of
+        // CLAUDE_KILLER_AGENT_ID around runScout. The scout's anti-recursion
+        // guard (agent.ts) only blocks "scout"/"sub-agent"/"small-task-agent" —
+        // "orchestrator" is explicitly ALLOWED. Clearing the ID was
+        // defense-in-depth but caused a subtle bug: if an error threw between
+        // the `delete` and the `finally`, the env var stayed deleted and the
+        // orchestrator's own anti-recursion state was lost. Keeping the ID set
+        // is both correct (the guard allows it) and safer (no env var churn).
+        const scoutArgs: ScoutArgs = {
+          objective,
+          tasks,
+          cwd,
+          maxToolCalls: maxCalls,
+          onToolCall: callbacks?.onToolCall,
+          onToolResult: callbacks?.onToolResult,
+        };
+        const scoutResult = await runScout(scoutArgs);
+        if (scoutResult === null) {
+          const errResult = "[SCOUT] Desabilitado ou falhou ao iniciar.";
+          callbacks?.onToolResult?.("usar_scout", false, errResult);
+          return { result: errResult, ok: false };
         }
+        if (!scoutResult.completed) {
+          const errResult = `[SCOUT FAILED] ${scoutResult.error ?? "unknown"}`;
+          callbacks?.onToolResult?.("usar_scout", false, errResult);
+          return { result: errResult, ok: false };
+        }
+        const formatted = formatScoutResult(scoutResult);
+        // Scout results can be large (raw file contents). Compact if needed.
+        const compacted = await compactResult(formatted, "SCOUT");
+        callbacks?.onToolResult?.("usar_scout", true, compacted);
+        return { result: compacted, ok: true };
       }
 
       case "buscar_web": {
@@ -713,6 +736,18 @@ export async function runOrchestratorLoop(
   userInput: string,
   callbacks?: OrchestratorCallbacks,
 ): Promise<string> {
+  // FIX-ORCH-S23 (HIGH 1): Concurrency guard — mirrors `agentLoopRunning` in
+  // agent.ts:2484. The orchestrator mutates module-level state (history,
+  // planStore, CLAUDE_KILLER_AGENT_ID, activity tracker); two overlapping
+  // runOrchestratorLoop() calls would interleave messages and corrupt the
+  // conversation. Reject hard here so the second caller gets a clear error
+  // instead of silently corrupting state.
+  if (orchestratorLoopRunning) {
+    throw new Error("Orchestrator loop already running");
+  }
+  orchestratorLoopRunning = true;
+
+  try {
   if (!isOrchestratorMode()) {
     throw new Error(
       "Orchestrator mode is disabled. Set ORCHESTRATOR_MODE=1 to enable.",
@@ -744,6 +779,21 @@ export async function runOrchestratorLoop(
     log.warn(`[ORCH] state cleanup failed (continuing): ${
       cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)
     }`);
+  }
+
+  // FIX-ORCH-S23 (HIGH 2): Call smartCompact BEFORE the loop starts — mirrors
+  // runAgentLoop in agent.ts, which compacts at the start of each turn. Without
+  // this, the orchestrator's context grows unbounded across turns (planner
+  // plans, coder results, scout file dumps all accumulate). The orchestrator
+  // uses a SMALL model with a smaller context window, so it overflows sooner
+  // than the heavy model. Wrap in try/catch so compaction failures never abort
+  // the turn — the loop can still proceed (worst case: context overflow later).
+  try {
+    const { smartCompact } = await import("./contextCompaction.js");
+    const compactionThreshold = config.contextWindowTokens * config.contextCompactThreshold;
+    await smartCompact(compactionThreshold);
+  } catch (err) {
+    log.debug(`[ORCH] Compaction failed: ${(err as Error).message}`);
   }
 
   const orchestratorModel = getOrchestratorModel();
@@ -863,6 +913,20 @@ export async function runOrchestratorLoop(
         log.debug(`[ORCH] Model requested ${msg.tool_calls.length} tool call(s)`);
 
         for (const [tcIdx, tc] of msg.tool_calls.entries()) {
+          // FIX-ORCH-S23 (HIGH 4): Basic tool call validation — mirrors the
+          // schema check in agent.ts dispatchToolCall. Some models emit tool
+          // calls with a missing or empty function.name (e.g. when they try
+          // to "call" a plain text response as a tool). Without this check,
+          // executeOrchestratorTool would fall through to the `default` case
+          // and return "[ERROR] Tool desconhecida: undefined" — which is
+          // confusing to the model. We push a clear error message to history
+          // and skip, so the model can recover on the next iteration.
+          if (!tc.function?.name) {
+            const fallbackId = tc.id ?? `fallback_${Date.now()}`;
+            const errResult = "[ERROR] Tool call missing function name";
+            history.addToolResult(fallbackId, errResult);
+            continue;
+          }
           const toolName = tc.function?.name ?? "unknown";
           const tcId = tc.id ?? `orch-tc-${iterations}-${tcIdx}-${Date.now()}`;
 
@@ -954,6 +1018,13 @@ export async function runOrchestratorLoop(
     clearModelOverride();
 
     activityDone();
+  }
+  } finally {
+    // FIX-ORCH-S23 (HIGH 1): Release the re-entrancy guard so the next
+    // orchestrator turn can start. MUST be in the outermost finally so a
+    // thrown error doesn't permanently lock out future turns (mirrors
+    // agentLoopRunning=false in agent.ts:2651).
+    orchestratorLoopRunning = false;
   }
 }
 

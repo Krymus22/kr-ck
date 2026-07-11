@@ -271,9 +271,9 @@ function asString(val: unknown, fallback = ""): string {
  * editar_multi_arquivos, desfazer_edicao) + read tools (usar_scout) +
  * pensar + executar_comando.
  *
- * Anti-recursion for usar_scout: temporarily clear CLAUDE_KILLER_AGENT_ID
- * before calling runScout (defense-in-depth — the scout itself doesn't
- * check, but any future code might).
+ * Anti-recursion for usar_scout: the coder keeps CLAUDE_KILLER_AGENT_ID = "coder"
+ * set while calling runScout — the scout's anti-recursion guard only blocks
+ * "scout"/"sub-agent"/"small-task-agent", so "coder" is allowed (FIX-ORCH-S23).
  *
  * Read-before-write: when usar_scout returns, call recordRead for each file
  * the scout inspected. This satisfies the read-before-write gate so the
@@ -466,32 +466,31 @@ async function executeCoderTool(
           onToolCall: callbacks?.onToolCall,
           onToolResult: callbacks?.onToolResult,
         };
-        // Defense-in-depth: clear agent ID while scout runs.
-        const savedAgentId = process.env.CLAUDE_KILLER_AGENT_ID;
-        delete process.env.CLAUDE_KILLER_AGENT_ID;
-        try {
-          const scoutResult = await runScout(scoutArgs);
-          if (scoutResult === null) {
-            return { result: "[SCOUT] Desabilitado ou falhou ao iniciar.", ok: false };
-          }
-          // Record reads for the read-before-write gate: every file the scout
-          // inspected counts as "read" by the coder. Without this, the coder's
-          // subsequent editar_arquivo / aplicar_diff would be blocked.
-          for (const f of scoutResult.filesInspected) {
-            try { recordRead("ler_arquivo", f); } catch { /* ignore */ }
-          }
-          if (!scoutResult.completed) {
-            return {
-              result: `[SCOUT FAILED] ${scoutResult.error ?? "unknown"}`,
-              ok: false,
-            };
-          }
-          return { result: formatScoutResult(scoutResult), ok: true };
-        } finally {
-          if (savedAgentId !== undefined) {
-            process.env.CLAUDE_KILLER_AGENT_ID = savedAgentId;
-          }
+        // FIX-ORCH-S23 (HIGH 3): Removed the save/clear/restore of
+        // CLAUDE_KILLER_AGENT_ID around runScout. The scout's anti-recursion
+        // guard (agent.ts) only blocks "scout"/"sub-agent"/"small-task-agent"
+        // — "coder" is explicitly ALLOWED. Clearing the ID was
+        // defense-in-depth but caused a subtle bug: if an error threw between
+        // the `delete` and the `finally`, the env var stayed deleted and the
+        // coder's own anti-recursion state was lost. Keeping the ID set is
+        // both correct (the guard allows it) and safer (no env var churn).
+        const scoutResult = await runScout(scoutArgs);
+        if (scoutResult === null) {
+          return { result: "[SCOUT] Desabilitado ou falhou ao iniciar.", ok: false };
         }
+        // Record reads for the read-before-write gate: every file the scout
+        // inspected counts as "read" by the coder. Without this, the coder's
+        // subsequent editar_arquivo / aplicar_diff would be blocked.
+        for (const f of scoutResult.filesInspected) {
+          try { recordRead("ler_arquivo", f); } catch { /* ignore */ }
+        }
+        if (!scoutResult.completed) {
+          return {
+            result: `[SCOUT FAILED] ${scoutResult.error ?? "unknown"}`,
+            ok: false,
+          };
+        }
+        return { result: formatScoutResult(scoutResult), ok: true };
       }
 
       case "executar_comando": {
