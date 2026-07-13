@@ -92,11 +92,13 @@ describe("Integration: API & Network", () => {
       spy.mockRestore();
     });
 
-    it("dispara quando MAX_403_RETRIES > 1", () => {
+    it("dispara quando MAX_403_RETRIES > 3 (§17.13 rule 118)", () => {
+      // BH-403-SCOUT-SUMMARY MEDIUM-3 fix: invariant updated from <= 1 to <= 3.
+      // Test updated to match — now requires max403Retries > 3 to fire.
       const spy = vi.spyOn(console, "error").mockImplementation(() => {});
       verifyStartupInvariants({
         poolSize: 4, heartbeatKeyIndex: 3, heartbeatIntervalMs: 300000,
-        max403Retries: 2, hasSearx: false, activeMode: null,
+        max403Retries: 4, hasSearx: false, activeMode: null,
       });
       expect(spy).toHaveBeenCalled();
       spy.mockRestore();
