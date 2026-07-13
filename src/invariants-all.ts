@@ -42,10 +42,15 @@ export function verifyStartupInvariants(opts: {
   );
 
   // 403 retry limit
+  // BH-403-SCOUT-SUMMARY MEDIUM-3 fix: updated from <= 1 to <= 3.
+  // Old rationale ("consome budget da key e causa 429") is outdated since
+  // §17.8 rule 32 introduced per-type retry counters (429 and 403 don't
+  // share budget). New rationale: 3 retries with 500ms backoff = 1.5s total,
+  // enough for pool to pick another key (§17.13 rule 113).
   invariant(
-    opts.max403Retries <= 1,
+    opts.max403Retries <= 3,
     "403_RETRY_TOO_HIGH",
-    "MAX_403_RETRIES > 1 consome budget da key e causa 429",
+    "MAX_403_RETRIES > 3 é excessivo — pool deve ter outras keys disponíveis",
     { max403Retries: opts.max403Retries },
   );
 

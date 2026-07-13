@@ -571,6 +571,92 @@ async function chatWithScoutModel(
 
 // --- Main entry point -------------------------------------------------------
 
+// --- Scout internal summary (§17.13 rule 114) --------------------------------
+
+/**
+ * Threshold below which we DON'T summarize — small files are already cheap
+ * to keep in context. 2KB = ~500 tokens, not worth an extra LLM call.
+ */
+const SCOUT_SUMMARY_THRESHOLD_BYTES = 2048;
+
+/**
+ * Max tokens for the scout's internal summary of a file. Keep it tiny —
+ * this is just enough for the scout to remember "what was this file about"
+ * without blowing up its own context window.
+ */
+const SCOUT_SUMMARY_MAX_TOKENS = 100;
+
+/**
+ * Generate a SHORT internal summary of a file result for the scout's own
+ * context. This is SEPARATE from the raw result that goes to the main agent.
+ *
+ * Why: without this, reading 10 files of 8KB each fills the scout's context
+ * with 80KB of file content. The scout can't reason about what to read next
+ * because its context is full. With summaries, each file takes ~200 bytes
+ * in the scout's context, so it can explore 50+ files without overflow.
+ *
+ * The RAW content is still returned to the main agent via toolResults —
+ * the summary is ONLY for the scout's internal history.
+ *
+ * §17.13 rule 114: scout summary is INTERNAL only. toolResults always
+ * contains the RAW content for the main agent.
+ *
+ * @param result  The raw tool result (file content, search results, etc)
+ * @param toolName  The tool that produced this result (for context)
+ * @returns  A short summary (1-2 sentences) or the original result if small
+ */
+async function summarizeForScoutContext(result: string, toolName: string): Promise<string> {
+  // Don't summarize small results — not worth the LLM call
+  if (result.length < SCOUT_SUMMARY_THRESHOLD_BYTES) {
+    return result;
+  }
+
+  // Don't summarize errors — pass through
+  if (result.startsWith("[ERROR]")) {
+    return result;
+  }
+
+  try {
+    const scoutModel = getScoutModel();
+    const { chatWithModel } = await import("./apiClient.js");
+
+    const summaryPrompt = [
+      {
+        role: "system" as const,
+        content: `You are a code summarizer. Summarize the following ${toolName} result in 1-2 sentences. Focus on: what it contains, key names/identifiers, and overall structure. Be extremely concise. Do NOT include code snippets — just describe what's there.`,
+      },
+      {
+        role: "user" as const,
+        content: result.slice(0, 12000), // cap input to avoid huge summarization calls
+      },
+    ];
+
+    const response = await chatWithModel(
+      summaryPrompt as any,
+      [], // BH-403-SCOUT-SUMMARY HIGH-1 fix: pass [] (not undefined) so createStreamRequest
+      // sends tools: [] instead of defaulting to TOOL_DEFINITIONS. Without this,
+      // every summarizer call ships the full ~21-tool main-agent set (~2-4K wasted
+      // tokens) AND the model might emit tool_calls instead of a summary.
+      scoutModel,
+      true, // disableThinking — fast summary
+    );
+
+    const summary = response.choices?.[0]?.message?.content?.trim() ?? "";
+    if (summary.length === 0) {
+      // Fallback: use truncated raw
+      return result.slice(0, 500) + `\n[... ${result.length - 500} chars total — summarized failed, truncated]`;
+    }
+
+    // Mark as summary so the scout knows this isn't the full content
+    return `[INTERNAL SUMMARY — full content (${result.length} chars) sent to main agent]\n${summary}`;
+  } catch (err) {
+    // Summarization failed — fall back to truncated raw
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log.debug(`[SCOUT] Summary generation failed (${errMsg}), using truncated raw`);
+    return result.slice(0, 500) + `\n[... ${result.length - 500} chars total — summary failed: ${errMsg}]`;
+  }
+}
+
 /**
  * Run the scout sub-agent to gather context using a smaller, faster model.
  *
@@ -882,10 +968,21 @@ export async function runScout(args: ScoutArgs): Promise<ScoutResult | null> {
           success,
         });
 
+        // §17.13 rule 114: scout internal summary.
+        // For the scout's OWN context (history), use a short summary instead
+        // of the raw result. This prevents context overflow when reading many
+        // files. The RAW result is already in toolResults (above) for the
+        // main agent.
+        //
+        // summarizeForScoutContext() skips small results (< 2KB) and errors,
+        // so it only fires an LLM call when the result is large enough to
+        // matter. Each summary is ~100 tokens, so the scout can explore
+        // 50+ files without blowing its 256k context window.
+        const internalSummary = await summarizeForScoutContext(result, toolName);
         history.push({
           role: "tool",
           tool_call_id: tcId,
-          content: result,
+          content: internalSummary,
         });
       }
     }

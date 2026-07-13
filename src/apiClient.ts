@@ -1413,19 +1413,36 @@ async function handle403Error(
       `  2. Key expirada ou revogada (verifique NVIDIA_API_KEY no .env)\n` +
       `  3. Contexto muito grande (use /compact para reduzir o histórico)\n` +
       `  4. Modelo temporariamente indisponível (tente /model para trocar)\n` +
+      `  5. §17.13: key pode ter batido 40 RPM (NVIDIA às vezes retorna 403 em vez de 429)\n` +
       `Erro original: ${(err as Error)?.message ?? String(err)}`
     );
     return { retried: false, newAttempt: attempt };
   }
 
   const newAttempt = attempt + 1;
-  // Backoff exponencial: 1s, 2s, 4s
-  const waitMs = Math.pow(2, attempt) * 1000;
-  log.warn(
-    `Erro 403 (Forbidden) — glitch temporário do servidor. ` +
-    `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
-  );
-  await sleep(waitMs);
+  // §17.13 rule 113: 403 cooldown + try another key.
+  // BH-403-SCOUT-SUMMARY MEDIUM-5 fix: differentiate backoff by mode.
+  // - Pool mode (getPoolSize() > 1): 0ms delay — pool's releaseKey() already
+  //   cooled down the 403'd key, so acquireKeyForStreaming picks another
+  //   immediately. 500ms was pure latency waste.
+  // - Single-key mode: exponential backoff 1s/2s/4s (old behavior) — gives
+  //   transient NVIDIA glitches time to recover, §3.2 compliance.
+  const poolSize = getPoolSize();
+  const waitMs = poolSize > 1
+    ? 0
+    : Math.min(Math.pow(2, attempt) * 1000, 4000);
+  if (poolSize > 1) {
+    log.warn(
+      `Erro 403 (Forbidden) — key em cooldown, tentando outra key do pool. ` +
+      `Retry imediato (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
+    );
+  } else {
+    log.warn(
+      `Erro 403 (Forbidden) — glitch temporário do servidor. ` +
+      `Retry em ${waitMs / 1000}s (tentativa ${newAttempt}/${MAX_403_RETRIES})...`
+    );
+  }
+  if (waitMs > 0) await sleep(waitMs);
   return { retried: true, newAttempt };
 }
 

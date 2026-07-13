@@ -1277,6 +1277,23 @@ Antes de corrigir qualquer bug:
 
 112. **Scout heartbeat só inicia quando scout usa provider diferente** — `index.ts` só chama `startScoutHeartbeat()` quando `detectScoutProvider() !== providerConfig.name`. Se scout = main provider, heartbeat principal já cobre.
 
+### 17.13 403 Cooldown + Scout Internal Summary (Julho 2026)
+
+> Duas melhorias: (1) 403 agora faz cooldown de key como 429, (2) scout
+> gera sumário interno pra não estourar próprio contexto.
+
+113. **403 = cooldown 60s (igual 429)** — `apiKeyPool.ts:releaseKey()` faz `cooldownUntil = now + 60_000` quando `httpStatus === 403`. NVIDIA free tier às vezes retorna 403 em vez de 429 quando key bate 40 RPM. Sem isso, pool continuava usando a mesma key 403'd.
+
+114. **Scout internal summary** — `scoutAgent.ts:summarizeForScoutContext()` gera sumário curto (1-2 frases) de cada arquivo > 2KB lido. Sumário entra no `history` do scout (economiza contexto dele). Conteúdo **CRU** entra em `toolResults` (vai pro agente principal). Sem isso, scout lendo 10 arquivos de 8KB = 80KB no contexto do scout, estourando 256k context window.
+
+115. **Sumarizador usa tools: []** — `summarizeForScoutContext` chama `chatWithModel(messages, [], scoutModel, true)`. Passar `[]` (não `undefined`) evita que `createStreamRequest` default para `TOOL_DEFINITIONS` (21 tools, ~2-4K tokens desperdiçados por chamada).
+
+116. **403 backoff diferenciado por modo** — `handle403Error`: pool mode (getPoolSize() > 1) = 0ms delay (pool pega outra key imediato); single-key mode = backoff exponencial 1s/2s/4s (glitch temporário). §3.2 compliance.
+
+117. **Pool exhaustion message informativa** — `acquireKey` throw inclui breakdown: `(busy: N, in 429 cooldown: M, in 403 cooldown: K)`. Se todas em 403, adiciona hint sobre keys revogadas.
+
+118. **Invariant atualizado** — `invariants-all.ts:46` agora aceita `max403Retries <= 3` (era `<= 1`). Rationale antigo ("consome budget da key e causa 429") era stale desde §17.8 rule 32 (per-type retry counters).
+
 ---
 
 **FIM DO DOCUMENTO**

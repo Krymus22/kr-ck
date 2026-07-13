@@ -332,7 +332,19 @@ async function acquireKey(maxWaitMs: number = 60_000): Promise<PoolEntry> {
     lastChance.stats.inFlight++;
     return lastChance;
   }
-  throw new Error(`[API_POOL] All keys busy or rate-limited after ${maxWaitMs}ms - pool size: ${pool.length}`);
+  // BH-403-SCOUT-SUMMARY MEDIUM-4 fix: include breakdown of WHY keys are
+  // unavailable, so operators can distinguish "all busy" from "all 403'd
+  // (possibly revoked)" — actionable hint for debugging.
+  const now = Date.now();
+  const in403 = pool.filter(e => e.stats.cooldownUntil > now && e.stats.errorCount > 0 && e.stats.rateLimitedCount === 0).length;
+  const in429 = pool.filter(e => e.stats.cooldownUntil > now && e.stats.rateLimitedCount > 0).length;
+  const busy = pool.filter(e => e.mutex.locked).length;
+  let msg = `[API_POOL] All keys busy or rate-limited after ${maxWaitMs}ms - pool size: ${pool.length}`;
+  msg += ` (busy: ${busy}, in 429 cooldown: ${in429}, in 403 cooldown: ${in403})`;
+  if (in403 === pool.length && in429 === 0 && busy === 0) {
+    msg += ` — all keys returned 403. Check NVIDIA_API_KEY validity (keys may be revoked).`;
+  }
+  throw new Error(msg);
 }
 
 function releaseKey(entry: PoolEntry, success: boolean, httpStatus: number | null, latencyMs: number): void {
@@ -352,6 +364,16 @@ function releaseKey(entry: PoolEntry, success: boolean, httpStatus: number | nul
       entry.stats.rateLimitedCount++;
       entry.stats.cooldownUntil = Date.now() + COOLDOWN_AFTER_429_MS;
       log.warn(`[API_POOL] Key #${entry.index} (${entry.stats.keyPrefix}) hit 429 - cooling down for ${COOLDOWN_AFTER_429_MS / 1000}s`);
+    }
+    // §17.13 rule 113: 403 -> cooldown this key for 60s (same as 429).
+    // NVIDIA free tier sometimes returns 403 when a key hits its 40 RPM quota
+    // (instead of the correct 429). Other times it's a transient glitch.
+    // Either way, cooldown + try another key is the right move.
+    // Without this, the pool keeps using the same 403'd key and the user
+    // sees persistent failures even when other keys are available.
+    if (httpStatus === 403) {
+      entry.stats.cooldownUntil = Date.now() + COOLDOWN_AFTER_429_MS;
+      log.warn(`[API_POOL] Key #${entry.index} (${entry.stats.keyPrefix}) hit 403 - cooling down for ${COOLDOWN_AFTER_429_MS / 1000}s (try another key)`);
     }
   }
 
