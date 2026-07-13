@@ -58,7 +58,7 @@ jobs:
       - run: npm install --legacy-peer-deps
 
       - name: Download groups file
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-groups
           path: .
@@ -131,7 +131,7 @@ jobs:
           python-version: "3.12"
 
       - name: Download all group reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: mutation-report-group-*
           path: all-reports
