@@ -896,3 +896,18 @@ function generateContextSummary(
 
   return parts.join("\n");
 }
+
+/**
+ * BH-SESSION-NEW-1 MEDIUM #3 fix: Clear the checkpoint file so old session's
+ * currentTask/summary doesn't get injected into the new session via
+ * injectMemory() → runAgentLoop → history.addSystemMessage().
+ */
+export function clearCheckpoint(config: MemoryConfig): void {
+  const filePath = getCheckpointPath(config);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    log.debug(`[MEMORY] Cleared checkpoint: ${filePath}`);
+  } catch (err) {
+    log.warn(`[MEMORY] Failed to clear checkpoint: ${(err as Error).message}`);
+  }
+}

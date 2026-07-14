@@ -64,6 +64,7 @@ import { clearPlan } from "./planExecutor.js";
 import { clearSpec } from "./specFirst.js";
 import { clearTDD } from "./tddMode.js";
 import { resetTodo } from "./todo.js";
+import { clearTaskState } from "./taskState.js";
 
 /**
  * Clear ALL module-level state that could leak between sessions/turns.
@@ -117,6 +118,10 @@ export async function clearAllModuleState(): Promise<void> {
   try { clearSpec(); } catch { /* specFirst optional */ }
   try { clearTDD(); } catch { /* tddMode optional */ }
   try { resetTodo(); } catch { /* todo optional */ }
+  // BH-SESSION-NEW-1 HIGH #1 fix: clear TASK_STATE.md so old session's
+  // title/todos/bugs don't get injected into the new session via
+  // getTaskStateSummary() → runAgentLoop → history.addSystemMessage().
+  try { clearTaskState(); } catch { /* taskState optional */ }
 
   // Asynchronous clears (heavy modules — dynamic import to avoid eager-loading
   // apiClient / OpenAI SDK at module init time).
@@ -132,6 +137,19 @@ export async function clearAllModuleState(): Promise<void> {
     const { resetCheckpoints } = await import("./checkpointWriter.js");
     resetCheckpoints();
   } catch { /* checkpointWriter optional */ }
+  // BH-SESSION-NEW-1 HIGH #2 fix: clear pending small task summaries so
+  // old /small results don't get injected into the new session via
+  // consumePendingSummaries() → runAgentLoop → history.addSystemMessage().
+  try {
+    const { _resetSmallTaskState } = await import("./smallTaskAgent.js");
+    _resetSmallTaskState();
+  } catch { /* smallTaskAgent optional */ }
+  // BH-SESSION-NEW-1 MEDIUM #3 fix: clear memory checkpoint so old session's
+  // currentTask doesn't get injected via injectMemory() → addSystemMessage().
+  try {
+    const { clearCheckpoint, getMemoryConfig } = await import("./memory.js");
+    clearCheckpoint(getMemoryConfig());
+  } catch { /* memory optional */ }
 }
 
 /**
@@ -158,4 +176,8 @@ export function clearAllModuleStateSync(): void {
   try { clearSpec(); } catch { /* specFirst optional */ }
   try { clearTDD(); } catch { /* tddMode optional */ }
   try { resetTodo(); } catch { /* todo optional */ }
+  // BH-SESSION-NEW-1 HIGH #1 fix: clear TASK_STATE.md so old session's
+  // title/todos/bugs don't get injected into the new session via
+  // getTaskStateSummary() → runAgentLoop → history.addSystemMessage().
+  try { clearTaskState(); } catch { /* taskState optional */ }
 }
