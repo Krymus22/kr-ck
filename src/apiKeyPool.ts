@@ -257,10 +257,28 @@ function pickNextKey(): PoolEntry | null {
   // reserve and there's no other option).
   const reserveIdx = pool.length > 1 ? pool.length - 1 : -1;
 
+  // §17.13 rule 119: SCOUT_EXCLUDE_KEY_INDEX — when scout is making requests,
+  // apiClient sets a module-level flag that tells us to skip a specific key
+  // index (default 0). This reserves that key for the main agent so the scout
+  // can't exhaust its rate limit quota. We read it via dynamic import to avoid
+  // circular dependency (apiClient imports apiKeyPool).
+  // The function returns -1 when no key is excluded (main agent mode).
+  let scoutExcludeIdx = -1;
+  try {
+    // Synchronous dynamic import workaround: apiClient exports a getter that
+    // returns the current exclude index. We use a globalThis cache to avoid
+    // re-importing on every pickNextKey call (which fires per LLM call).
+    const getter = (globalThis as any).__ckGetScoutExcludeKeyIndex;
+    if (getter) {
+      scoutExcludeIdx = getter();
+    }
+  } catch { /* ignore — fail open (no exclusion) */ }
+
   // First pass: try all NON-RESERVE keys (round-robin from nextIndex).
   for (let i = 0; i < pool.length; i++) {
     const idx = (nextIndex + i) % pool.length;
     if (idx === reserveIdx) continue;  // skip reserve in first pass
+    if (idx === scoutExcludeIdx) continue;  // §17.13 rule 119: skip scout-excluded key
     const entry = pool[idx];
     // Skip if cooling down after 429
     if (entry.stats.cooldownUntil > now) continue;
@@ -279,7 +297,8 @@ function pickNextKey(): PoolEntry | null {
   // rate-limited. This prevents the pool from blocking user requests when
   // only the reserve is idle, while still preferring non-reserve keys for
   // normal operation so heartbeat has its own budget.
-  if (reserveIdx >= 0) {
+  // BH-SCOUT-EXCLUDE-KEY MEDIUM-1 fix: also skip reserve if it's the excluded key.
+  if (reserveIdx >= 0 && reserveIdx !== scoutExcludeIdx) {
     const reserve = pool[reserveIdx];
     if (reserve.stats.cooldownUntil <= now && !reserve.mutex.locked) {
       const rl = checkRateLimit(reserve);

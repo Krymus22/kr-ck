@@ -520,6 +520,10 @@ async function chatWithScoutModel(
       tools as any,
       scoutModel,
       true, // disableThinking — scout doesn't need reasoning, just fast tool calls
+      undefined, // onStreamStart
+      undefined, // onToken
+      undefined, // onThinking
+      true,      // §17.13 rule 119: isScout=true — activate SCOUT_EXCLUDE_KEY_INDEX
     );
 
     const choice = response.choices?.[0];
@@ -639,6 +643,10 @@ async function summarizeForScoutContext(result: string, toolName: string): Promi
       // tokens) AND the model might emit tool_calls instead of a summary.
       scoutModel,
       true, // disableThinking — fast summary
+      undefined, // onStreamStart
+      undefined, // onToken
+      undefined, // onThinking
+      true,      // §17.13 rule 119: isScout=true — summarizer is part of scout, exclude reserved key
     );
 
     const summary = response.choices?.[0]?.message?.content?.trim() ?? "";

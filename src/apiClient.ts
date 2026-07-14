@@ -1739,6 +1739,22 @@ let clientOverride: OpenAI | null = null;
 let disableThinkingOverride = false;
 
 /**
+ * When set (by chatWithModel for scout calls), pickNextKey() in apiKeyPool
+ * will SKIP this key index. This reserves a key for the main agent so the
+ * scout can't exhaust its rate limit quota.
+ *
+ * §17.13 rule 119: SCOUT_EXCLUDE_KEY_INDEX (default 0) reserves key #0
+ * for the main agent. Scout uses keys [1, 2, ..., N-1]. Without this,
+ * scout making 40 LLM calls (e.g., 20 tool calls + 20 summarizer calls)
+ * would exhaust the key the main agent needs when it resumes → 403.
+ *
+ * Set SCOUT_EXCLUDE_KEY_INDEX=-1 to disable (scout uses all keys).
+ * Only effective when scout uses the SAME provider as main (otherwise
+ * scout uses its own client, not the pool).
+ */
+let scoutExcludeKeyIndex: number = -1;
+
+/**
  * Call the API with a DIFFERENT model than config.model.
  *
  * Used by the scout sub-agent (scoutAgent.ts) to call a smaller, faster
@@ -1767,6 +1783,16 @@ export async function chatWithModel(
   onStreamStart?: () => void,
   onToken?: (token: string) => void,
   onThinking?: () => void,
+  /**
+   * BH-SCOUT-EXCLUDE-KEY MEDIUM-2 fix: when true, chatWithModel activates
+   * SCOUT_EXCLUDE_KEY_INDEX (skips the reserved key for the main agent).
+   * Only the scout should pass true — other callers (small task agent,
+   * planner, coder, orchestrator) use the default (false) so they can
+   * use ALL keys including the reserved one.
+   *
+   * §17.13 rule 119: SCOUT_EXCLUDE_KEY_INDEX is scout-specific.
+   */
+  isScout = false,
 ): Promise<ChatResponse> {
   // Set the override — createStreamRequest will use this instead of config.model
   modelOverride = modelId;
@@ -1782,6 +1808,25 @@ export async function chatWithModel(
     clientOverride = getScoutClient();
   }
 
+  // §17.13 rule 119: SCOUT_EXCLUDE_KEY_INDEX — reserve a key for the main agent.
+  // When scout uses the SAME provider (pool mode), exclude the configured key
+  // index from the scout's pool selection. Default: 0 (key #0 reserved for main).
+  // This prevents the scout from exhausting the main agent's rate limit quota.
+  // Only effective in pool mode (getPoolSize() > 1) — single-key mode has no choice.
+  // BH-SCOUT-EXCLUDE-KEY MEDIUM-2 fix: only activate when isScout=true (not for
+  // small task agent, planner, coder, orchestrator — they can use all keys).
+  const previousExcludeKeyIndex = scoutExcludeKeyIndex;
+  if (isScout && !scoutUsesDifferentProvider() && getPoolSize() > 1) {
+    const excludeIdx = parseInt(process.env.SCOUT_EXCLUDE_KEY_INDEX ?? "0", 10);
+    if (!Number.isNaN(excludeIdx) && excludeIdx >= 0 && excludeIdx < getPoolSize()) {
+      scoutExcludeKeyIndex = excludeIdx;
+      log.debug(`[CHAT_WITH_MODEL] Scout excluding key #${excludeIdx} from pool selection (reserved for main agent)`);
+    } else if (!Number.isNaN(excludeIdx) && excludeIdx !== -1) {
+      // BH-SCOUT-EXCLUDE-KEY LOW-6 fix: warn on invalid values (out of range or unparseable)
+      log.warn(`[CHAT_WITH_MODEL] SCOUT_EXCLUDE_KEY_INDEX=${excludeIdx} is invalid (pool size ${getPoolSize()}) — scout will use all keys`);
+    }
+  }
+
   try {
     log.debug(`[CHAT_WITH_MODEL] Calling ${modelId} (override set, config.model=${config.model} unchanged, thinking=${disableThinking ? "disabled" : "default"}, scoutClient=${clientOverride ? "yes" : "no"})`);
     return await chat(messages, onStreamStart, onToken, onThinking, tools);
@@ -1789,6 +1834,8 @@ export async function chatWithModel(
     modelOverride = null;
     disableThinkingOverride = false;
     clientOverride = previousClientOverride;
+    // §17.13 rule 119: restore the previous exclude key index (usually -1 = disabled)
+    scoutExcludeKeyIndex = previousExcludeKeyIndex;
   }
 }
 
@@ -1818,7 +1865,26 @@ export function clearModelOverride(): void {
   // (raced against a timeout) doesn't leave the scout client active for
   // subsequent main-agent chat() calls.
   clientOverride = null;
+  // §17.13 rule 119: also clear scoutExcludeKeyIndex so main agent uses all keys
+  scoutExcludeKeyIndex = -1;
 }
+
+/**
+ * Get the current scout-exclude key index.
+ * Used by apiKeyPool's pickNextKey() to skip the reserved key when the scout
+ * is making requests. Returns -1 when no key is excluded (main agent mode).
+ *
+ * §17.13 rule 119: SCOUT_EXCLUDE_KEY_INDEX reserves a key for the main agent.
+ */
+export function getScoutExcludeKeyIndex(): number {
+  return scoutExcludeKeyIndex;
+}
+
+// §17.13 rule 119: register the getter on globalThis so apiKeyPool can read it
+// without a circular import. apiKeyPool's pickNextKey() checks globalThis.__ckGetScoutExcludeKeyIndex
+// on every call — if set, it skips the returned key index.
+// This is set once at module load and never changes (the function reads the live value).
+(globalThis as any).__ckGetScoutExcludeKeyIndex = getScoutExcludeKeyIndex;
 
 // BUG FIX (BUG 6): helper for cancelar/abortar um stream perdedor do hedging.
 // Tenta várias APIs comuns: OpenAI SDK Stream expõe `.controller` (AbortController);

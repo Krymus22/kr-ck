@@ -1294,6 +1294,12 @@ Antes de corrigir qualquer bug:
 
 118. **Invariant atualizado** — `invariants-all.ts:46` agora aceita `max403Retries <= 3` (era `<= 1`). Rationale antigo ("consome budget da key e causa 429") era stale desde §17.8 rule 32 (per-type retry counters).
 
+119. **SCOUT_EXCLUDE_KEY_INDEX reserva key pro agente principal** — quando scout faz LLM calls (tool decisions + sumarizador), o pool pula a key configurada (default 0). Env var `SCOUT_EXCLUDE_KEY_INDEX=0` (default), `-1` desabilita. Só ativa quando `isScout=true` em `chatWithModel` (não afeta small task agent, planner, coder, orchestrator). Só em pool mode (`getPoolSize() > 1`) e mesmo provider. Previne que scout esgote rate limit da key que o agente principal vai usar ao retomar.
+
+120. **globalThis.__ckGetScoutExcludeKeyIndex** — `apiKeyPool.pickNextKey()` lê o exclude index via globalThis getter (evita circular import com apiClient). Getter é registrado uma vez no module load do apiClient. `pickNextKey` falha open (sem exclusão) se getter não existir.
+
+121. **Excluded key NÃO é usada como fallback** — `pickNextKey` second pass (fallback pra reserve key) também pula o excluded index. Sem isso, scout poderia pegar a key excluída quando todas as outras tão ocupadas.
+
 ---
 
 **FIM DO DOCUMENTO**
